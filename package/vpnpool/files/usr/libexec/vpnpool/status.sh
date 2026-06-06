@@ -6,7 +6,7 @@
 ENABLED=$(uci -q get vpnpool.main.enabled); [ -n "$ENABLED" ] || ENABLED=0
 RUNNING=false; pgrep -f '/usr/libexec/vpnpool/vpnpoold' >/dev/null 2>&1 && RUNNING=true
 ROUTING=false; nft list table inet vpnpool >/dev/null 2>&1 && ROUTING=true
-CLASH=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH" ] || CLASH=192.168.10.1:9091
+CLASH=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH" ] || CLASH=127.0.0.1:9091
 MODE=$(uci -q get vpnpool.main.mode); [ -n "$MODE" ] || MODE=selective
 
 ACTIVE=""

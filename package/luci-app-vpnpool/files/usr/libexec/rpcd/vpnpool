@@ -2,7 +2,7 @@
 # rpcd backend for luci-app-vpnpool. Exposes ubus object "vpnpool".
 # Methods: status (read) + control actions (write).
 . /usr/libexec/vpnpool/lib.sh 2>/dev/null
-CLASH=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH" ] || CLASH=192.168.10.1:9091
+CLASH=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH" ] || CLASH=127.0.0.1:9091
 
 # Tell the running daemon to rebuild config + hot-reload sing-box (manual/domain edits).
 signal_reload() {
