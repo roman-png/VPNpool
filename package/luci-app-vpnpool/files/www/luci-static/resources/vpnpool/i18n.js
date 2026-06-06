@@ -66,6 +66,11 @@ var DICT = {
 		'Sending test message…': 'Отправляю тестовое сообщение…', 'Test sent — check Telegram.': 'Отправлено — проверьте Telegram.',
 		'Create a bot via @BotFather, get your chat id (e.g. @userinfobot). Alerts: failover, subscription expiry, start/stop.':
 			'Создайте бота через @BotFather, узнайте chat id (напр. @userinfobot). Алерты: переключение узла, истечение подписки, старт/стоп.',
+		'Backup / Restore': 'Бэкап / Восстановление', 'Export': 'Экспорт', 'Import': 'Импорт',
+		'Configuration imported. Reloading…': 'Конфигурация импортирована. Перезагрузка…',
+		'Replace the current vpnpool configuration with the pasted backup?': 'Заменить текущую конфигурацию vpnpool вставленным бэкапом?',
+		'Export fills the box with your config — copy it somewhere safe. Paste a backup and Import to restore.':
+			'Экспорт заполнит поле вашей конфигурацией — сохраните её. Вставьте бэкап и нажмите Импорт для восстановления.',
 		'Technical (read-only)': 'Технические (только чтение)', 'sing-box version': 'версия sing-box',
 		'tproxy port': 'порт tproxy', 'fwmark': 'fwmark', 'route table': 'таблица маршрутов',
 		'Clash API': 'Clash API',

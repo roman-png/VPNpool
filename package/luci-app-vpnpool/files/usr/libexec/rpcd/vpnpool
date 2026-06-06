@@ -17,7 +17,7 @@ signal_refetch() {
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "tg_test": {} }
+{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "tg_test": {} }
 L
 	;;
 call)
@@ -28,6 +28,21 @@ call)
 		;;
 	diag)
 		/usr/libexec/vpnpool/diag.sh
+		;;
+	export)
+		cfg=$(uci export vpnpool 2>/dev/null)
+		jq -n --arg c "$cfg" '{ config: $c }'
+		;;
+	import)
+		cfg=$(echo "$input" | jq -r '.config // ""')
+		if [ -n "$cfg" ]; then
+			printf '%s\n' "$cfg" | uci import vpnpool 2>/dev/null
+			uci commit vpnpool
+			signal_refetch
+			echo '{"ok":true}'
+		else
+			echo '{"error":"empty config"}'
+		fi
 		;;
 	conntest)
 		TP=$(uci -q get vpnpool.main.test_port); [ -n "$TP" ] || TP=1605
