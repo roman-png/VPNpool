@@ -9,6 +9,21 @@ SB_DATA=/tmp/vpnpool
 
 log() { logger -t "$NAME" "$1"; }
 
+# Send a Telegram message if configured (no-op otherwise). Used for failover /
+# subscription / lifecycle alerts.
+tg_notify() {
+	[ "$(uci -q get vpnpool.main.telegram_enabled)" = "1" ] || return 0
+	local tok chat
+	tok=$(uci -q get vpnpool.main.telegram_token)
+	chat=$(uci -q get vpnpool.main.telegram_chat)
+	[ -n "$tok" ] && [ -n "$chat" ] || return 0
+	curl -s -m 8 -o /dev/null \
+		--data-urlencode "chat_id=$chat" \
+		--data-urlencode "text=$1" \
+		"https://api.telegram.org/bot$tok/sendMessage" 2>/dev/null
+	return 0
+}
+
 SUB_URL=$(uci -q get vpnpool.main.subscription_url)
 SUB_UA=$(uci -q get vpnpool.main.subscription_ua); [ -n "$SUB_UA" ] || SUB_UA="v2rayNG/1.8.5"
 TPROXY_PORT=$(uci -q get vpnpool.main.tproxy_port); [ -n "$TPROXY_PORT" ] || TPROXY_PORT=1603

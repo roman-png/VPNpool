@@ -56,6 +56,11 @@ var DICT = {
 		'Auto-ping & failover': 'Автопинг и переключение', 'Auto-ping interval (sec)': 'Интервал автопинга (сек)',
 		'Switch tolerance (ms)': 'Допуск переключения (мс)',
 		'Auto-switch to a working node (urltest)': 'Авто-переключение на рабочий узел (urltest)',
+		'Telegram alerts': 'Уведомления в Telegram', 'Enable Telegram notifications': 'Включить уведомления в Telegram',
+		'Bot token': 'Токен бота', 'Chat ID': 'Chat ID', 'Send test': 'Тест', 'Telegram settings saved.': 'Настройки Telegram сохранены.',
+		'Sending test message…': 'Отправляю тестовое сообщение…', 'Test sent — check Telegram.': 'Отправлено — проверьте Telegram.',
+		'Create a bot via @BotFather, get your chat id (e.g. @userinfobot). Alerts: failover, subscription expiry, start/stop.':
+			'Создайте бота через @BotFather, узнайте chat id (напр. @userinfobot). Алерты: переключение узла, истечение подписки, старт/стоп.',
 		'Technical (read-only)': 'Технические (только чтение)', 'sing-box version': 'версия sing-box',
 		'tproxy port': 'порт tproxy', 'fwmark': 'fwmark', 'route table': 'таблица маршрутов',
 		'Clash API': 'Clash API',

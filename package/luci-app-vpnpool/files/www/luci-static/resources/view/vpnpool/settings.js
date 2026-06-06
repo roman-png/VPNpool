@@ -9,6 +9,7 @@ var _ = function(s) { return i18n.tr(s); };
 var callStatus = rpc.declare({ object: 'vpnpool', method: 'status' });
 var callDiag   = rpc.declare({ object: 'vpnpool', method: 'diag' });
 var callSetOpt = rpc.declare({ object: 'vpnpool', method: 'set_option', params: [ 'name', 'value' ] });
+var callTgTest = rpc.declare({ object: 'vpnpool', method: 'tg_test' });
 
 return view.extend({
 	notify: function(msg) { ui.addNotification(null, E('p', msg), 'info'); },
@@ -17,6 +18,17 @@ return view.extend({
 	handleSaveInterval: function(inp) { return this.save('failover_interval', inp.value || '60'); },
 	handleSaveTolerance: function(inp) { return this.save('failover_tolerance', inp.value || '50'); },
 	handleToggleAuto: function(cb) { return this.save('auto_switch', cb.checked ? '1' : '0'); },
+	handleSaveTg: function(en, tok, chat) {
+		var self = this;
+		return callSetOpt('telegram_token', tok.value || '')
+			.then(function() { return callSetOpt('telegram_chat', chat.value || ''); })
+			.then(function() { return callSetOpt('telegram_enabled', en.checked ? '1' : '0'); })
+			.then(function() { self.notify(_('Telegram settings saved.')); });
+	},
+	handleTgTest: function() {
+		ui.addNotification(null, E('p', _('Sending test message…')), 'info');
+		return callTgTest().then(function() { ui.addNotification(null, E('p', _('Test sent — check Telegram.')), 'info'); });
+	},
 
 	load: function() { return Promise.all([ callStatus(), callDiag().catch(function() { return {}; }) ]); },
 	render: function(res) {
@@ -27,6 +39,9 @@ return view.extend({
 		var fi = E('input', { 'type': 'number', 'min': '10', 'class': 'cbi-input-text', 'style': 'width:120px', 'value': s.failover_interval || 60 });
 		var tol = E('input', { 'type': 'number', 'min': '0', 'class': 'cbi-input-text', 'style': 'width:120px', 'value': s.failover_tolerance || 50 });
 		var auto = E('input', { 'type': 'checkbox', 'checked': (s.auto_switch !== false) ? 'checked' : null });
+		var tgEnable = E('input', { 'type': 'checkbox', 'checked': s.telegram_enabled ? 'checked' : null });
+		var tgToken = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:100%', 'value': s.telegram_token || '', 'placeholder': '123456789:ABC…' });
+		var tgChat = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:220px', 'value': s.telegram_chat || '', 'placeholder': 'chat id' });
 
 		function row(label, val) {
 			return E('div', { 'style': 'margin:3px 0' }, [ E('b', { 'style': 'display:inline-block;width:180px' }, label), E('span', { 'style': 'font-family:monospace' }, val == null ? '—' : String(val)) ]);
@@ -51,6 +66,17 @@ return view.extend({
 				])
 			]),
 
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('Telegram alerts')),
+				E('label', {}, [ tgEnable, E('span', { 'style': 'margin-left:6px' }, _('Enable Telegram notifications')) ]),
+				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:inline-block;width:110px' }, _('Bot token')), tgToken ]),
+				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:inline-block;width:110px' }, _('Chat ID')), tgChat ]),
+				E('div', { 'style': 'margin-top:6px' }, [
+					E('button', { 'class': 'btn cbi-button cbi-button-save', 'click': ui.createHandlerFn(this, 'handleSaveTg', tgEnable, tgToken, tgChat) }, _('Save')),
+					E('button', { 'class': 'btn cbi-button cbi-button-action', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleTgTest') }, _('Send test'))
+				]),
+				E('p', { 'style': 'color:#888' }, _('Create a bot via @BotFather, get your chat id (e.g. @userinfobot). Alerts: failover, subscription expiry, start/stop.'))
+			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Technical (read-only)')),
 				row(_('sing-box version'), r.singbox_version),
