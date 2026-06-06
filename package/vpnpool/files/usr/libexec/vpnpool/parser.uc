@@ -87,6 +87,91 @@ function parse_vless(line) {
 	return ob;
 }
 
+function parse_trojan(line) {
+	let m = match(line, /^trojan:\/\/([^@]+)@([^:\/?#]+):([0-9]+)(\?[^#]*)?(#.*)?$/);
+	if (!m) return null;
+	let p = parse_query(m[4] ? substr(m[4], 1) : '');
+	let name = m[5] ? url_decode(substr(m[5], 1)) : '';
+	let ob = {
+		type: 'trojan', tag: length(name) ? name : (m[2] + ':' + m[3]),
+		server: m[2], server_port: int(m[3]), password: m[1]
+	};
+	let tls = { enabled: true };
+	if (length(p.sni)) tls.server_name = p.sni;
+	if (length(p.fp)) tls.utls = { enabled: true, fingerprint: p.fp };
+	ob.tls = tls;
+	if (p.type == 'ws') {
+		ob.transport = { type: 'ws' };
+		if (length(p.path)) ob.transport.path = p.path;
+		if (length(p.host)) ob.transport.headers = { Host: p.host };
+	} else if (p.type == 'grpc') {
+		ob.transport = { type: 'grpc' };
+		if (length(p.serviceName)) ob.transport.service_name = p.serviceName;
+	}
+	return ob;
+}
+
+function parse_vmess(line) {
+	let dec = b64dec(substr(line, 8));
+	if (!dec) return null;
+	let v = json(dec);
+	if (type(v) != 'object') return null;
+	let ob = {
+		type: 'vmess',
+		tag: length(v.ps) ? v.ps : ((v.add ?? '') + ':' + (v.port ?? '')),
+		server: v.add, server_port: int(v.port),
+		uuid: v.id, alter_id: int(v.aid ?? 0),
+		security: length(v.scy) ? v.scy : 'auto'
+	};
+	if (v.tls == 'tls') {
+		ob.tls = { enabled: true };
+		let sni = length(v.sni) ? v.sni : v.host;
+		if (length(sni)) ob.tls.server_name = sni;
+	}
+	if (v.net == 'ws') {
+		ob.transport = { type: 'ws' };
+		if (length(v.path)) ob.transport.path = v.path;
+		if (length(v.host)) ob.transport.headers = { Host: v.host };
+	} else if (v.net == 'grpc') {
+		ob.transport = { type: 'grpc' };
+		if (length(v.path)) ob.transport.service_name = v.path;
+	}
+	return ob;
+}
+
+function parse_ss(line) {
+	// ss://base64(method:password)@host:port#name  OR  ss://base64(method:password@host:port)#name
+	let rest = substr(line, 5);
+	let name = '';
+	let h = index(rest, '#');
+	if (h >= 0) { name = url_decode(substr(rest, h + 1)); rest = substr(rest, 0, h); }
+	let q = index(rest, '?');
+	if (q >= 0) rest = substr(rest, 0, q);
+
+	let method, password, server, port;
+	let at = index(rest, '@');
+	if (at >= 0) {
+		let dec = b64dec(substr(rest, 0, at)) || substr(rest, 0, at);
+		let hp = substr(rest, at + 1);
+		let c = index(dec, ':'); if (c < 0) return null;
+		method = substr(dec, 0, c); password = substr(dec, c + 1);
+		let cc = rindex(hp, ':'); if (cc < 0) return null;
+		server = substr(hp, 0, cc); port = int(substr(hp, cc + 1));
+	} else {
+		let dec = b64dec(rest);
+		if (!dec) return null;
+		let at2 = index(dec, '@'); if (at2 < 0) return null;
+		let mp = substr(dec, 0, at2), hp = substr(dec, at2 + 1);
+		let c = index(mp, ':'); method = substr(mp, 0, c); password = substr(mp, c + 1);
+		let cc = rindex(hp, ':'); server = substr(hp, 0, cc); port = int(substr(hp, cc + 1));
+	}
+	if (!length(server) || !port) return null;
+	return {
+		type: 'shadowsocks', tag: length(name) ? name : (server + ':' + port),
+		server: server, server_port: port, method: method, password: password
+	};
+}
+
 function looks_base64(s) {
 	if (index(s, '://') >= 0) return false;
 	let c = substr(s, 0, 1);
@@ -137,7 +222,12 @@ function process_text(raw) {
 		let ob = null;
 		if (substr(line, 0, 8) == 'vless://')
 			ob = parse_vless(line);
-		// TODO: vmess://, ss:// (rare for this provider)
+		else if (substr(line, 0, 9) == 'trojan://')
+			ob = parse_trojan(line);
+		else if (substr(line, 0, 8) == 'vmess://')
+			ob = parse_vmess(line);
+		else if (substr(line, 0, 5) == 'ss://')
+			ob = parse_ss(line);
 		if (ob) add_node(ob, line);
 	}
 }

@@ -56,12 +56,15 @@ cleanup() {
 # USR1 = rebuild config from cache + manual nodes and hot-reload sing-box.
 # Sent by the LuCI backend after manual node / domain edits so they apply live.
 reload_config() {
-	log "reload (USR1): rebuilding config"
+	log "reload (USR1): rebuilding config + routing"
 	if "$LIBEXEC/build.sh"; then
 		[ -f "$SB_PIDFILE" ] && kill "$(cat "$SB_PIDFILE")" 2>/dev/null
 		sleep 1
 		start_singbox
-		log "reloaded: sing-box restarted"
+		# re-apply routing so per-client / ipv6 / coexist / domain edits take effect
+		"$LIBEXEC/route.sh" down
+		"$LIBEXEC/route.sh" up
+		log "reloaded: sing-box + routing"
 	else
 		log "reload: build failed, keeping current config"
 	fi

@@ -16,6 +16,9 @@ config vpnpool 'main'
 	option selected_node ''
 	# IPv6 policy: block (fail-closed) | off | proxy
 	option ipv6 'block'
+	# Per-client routing: all | exclude (listed bypass) | include (only listed).
+	# Clients are IPv4 addresses, e.g.:  list client '192.168.1.50'
+	option client_mode 'all'
 	# Telegram alerts (failover / subscription / lifecycle)
 	option telegram_enabled '0'
 	option telegram_token ''
