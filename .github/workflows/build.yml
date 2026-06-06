@@ -1,0 +1,59 @@
+name: Build .ipk
+
+# Builds opkg packages (vpnpool + luci-app-vpnpool) for several OpenWrt targets
+# using the official OpenWrt SDK, so the app is installable via opkg on most
+# router hardware. On a published release the .ipk files are attached to it.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'package/**'
+      - '.github/workflows/build.yml'
+  pull_request:
+  release:
+    types: [ published ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - aarch64_cortex-a53-openwrt-23.05   # MediaTek Filogic (Cudy TR3000 etc.), most ARM64
+          - aarch64_generic-openwrt-23.05      # other ARM64
+          - mipsel_24kc-openwrt-23.05          # MT76x8 / ramips (older routers)
+          - x86_64-openwrt-23.05               # x86 / VM routers
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build packages (OpenWrt SDK)
+        uses: openwrt/gh-action-sdk@v6
+        env:
+          ARCH: ${{ matrix.arch }}
+          FEEDNAME: vpnpool_feed
+          PACKAGES: vpnpool luci-app-vpnpool
+          NO_REFRESH_CHECK: 1
+
+      - name: Collect .ipk
+        run: |
+          mkdir -p artifacts
+          find bin -name '*.ipk' -exec cp {} artifacts/ \; || true
+          ls -l artifacts || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipk-${{ matrix.arch }}
+          path: artifacts/*.ipk
+          if-no-files-found: warn
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.ipk
