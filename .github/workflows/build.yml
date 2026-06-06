@@ -23,21 +23,19 @@ jobs:
       fail-fast: false
       matrix:
         arch:
-          - aarch64_cortex-a53-openwrt-23.05   # MediaTek Filogic (Cudy TR3000 etc.), most ARM64
-          - aarch64_generic-openwrt-23.05      # other ARM64
-          - mipsel_24kc-openwrt-23.05          # MT76x8 / ramips (older routers)
-          - x86_64-openwrt-23.05               # x86 / VM routers
+          - aarch64_cortex-a53-24.10.4   # MediaTek Filogic (Cudy TR3000 etc.)
+          - x86_64-24.10.4               # x86 / VM routers
+          - mipsel_24kc-24.10.4          # ramips MT76x8 (older routers)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Build packages (OpenWrt SDK)
-        uses: openwrt/gh-action-sdk@v6
+        uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}
           FEEDNAME: vpnpool_feed
           PACKAGES: vpnpool luci-app-vpnpool
-          NO_REFRESH_CHECK: 1
 
       - name: Collect .ipk
         run: |
