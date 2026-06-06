@@ -40,7 +40,7 @@ jobs:
       - name: Collect .ipk
         run: |
           mkdir -p artifacts
-          find bin -name '*.ipk' -exec cp {} artifacts/ \; || true
+          find bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' \) -exec cp {} artifacts/ \; || true
           ls -l artifacts || true
 
       - name: Upload artifacts
