@@ -16,6 +16,10 @@ config vpnpool 'main'
 	option selected_node ''
 	# IPv6 policy: block (fail-closed) | off | proxy
 	option ipv6 'block'
+	# Telegram alerts (failover / subscription / lifecycle)
+	option telegram_enabled '0'
+	option telegram_token ''
+	option telegram_chat ''
 	# --- non-colliding resources (discovered; MUST differ from podkop/zapret) ---
 	# podkop: mark 0x100000, table podkop(pri105), tproxy :1602, clash :9090
 	# zapret: mark 0x20000000 / ct 0x40000000

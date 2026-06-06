@@ -53,6 +53,9 @@ FI=$(uci -q get vpnpool.main.failover_interval); [ -n "$FI" ] || FI=60
 SI=$(uci -q get vpnpool.main.subscription_interval); [ -n "$SI" ] || SI=6h
 TOL=$(uci -q get vpnpool.main.failover_tolerance); [ -n "$TOL" ] || TOL=50
 ASW=$(uci -q get vpnpool.main.auto_switch); [ -n "$ASW" ] || ASW=1
+TGE=$(uci -q get vpnpool.main.telegram_enabled); [ -n "$TGE" ] || TGE=0
+TGT=$(uci -q get vpnpool.main.telegram_token)
+TGC=$(uci -q get vpnpool.main.telegram_chat)
 
 jq -n \
 	--argjson enabled "${ENABLED:-0}" \
@@ -72,6 +75,10 @@ jq -n \
 	--arg si "$SI" \
 	--arg tol "$TOL" \
 	--argjson asw "${ASW:-1}" \
+	--argjson tge "${TGE:-0}" \
+	--arg tgt "$TGT" \
+	--arg tgc "$TGC" \
+	--arg ipv6 "$IPV6" \
 	--argjson tup "${TUP:-0}" \
 	--argjson tdown "${TDOWN:-0}" \
 	--argjson tconn "${TCONN:-0}" \
@@ -93,6 +100,10 @@ jq -n \
 			failover_interval: ($fi|tonumber? // 60),
 			subscription_interval: $si,
 			failover_tolerance: ($tol|tonumber? // 50),
-			auto_switch: ($asw==1)
+			auto_switch: ($asw==1),
+			ipv6: $ipv6,
+			telegram_enabled: ($tge==1),
+			telegram_token: $tgt,
+			telegram_chat: $tgc
 		}
 	}'

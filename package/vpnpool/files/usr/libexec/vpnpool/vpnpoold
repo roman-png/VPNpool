@@ -31,8 +31,21 @@ singbox_alive() {
 	[ -n "$p" ] && kill -0 "$p" 2>/dev/null
 }
 
+# the node actually carrying traffic (resolve selector 'auto' to the urltest pick)
+current_node() {
+	local p sel
+	p=$(curl -s -m3 "http://$CLASH_API/proxies" 2>/dev/null)
+	sel=$(echo "$p" | jq -r '.proxies.proxy.now // ""' 2>/dev/null)
+	if [ -z "$sel" ] || [ "$sel" = "auto" ]; then
+		echo "$p" | jq -r '.proxies.auto.now // ""' 2>/dev/null
+	else
+		echo "$sel"
+	fi
+}
+
 cleanup() {
 	log "stopping: removing routing and sing-box"
+	tg_notify "🔴 vpnpool: stopped"
 	"$LIBEXEC/route.sh" down
 	[ -f "$SB_PIDFILE" ] && kill "$(cat "$SB_PIDFILE")" 2>/dev/null
 	rm -f "$SB_PIDFILE"
@@ -83,9 +96,11 @@ start_singbox
 sleep 3
 "$LIBEXEC/route.sh" up
 log "routing is UP"
+tg_notify "🟢 vpnpool: routing is up"
 
 REFRESH=$(interval_seconds)
 LAST=$(date +%s)
+LAST_NODE=""
 
 # main supervise/refresh loop. sleep in bg + wait so TERM is handled promptly.
 while : ; do
@@ -96,6 +111,13 @@ while : ; do
 		log "sing-box not running, restarting"
 		start_singbox
 		sleep 2
+	fi
+
+	# detect node change (failover / manual switch) and notify
+	NODE=$(current_node)
+	if [ -n "$NODE" ] && [ "$NODE" != "$LAST_NODE" ]; then
+		[ -n "$LAST_NODE" ] && { log "active node -> $NODE"; tg_notify "🔁 vpnpool: switched to $NODE"; }
+		LAST_NODE="$NODE"
 	fi
 
 	REFRESH=$(interval_seconds)
@@ -110,6 +132,12 @@ while : ; do
 			log "subscription refreshed, sing-box reloaded"
 		else
 			log "refresh failed, keeping current config"
+		fi
+		# subscription expiry warning
+		EXP=$(cat "$CONF_DIR/sub.expire" 2>/dev/null)
+		if [ -n "$EXP" ]; then
+			DAYS=$(( (EXP - $(date +%s)) / 86400 ))
+			[ "$DAYS" -ge 0 ] && [ "$DAYS" -le 3 ] && tg_notify "⚠️ vpnpool: subscription expires in ${DAYS}d"
 		fi
 	fi
 done

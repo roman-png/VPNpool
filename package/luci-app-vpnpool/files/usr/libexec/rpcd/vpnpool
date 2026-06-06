@@ -17,7 +17,7 @@ signal_refetch() {
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" } }
+{ "status": {}, "diag": {}, "conntest": {}, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "tg_test": {} }
 L
 	;;
 call)
@@ -113,10 +113,10 @@ call)
 		k=$(echo "$input" | jq -r '.name // ""')
 		v=$(echo "$input" | jq -r '.value // ""')
 		case "$k" in
-		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|subscription_ua)
+		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|subscription_ua|telegram_enabled|telegram_token|telegram_chat|ipv6)
 			uci set vpnpool.main."$k"="$v"; uci commit vpnpool
 			case "$k" in
-				subscription_interval) : ;;   # applied by daemon loop, no reload needed
+				subscription_interval|telegram_*) : ;;   # read live by the daemon, no reload
 				*) signal_reload ;;
 			esac
 			echo '{"ok":true}'
@@ -125,6 +125,10 @@ call)
 			echo '{"error":"unknown option"}'
 			;;
 		esac
+		;;
+	tg_test)
+		tg_notify "✅ vpnpool: test message" 2>/dev/null
+		echo '{"ok":true}'
 		;;
 	add_node)
 		l=$(echo "$input" | jq -r '.link // ""')
