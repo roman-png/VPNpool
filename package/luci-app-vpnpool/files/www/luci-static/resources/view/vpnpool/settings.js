@@ -10,6 +10,8 @@ var callStatus = rpc.declare({ object: 'vpnpool', method: 'status' });
 var callDiag   = rpc.declare({ object: 'vpnpool', method: 'diag' });
 var callSetOpt = rpc.declare({ object: 'vpnpool', method: 'set_option', params: [ 'name', 'value' ] });
 var callTgTest = rpc.declare({ object: 'vpnpool', method: 'tg_test' });
+var callExport = rpc.declare({ object: 'vpnpool', method: 'export' });
+var callImport = rpc.declare({ object: 'vpnpool', method: 'import', params: [ 'config' ] });
 
 return view.extend({
 	notify: function(msg) { ui.addNotification(null, E('p', msg), 'info'); },
@@ -29,6 +31,14 @@ return view.extend({
 		ui.addNotification(null, E('p', _('Sending test message…')), 'info');
 		return callTgTest().then(function() { ui.addNotification(null, E('p', _('Test sent — check Telegram.')), 'info'); });
 	},
+	handleExport: function(box) {
+		return callExport().then(function(r) { box.value = (r && r.config) || ''; });
+	},
+	handleImport: function(box) {
+		var self = this;
+		if (!confirm(_('Replace the current vpnpool configuration with the pasted backup?'))) return;
+		return callImport(box.value || '').then(function() { self.notify(_('Configuration imported. Reloading…')); });
+	},
 
 	load: function() { return Promise.all([ callStatus(), callDiag().catch(function() { return {}; }) ]); },
 	render: function(res) {
@@ -42,6 +52,7 @@ return view.extend({
 		var tgEnable = E('input', { 'type': 'checkbox', 'checked': s.telegram_enabled ? 'checked' : null });
 		var tgToken = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:100%', 'value': s.telegram_token || '', 'placeholder': '123456789:ABC…' });
 		var tgChat = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:220px', 'value': s.telegram_chat || '', 'placeholder': 'chat id' });
+		var bkBox = E('textarea', { 'class': 'cbi-input-textarea', 'style': 'width:100%;height:140px;font-family:monospace;font-size:11px' });
 
 		function row(label, val) {
 			return E('div', { 'style': 'margin:3px 0' }, [ E('b', { 'style': 'display:inline-block;width:180px' }, label), E('span', { 'style': 'font-family:monospace' }, val == null ? '—' : String(val)) ]);
@@ -76,6 +87,15 @@ return view.extend({
 					E('button', { 'class': 'btn cbi-button cbi-button-action', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleTgTest') }, _('Send test'))
 				]),
 				E('p', { 'style': 'color:#888' }, _('Create a bot via @BotFather, get your chat id (e.g. @userinfobot). Alerts: failover, subscription expiry, start/stop.'))
+			]),
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('Backup / Restore')),
+				E('div', { 'style': 'margin-bottom:6px' }, [
+					E('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, 'handleExport', bkBox) }, _('Export')),
+					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleImport', bkBox) }, _('Import'))
+				]),
+				bkBox,
+				E('p', { 'style': 'color:#888' }, _('Export fills the box with your config — copy it somewhere safe. Paste a backup and Import to restore.'))
 			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Technical (read-only)')),
