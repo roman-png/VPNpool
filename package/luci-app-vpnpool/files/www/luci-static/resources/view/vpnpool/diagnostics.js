@@ -9,6 +9,7 @@
 var _ = function(s) { return i18n.tr(s); };
 
 var callDiag = rpc.declare({ object: 'vpnpool', method: 'diag' });
+var callConntest = rpc.declare({ object: 'vpnpool', method: 'conntest' });
 
 function yn(v) { return E('span', { 'style': 'color:' + (v ? '#2e7d32' : '#cc3333') + ';font-weight:bold' }, v ? '✓' : '✗'); }
 function row(label, valNode) {
@@ -20,6 +21,16 @@ return view.extend({
 	refresh: function() { return callDiag().then(L.bind(function(d) {
 		var el = document.getElementById('vp-diag'); if (el) dom.content(el, this.renderDiag(d));
 	}, this)); },
+
+	handleConntest: function() {
+		ui.addNotification(null, E('p', _('Testing exit via VPN…')), 'info');
+		return callConntest().then(function(r) {
+			if (r && r.ok)
+				ui.addNotification(null, E('p', _('VPN exit: %s  (IP %s)').format(r.country || '?', r.ip || '?')), 'info');
+			else
+				ui.addNotification(null, E('p', _('VPN exit test failed — is the service running?')), 'warning');
+		});
+	},
 
 	renderDiag: function(d) {
 		d = d || {};
@@ -43,7 +54,9 @@ return view.extend({
 				row(_('Internet (direct)'), yn(n.internet)),
 				row(_('WAN interface'), txt(n.wan_iface)), row(_('Gateway'), txt(n.gateway)),
 				row(_('Direct egress IP'), txt(n.direct_ip)), row(_('Direct egress country'), txt(n.direct_country)),
-				E('p', { 'style': 'color:#888' }, _('This is your ISP exit (traffic NOT via VPN). Proxied nodes exit elsewhere — see Dashboard pings.'))
+				E('p', { 'style': 'color:#888' }, _('This is your ISP exit (traffic NOT via VPN). Proxied nodes exit elsewhere — see Dashboard pings.')),
+				E('button', { 'class': 'btn cbi-button cbi-button-action',
+					'click': ui.createHandlerFn(this, 'handleConntest') }, '🌍 ' + _('Test exit via VPN'))
 			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Community rule-sets')),

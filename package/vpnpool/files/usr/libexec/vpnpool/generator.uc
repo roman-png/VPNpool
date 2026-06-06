@@ -132,6 +132,9 @@ let listed_ob = (mode == 'exclude') ? 'direct' : 'proxy';
 let final_ob  = (mode == 'exclude') ? 'proxy'  : 'direct';
 
 let rules = [ { action: 'sniff' } ];
+// the local test/SOCKS inbound always egresses through the proxy (for the
+// "test exit via VPN" diagnostic and as a handy local proxy port)
+push(rules, { inbound: [ 'test-mixed-in' ], outbound: 'proxy' });
 if (length(comm_tags))
 	push(rules, { rule_set: comm_tags, outbound: listed_ob });
 if (length(domains))
@@ -148,12 +151,23 @@ if (length(rule_sets))
 // ---- inbound (tproxy) ----
 // NOTE: omit "network" so tproxy listens on BOTH tcp and udp. The field is a
 // single enum ("tcp"|"udp"); "tcp,udp" is invalid and fails sing-box check.
-let inbounds = [ {
-	type: 'tproxy',
-	tag: 'tproxy-in',
-	listen: '127.0.0.1',
-	listen_port: tproxy_port
-} ];
+let test_port = int(opt('main', 'test_port', 1605));
+let inbounds = [
+	{
+		type: 'tproxy',
+		tag: 'tproxy-in',
+		listen: '127.0.0.1',
+		listen_port: tproxy_port
+	},
+	{
+		// local mixed (SOCKS+HTTP) proxy on loopback — used by the "test exit via
+		// VPN" diagnostic; also usable directly by apps on the router.
+		type: 'mixed',
+		tag: 'test-mixed-in',
+		listen: '127.0.0.1',
+		listen_port: test_port
+	}
+];
 
 // ---- assemble ----
 let config = {

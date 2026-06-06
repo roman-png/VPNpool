@@ -34,6 +34,14 @@ function fmtExpire(ts) {
 function badge(text, color) {
 	return E('span', { 'style': 'display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;color:#fff;background:' + color + ';margin-right:6px' }, text);
 }
+function fmtBytes(n) {
+	n = n || 0;
+	if (n < 1024) return n.toFixed(0) + ' B';
+	if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+	if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+	return (n / 1073741824).toFixed(2) + ' GB';
+}
+var prevTraffic = null;
 
 return view.extend({
 	handleToggle: function(cur) {
@@ -67,7 +75,23 @@ return view.extend({
 	renderStatus: function(st) {
 		var on = st.enabled && st.running;
 		var using = (st.active === 'auto' || !st.active) ? (st.auto_now || '—') : st.active;
-		return E('div', {}, [
+
+		// traffic speed = delta of totals between polls
+		var t = st.traffic || {};
+		var now = Date.now(), dn = 0, up = 0;
+		if (prevTraffic && now > prevTraffic.time) {
+			var dt = (now - prevTraffic.time) / 1000;
+			dn = Math.max(0, ((t.down_total || 0) - prevTraffic.down) / dt);
+			up = Math.max(0, ((t.up_total || 0) - prevTraffic.up) / dt);
+		}
+		prevTraffic = { time: now, down: t.down_total || 0, up: t.up_total || 0 };
+
+		// subscription expiry color
+		var exp = st.subscription && st.subscription.expire;
+		var days = exp ? Math.floor((exp * 1000 - Date.now()) / 86400000) : null;
+		var expColor = (days != null && days < 7) ? '#cc3333' : (days != null && days < 30 ? '#e08a00' : '');
+
+		var kids = [
 			E('div', { 'style': 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px' }, [
 				E('button', { 'class': 'btn cbi-button ' + (on ? 'cbi-button-negative' : 'cbi-button-positive'),
 					'click': ui.createHandlerFn(this, 'handleToggle', st.enabled) }, on ? _('Turn OFF') : _('Turn ON')),
@@ -76,12 +100,23 @@ return view.extend({
 				badge(st.mode === 'exclude' ? _('all except lists') : _('only lists'), '#1565c0')
 			]),
 			E('div', { 'style': 'margin:4px 0' }, [ E('b', {}, _('Active node') + ': '), E('span', {}, using),
-				(st.active === 'auto' || !st.active) ? E('span', { 'style': 'color:#888' }, ' (' + _('auto / urltest') + ')') : '' ]),
-			E('div', { 'style': 'margin:4px 0' }, [ E('b', {}, _('Subscription') + ': '),
-				E('span', {}, _('expires %s').format(fmtExpire(st.subscription && st.subscription.expire))),
-				E('button', { 'class': 'btn cbi-button cbi-button-action', 'style': 'margin-left:10px',
-					'click': ui.createHandlerFn(this, 'handleRefresh') }, _('Update now')) ])
-		]);
+				(st.active === 'auto' || !st.active) ? E('span', { 'style': 'color:#888' }, ' (' + _('auto / urltest') + ')') : '' ])
+		];
+
+		if (on)
+			kids.push(E('div', { 'style': 'margin:4px 0' }, [
+				E('b', {}, _('Traffic') + ': '),
+				E('span', {}, '↓ ' + fmtBytes(dn) + '/s   ↑ ' + fmtBytes(up) + '/s'),
+				E('span', { 'style': 'color:#888;margin-left:12px' }, (t.connections || 0) + ' ' + _('connections')),
+				E('span', { 'style': 'color:#888;margin-left:12px' }, _('total') + ': ↓' + fmtBytes(t.down_total) + ' ↑' + fmtBytes(t.up_total))
+			]));
+
+		kids.push(E('div', { 'style': 'margin:4px 0' }, [ E('b', {}, _('Subscription') + ': '),
+			E('span', { 'style': expColor ? ('color:' + expColor + ';font-weight:bold') : '' }, _('expires %s').format(fmtExpire(exp))),
+			E('button', { 'class': 'btn cbi-button cbi-button-action', 'style': 'margin-left:10px',
+				'click': ui.createHandlerFn(this, 'handleRefresh') }, _('Update now')) ]));
+
+		return E('div', {}, kids);
 	},
 
 	renderNodes: function(st) {

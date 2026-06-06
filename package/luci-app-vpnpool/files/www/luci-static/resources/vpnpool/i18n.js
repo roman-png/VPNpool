@@ -29,6 +29,7 @@ var DICT = {
 		'Node': 'Узел', 'Server': 'Сервер', 'Ping': 'Пинг', 'Select': 'Выбор',
 		'AUTO (urltest)': 'АВТО (urltest)', 'auto-ping + failover': 'авто-пинг + переключение',
 		'Ping all nodes': 'Пинговать все узлы',
+		'Traffic': 'Трафик', 'connections': 'соединений', 'total': 'всего',
 		'VPN Pool — Sources': 'VPN Pool — Источники', 'Main subscription': 'Основная подписка',
 		'Save URL': 'Сохранить URL', 'Delete subscription': 'Удалить подписку',
 		'Subscription URL saved.': 'URL подписки сохранён.', 'Delete the subscription URL?': 'Удалить URL подписки?',
@@ -73,7 +74,10 @@ var DICT = {
 		'Resources': 'Ресурсы', 'fwmark / table': 'fwmark / таблица', 'Recent logs': 'Последние логи',
 		'(no logs)': '(логов нет)',
 		'Community rule-sets': 'Списки сообществ (rule-set)', 'Lists configured': 'Списков настроено',
-		'SRS cache present': 'SRS-кэш есть', 'SRS cache size (KB)': 'Размер SRS-кэша (КБ)'
+		'SRS cache present': 'SRS-кэш есть', 'SRS cache size (KB)': 'Размер SRS-кэша (КБ)',
+		'Test exit via VPN': 'Проверить выход через VPN', 'Testing exit via VPN…': 'Проверяю выход через VPN…',
+		'VPN exit: %s  (IP %s)': 'Выход через VPN: %s  (IP %s)',
+		'VPN exit test failed — is the service running?': 'Тест выхода не удался — служба запущена?'
 	}
 };
 

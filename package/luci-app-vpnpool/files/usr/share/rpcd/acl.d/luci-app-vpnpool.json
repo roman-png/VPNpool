@@ -3,7 +3,7 @@
 		"description": "Grant access to vpnpool dashboard",
 		"read": {
 			"ubus": {
-				"vpnpool": [ "status", "diag" ]
+				"vpnpool": [ "status", "diag", "conntest" ]
 			}
 		},
 		"write": {
