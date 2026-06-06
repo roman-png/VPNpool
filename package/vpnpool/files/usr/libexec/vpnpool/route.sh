@@ -46,6 +46,25 @@ ${YIELD}		ip daddr @localv4 return
 	}
 }
 NFT
+
+	# IPv6 leak guard (fail-closed): drop LAN IPv6 to the internet so v6 traffic
+	# can't bypass the v4 VPN. Local/ULA/link-local v6 stays allowed.
+	if [ "$IPV6" = "block" ]; then
+		nft -f - <<NFT6
+table inet vpnpool {
+	set localv6 {
+		type ipv6_addr
+		flags interval
+		auto-merge
+		elements = { ::1/128, ::/128, fc00::/7, fe80::/10, ff00::/8, 64:ff9b::/96 }
+	}
+	chain v6filter {
+		type filter hook forward priority -90; policy accept;
+		meta nfproto ipv6 iifname "$LAN_IF" ip6 daddr != @localv6 reject
+	}
+}
+NFT6
+	fi
 	;;
 down)
 	nft delete table inet vpnpool 2>/dev/null

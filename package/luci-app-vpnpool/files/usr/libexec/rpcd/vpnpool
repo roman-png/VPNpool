@@ -42,6 +42,13 @@ call)
 		;;
 	select)
 		tag=$(echo "$input" | jq -r '.tag')
+		# persist the pick so it survives reload / subscription updates ('auto' clears it)
+		if [ "$tag" = "auto" ]; then
+			uci set vpnpool.main.selected_node=''
+		else
+			uci set vpnpool.main.selected_node="$tag"
+		fi
+		uci commit vpnpool
 		code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "http://$CLASH/proxies/proxy" \
 			--data "$(jq -n --arg n "$tag" '{name:$n}')")
 		echo "{\"ok\":true,\"http\":\"$code\"}"

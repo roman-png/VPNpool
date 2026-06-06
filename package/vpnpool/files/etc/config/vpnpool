@@ -11,6 +11,11 @@ config vpnpool 'main'
 	option health_url 'http://cp.cloudflare.com/generate_204'
 	option failover_interval '60'
 	option failover_tolerance '50'
+	option auto_switch '1'
+	# persisted manual node pick (empty = AUTO/urltest); set by the UI "Use" button
+	option selected_node ''
+	# IPv6 policy: block (fail-closed) | off | proxy
+	option ipv6 'block'
 	# --- non-colliding resources (discovered; MUST differ from podkop/zapret) ---
 	# podkop: mark 0x100000, table podkop(pri105), tproxy :1602, clash :9090
 	# zapret: mark 0x20000000 / ct 0x40000000
