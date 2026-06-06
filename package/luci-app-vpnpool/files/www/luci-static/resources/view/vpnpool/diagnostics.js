@@ -23,7 +23,7 @@ return view.extend({
 
 	renderDiag: function(d) {
 		d = d || {};
-		var s = d.service || {}, c = d.coexist || {}, n = d.network || {}, r = d.resources || {};
+		var s = d.service || {}, c = d.coexist || {}, n = d.network || {}, r = d.resources || {}, rs = d.rulesets || {};
 		var logs = d.logs || [];
 
 		return E('div', {}, [
@@ -44,6 +44,12 @@ return view.extend({
 				row(_('WAN interface'), txt(n.wan_iface)), row(_('Gateway'), txt(n.gateway)),
 				row(_('Direct egress IP'), txt(n.direct_ip)), row(_('Direct egress country'), txt(n.direct_country)),
 				E('p', { 'style': 'color:#888' }, _('This is your ISP exit (traffic NOT via VPN). Proxied nodes exit elsewhere — see Dashboard pings.'))
+			]),
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('Community rule-sets')),
+				row(_('Lists configured'), txt(rs.communities)),
+				row(_('SRS cache present'), yn(rs.cache_present)),
+				row(_('SRS cache size (KB)'), txt(rs.cache_kb))
 			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Resources')),

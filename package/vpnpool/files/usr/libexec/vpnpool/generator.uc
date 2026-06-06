@@ -163,7 +163,7 @@ let config = {
 	route: route,
 	experimental: {
 		clash_api: { external_controller: clash_api },
-		cache_file: { enabled: true, path: '/etc/vpnpool/cache.db' }
+		cache_file: { enabled: true, path: '/tmp/vpnpool/cache.db' }
 	}
 };
 

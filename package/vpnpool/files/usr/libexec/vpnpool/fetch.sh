@@ -34,7 +34,7 @@ fetch_best() {   # $1=url $2=primary(0/1) $3=outfile
 	url="$1"; primary="$2"; outfile="$3"
 	best=-1; bestua=""
 	for ua in $UAS; do
-		curl -sfL -m 20 -A "$ua" -D "$SB_DATA/h.tmp" -o "$SB_DATA/b.tmp" "$url" 2>/dev/null || continue
+		curl -sfL --connect-timeout 5 -m 12 -A "$ua" -D "$SB_DATA/h.tmp" -o "$SB_DATA/b.tmp" "$url" 2>/dev/null || continue
 		sz=$(wc -c < "$SB_DATA/b.tmp" 2>/dev/null); [ "${sz:-0}" -lt 20 ] && continue
 		normalize "$SB_DATA/b.tmp" > "$SB_DATA/n.tmp"
 		cnt=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/n.tmp" 2>/dev/null | jq 'length' 2>/dev/null)
