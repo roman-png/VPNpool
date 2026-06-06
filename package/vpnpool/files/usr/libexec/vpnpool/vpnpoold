@@ -10,8 +10,17 @@
 SB_PIDFILE=/var/run/vpnpool-singbox.pid
 LIBEXEC=/usr/libexec/vpnpool
 
+SB_LOG="$SB_DATA/sing-box.log"
+LOG_CAP=524288   # 512 KiB — keep the volatile /tmp log bounded
+
+cap_log() {
+	[ -f "$SB_LOG" ] && [ "$(wc -c < "$SB_LOG" 2>/dev/null || echo 0)" -gt "$LOG_CAP" ] && : > "$SB_LOG"
+	return 0
+}
+
 start_singbox() {
-	sing-box run -c "$SB_CONF" -D "$SB_DATA" >> "$SB_DATA/sing-box.log" 2>&1 &
+	cap_log
+	sing-box run -c "$SB_CONF" -D "$SB_DATA" >> "$SB_LOG" 2>&1 &
 	echo $! > "$SB_PIDFILE"
 	log "sing-box started pid=$(cat "$SB_PIDFILE")"
 }
@@ -59,12 +68,16 @@ trap refetch_config USR2
 mkdir -p "$SB_DATA"
 log "vpnpoold starting (whole-LAN selective, coexist with podkop)"
 
-# initial subscription + config
-"$LIBEXEC/fetch.sh" || log "initial fetch failed (will use cache if present)"
-if ! "$LIBEXEC/build.sh"; then
-	log "FATAL: could not build initial config; exiting"
-	exit 1
-fi
+# initial subscription + config, with soft retry (e.g. WAN not ready at boot) —
+# never give up, so the service self-heals once connectivity appears.
+while : ; do
+	"$LIBEXEC/fetch.sh" || log "fetch failed (will use cache if present)"
+	if "$LIBEXEC/build.sh"; then
+		break
+	fi
+	log "initial build failed (no nodes/cache yet), retrying in 15s"
+	sleep 15 & wait $!
+done
 
 start_singbox
 sleep 3
@@ -77,6 +90,7 @@ LAST=$(date +%s)
 # main supervise/refresh loop. sleep in bg + wait so TERM is handled promptly.
 while : ; do
 	sleep 15 & wait $!
+	cap_log
 
 	if ! singbox_alive; then
 		log "sing-box not running, restarting"

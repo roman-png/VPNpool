@@ -27,6 +27,9 @@ DIP=$(echo "$DJSON" | jq -r '.ip // ""' 2>/dev/null)
 DCO=$(echo "$DJSON" | jq -r '.country_iso // .country // ""' 2>/dev/null)
 
 SBVER=$(sing-box version 2>/dev/null | head -1 | awk '{print $NF}')
+COMM_N=$(uci -q get vpnpool.routing.community | tr ' ' '\n' | grep -c .)
+CACHE=false; CACHE_KB=0
+if [ -f /tmp/vpnpool/cache.db ]; then CACHE=true; CACHE_KB=$(( $(wc -c < /tmp/vpnpool/cache.db) / 1024 )); fi
 LOGS=$(logread 2>/dev/null | grep 'vpnpool:' | tail -40 | sed 's/^\(.\{15\}\).*vpnpool: /\1 /' | jq -R . | jq -s . 2>/dev/null)
 [ -n "$LOGS" ] || LOGS='[]'
 
@@ -50,6 +53,9 @@ jq -n \
 	--arg rttab "$RT_TABLE" \
 	--arg tport "$TPROXY_PORT" \
 	--arg clash "$CLASH" \
+	--argjson comm_n "${COMM_N:-0}" \
+	--argjson cache "$CACHE" \
+	--argjson cache_kb "${CACHE_KB:-0}" \
 	--argjson logs "$LOGS" \
 	'{
 		service: { enabled: ($enabled==1), running: $running, routing: $routing,
@@ -57,6 +63,7 @@ jq -n \
 		coexist: { podkop_running: $pod_run, podkop_table: $pod_tbl, zapret_table: $zap_tbl },
 		network: { wan_iface: $wan, gateway: $gw, internet: $inet,
 		           direct_ip: $dip, direct_country: $dco },
+		rulesets: { communities: $comm_n, cache_present: $cache, cache_kb: $cache_kb },
 		resources: { fwmark: $fwmark, route_table: $rttab, tproxy_port: $tport, clash_api: $clash, singbox_version: $sbver },
 		logs: $logs
 	}'

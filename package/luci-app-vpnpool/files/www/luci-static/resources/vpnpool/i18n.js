@@ -71,7 +71,9 @@ var DICT = {
 		'This is your ISP exit (traffic NOT via VPN). Proxied nodes exit elsewhere — see Dashboard pings.':
 			'Это выход через провайдера (НЕ через VPN). Проксированные узлы выходят иначе — см. пинги на Дашборде.',
 		'Resources': 'Ресурсы', 'fwmark / table': 'fwmark / таблица', 'Recent logs': 'Последние логи',
-		'(no logs)': '(логов нет)'
+		'(no logs)': '(логов нет)',
+		'Community rule-sets': 'Списки сообществ (rule-set)', 'Lists configured': 'Списков настроено',
+		'SRS cache present': 'SRS-кэш есть', 'SRS cache size (KB)': 'Размер SRS-кэша (КБ)'
 	}
 };
 
