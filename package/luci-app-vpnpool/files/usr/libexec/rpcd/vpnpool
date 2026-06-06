@@ -17,7 +17,7 @@ signal_refetch() {
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" } }
+{ "status": {}, "diag": {}, "conntest": {}, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" } }
 L
 	;;
 call)
@@ -28,6 +28,13 @@ call)
 		;;
 	diag)
 		/usr/libexec/vpnpool/diag.sh
+		;;
+	conntest)
+		TP=$(uci -q get vpnpool.main.test_port); [ -n "$TP" ] || TP=1605
+		J=$(curl -s -m 12 --proxy "socks5h://127.0.0.1:$TP" https://ifconfig.co/json 2>/dev/null)
+		IP=$(echo "$J" | jq -r '.ip // ""' 2>/dev/null)
+		CO=$(echo "$J" | jq -r '.country_iso // .country // ""' 2>/dev/null)
+		jq -n --arg ip "$IP" --arg co "$CO" '{ ok: ($ip != ""), ip: $ip, country: $co }'
 		;;
 	set_enabled)
 		en=$(echo "$input" | jq -r '.enabled')

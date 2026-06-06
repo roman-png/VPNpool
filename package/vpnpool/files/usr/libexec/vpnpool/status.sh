@@ -12,11 +12,16 @@ MODE=$(uci -q get vpnpool.main.mode); [ -n "$MODE" ] || MODE=selective
 ACTIVE=""
 AUTONOW=""
 PROX='{}'
+TUP=0; TDOWN=0; TCONN=0
 if [ "$RUNNING" = true ]; then
 	PROX=$(curl -s -m3 "http://$CLASH/proxies" 2>/dev/null)
 	[ -n "$PROX" ] || PROX='{}'
 	ACTIVE=$(echo "$PROX" | jq -r '.proxies.proxy.now // ""' 2>/dev/null)
 	AUTONOW=$(echo "$PROX" | jq -r '.proxies.auto.now // ""' 2>/dev/null)
+	CONN=$(curl -s -m3 "http://$CLASH/connections" 2>/dev/null)
+	TUP=$(echo "$CONN" | jq -r '(.uploadTotal // 0)' 2>/dev/null); [ -n "$TUP" ] || TUP=0
+	TDOWN=$(echo "$CONN" | jq -r '(.downloadTotal // 0)' 2>/dev/null); [ -n "$TDOWN" ] || TDOWN=0
+	TCONN=$(echo "$CONN" | jq -r '((.connections // []) | length)' 2>/dev/null); [ -n "$TCONN" ] || TCONN=0
 fi
 
 NODES_FILE=/tmp/vpnpool/nodes.json
@@ -67,6 +72,9 @@ jq -n \
 	--arg si "$SI" \
 	--arg tol "$TOL" \
 	--argjson asw "${ASW:-1}" \
+	--argjson tup "${TUP:-0}" \
+	--argjson tdown "${TDOWN:-0}" \
+	--argjson tconn "${TCONN:-0}" \
 	'{
 		enabled: ($enabled==1),
 		running: $running,
@@ -76,6 +84,7 @@ jq -n \
 		auto_now: $auto_now,
 		subscription: { url: $url, expire: $expire },
 		nodes: $nodes,
+		traffic: { up_total: $tup, down_total: $tdown, connections: $tconn },
 		domains: $domains,
 		manual_nodes: $manual,
 		sources: $sources,
