@@ -64,6 +64,7 @@ var DICT = {
 		'Telegram alerts': 'Уведомления в Telegram', 'Enable Telegram notifications': 'Включить уведомления в Telegram',
 		'Bot token': 'Токен бота', 'Chat ID': 'Chat ID', 'Send test': 'Тест', 'Telegram settings saved.': 'Настройки Telegram сохранены.',
 		'Sending test message…': 'Отправляю тестовое сообщение…', 'Test sent — check Telegram.': 'Отправлено — проверьте Telegram.',
+		'Telegram send failed (HTTP %s) — check token/chat id.': 'Не удалось отправить (HTTP %s) — проверьте токен/chat id.',
 		'Create a bot via @BotFather, get your chat id (e.g. @userinfobot). Alerts: failover, subscription expiry, start/stop.':
 			'Создайте бота через @BotFather, узнайте chat id (напр. @userinfobot). Алерты: переключение узла, истечение подписки, старт/стоп.',
 		'Backup / Restore': 'Бэкап / Восстановление', 'Export': 'Экспорт', 'Import': 'Импорт',

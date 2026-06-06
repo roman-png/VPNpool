@@ -9,18 +9,23 @@ SB_DATA=/tmp/vpnpool
 
 log() { logger -t "$NAME" "$1"; }
 
-# Send a Telegram message if configured (no-op otherwise). Used for failover /
-# subscription / lifecycle alerts.
-tg_notify() {
-	[ "$(uci -q get vpnpool.main.telegram_enabled)" = "1" ] || return 0
+# Low-level Telegram send (ignores the enable toggle). Needs token+chat.
+# Echoes the HTTP status code (200 = delivered).
+tg_send() {
 	local tok chat
 	tok=$(uci -q get vpnpool.main.telegram_token)
 	chat=$(uci -q get vpnpool.main.telegram_chat)
-	[ -n "$tok" ] && [ -n "$chat" ] || return 0
-	curl -s -m 8 -o /dev/null \
+	[ -n "$tok" ] && [ -n "$chat" ] || { echo "000"; return 1; }
+	curl -s -m 10 -o /dev/null -w '%{http_code}' \
 		--data-urlencode "chat_id=$chat" \
 		--data-urlencode "text=$1" \
 		"https://api.telegram.org/bot$tok/sendMessage" 2>/dev/null
+}
+
+# Send a Telegram alert ONLY if notifications are enabled (used by the daemon).
+tg_notify() {
+	[ "$(uci -q get vpnpool.main.telegram_enabled)" = "1" ] || return 0
+	tg_send "$1" >/dev/null 2>&1
 	return 0
 }
 
