@@ -88,15 +88,31 @@ push(outbounds, {
 	interrupt_exist_connections: true
 });
 
-// manual override selector (default = auto)
+// manual override selector. Default depends on auto_switch + a persisted manual
+// pick (so a chosen node survives reload/subscription updates if it still exists).
+let auto_switch = opt('main', 'auto_switch', '1');
+let selected    = opt('main', 'selected_node', '');
+
 let sel = [ 'auto' ];
-for (let t in node_tags)
+let sel_exists = false;
+for (let t in node_tags) {
 	push(sel, t);
+	if (t == selected) sel_exists = true;
+}
+
+let def;
+if (length(selected) && sel_exists)
+	def = selected;                                  // honor persisted manual pick
+else if (auto_switch == '0')
+	def = length(node_tags) ? node_tags[0] : 'auto'; // off -> fixed node, no auto-switch
+else
+	def = 'auto';                                    // on -> urltest auto + failover
+
 push(outbounds, {
 	type: 'selector',
 	tag: 'proxy',
 	outbounds: sel,
-	default: 'auto',
+	default: def,
 	interrupt_exist_connections: true
 });
 
