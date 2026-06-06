@@ -12,6 +12,20 @@
 
 case "$1" in
 up)
+	# Build yield rules: skip traffic already marked by coexisting proxies so we
+	# don't double-intercept it. auto = detect podkop; plus any uci yield_mark.
+	YIELD=""
+	if [ "$COEXIST" != "off" ]; then
+		if nft list table inet PodkopTable >/dev/null 2>&1; then
+			YIELD="${YIELD}		meta mark & 0x100000 == 0x100000 return
+"
+		fi
+		for m in $(uci -q get vpnpool.main.yield_mark 2>/dev/null); do
+			YIELD="${YIELD}		meta mark & $m == $m return
+"
+		done
+	fi
+
 	ip route replace local 0.0.0.0/0 dev lo table "$RT_TABLE"
 	ip rule add fwmark "${FWMARK}/${FWMARK}" lookup "$RT_TABLE" priority "$RT_PRIO" 2>/dev/null
 	nft -f - <<NFT
@@ -24,8 +38,7 @@ table inet vpnpool {
 	}
 	chain prerouting {
 		type filter hook prerouting priority -90; policy accept;
-		meta mark & 0x100000 == 0x100000 return
-		ip daddr @localv4 return
+${YIELD}		ip daddr @localv4 return
 		iifname "$LAN_IF" meta l4proto tcp th dport { 80, 443 } meta mark set $FWMARK
 		iifname "$LAN_IF" meta l4proto udp th dport 443 meta mark set $FWMARK
 		meta mark & $FWMARK == $FWMARK meta l4proto tcp tproxy ip to 127.0.0.1:$TPROXY_PORT

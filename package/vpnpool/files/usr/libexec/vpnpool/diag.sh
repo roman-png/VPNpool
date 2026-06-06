@@ -11,7 +11,7 @@ RUN=false; pgrep -f '/usr/libexec/vpnpool/vpnpoold' >/dev/null 2>&1 && RUN=true
 ROUT=false; nft list table inet vpnpool >/dev/null 2>&1 && ROUT=true
 AUTOSTART=false; [ -n "$(ls /etc/rc.d/S*vpnpool 2>/dev/null)" ] && AUTOSTART=true
 SBPID=$(pgrep -f 'sing-box run -c /etc/vpnpool/sing-box.json' | head -1)
-CLASH=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH" ] || CLASH=192.168.10.1:9091
+CLASH=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH" ] || CLASH=127.0.0.1:9091
 CLASH_OK=false; [ "$RUN" = true ] && curl -s -m3 "http://$CLASH/version" >/dev/null 2>&1 && CLASH_OK=true
 
 POD_RUN=false; pgrep -f 'sing-box run -c /etc/sing-box/config.json' >/dev/null 2>&1 && POD_RUN=true

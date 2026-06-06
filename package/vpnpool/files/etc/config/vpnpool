@@ -18,9 +18,13 @@ config vpnpool 'main'
 	option route_table '142'
 	option route_priority '106'
 	option tproxy_port '1603'
-	option clash_api '192.168.10.1:9091'
+	option clash_api '127.0.0.1:9091'
 	option singbox_config '/etc/vpnpool/sing-box.json'
 	option log_level 'warn'
+	# lan_if empty = auto-detect (portable). coexist: auto|on|off — yield traffic
+	# already marked by podkop/other proxies so we don't double-intercept it.
+	option lan_if ''
+	option coexist 'auto'
 
 # Selective routing lists. Starter set mirrors podkop; fully editable.
 config routing 'routing'

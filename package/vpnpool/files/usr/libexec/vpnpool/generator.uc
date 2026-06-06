@@ -27,7 +27,7 @@ function opt(section, name, def) {
 }
 
 let tproxy_port = int(opt('main', 'tproxy_port', 1603));
-let clash_api   = opt('main', 'clash_api', '192.168.10.1:9091');
+let clash_api   = opt('main', 'clash_api', '127.0.0.1:9091');
 let health_url  = opt('main', 'health_url', 'http://cp.cloudflare.com/generate_204');
 let fo_interval = opt('main', 'failover_interval', '60');
 let fo_tol      = int(opt('main', 'failover_tolerance', 50));
