@@ -29,7 +29,12 @@ return view.extend({
 	},
 	handleTgTest: function() {
 		ui.addNotification(null, E('p', _('Sending test message…')), 'info');
-		return callTgTest().then(function() { ui.addNotification(null, E('p', _('Test sent — check Telegram.')), 'info'); });
+		return callTgTest().then(function(r) {
+			if (r && r.ok)
+				ui.addNotification(null, E('p', _('Test sent — check Telegram.')), 'info');
+			else
+				ui.addNotification(null, E('p', _('Telegram send failed (HTTP %s) — check token/chat id.').format((r && r.http) || '?')), 'warning');
+		});
 	},
 	handleExport: function(box) {
 		return callExport().then(function(r) { box.value = (r && r.config) || ''; });

@@ -153,8 +153,12 @@ call)
 		esac
 		;;
 	tg_test)
-		tg_notify "✅ vpnpool: test message" 2>/dev/null
-		echo '{"ok":true}'
+		code=$(tg_send "✅ vpnpool: test message" 2>/dev/null)
+		if [ "$code" = "200" ]; then
+			echo '{"ok":true}'
+		else
+			echo "{\"ok\":false,\"http\":\"${code:-000}\"}"
+		fi
 		;;
 	add_node)
 		l=$(echo "$input" | jq -r '.link // ""')
