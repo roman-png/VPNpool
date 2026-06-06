@@ -1,0 +1,15 @@
+{
+	"luci-app-vpnpool": {
+		"description": "Grant access to vpnpool dashboard",
+		"read": {
+			"ubus": {
+				"vpnpool": [ "status", "diag" ]
+			}
+		},
+		"write": {
+			"ubus": {
+				"vpnpool": [ "set_enabled", "select", "refresh", "ping", "set_url", "del_subscription", "add_source", "del_source", "add_node", "del_node", "set_domains", "set_communities", "set_option" ]
+			}
+		}
+	}
+}

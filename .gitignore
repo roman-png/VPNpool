@@ -1,0 +1,12 @@
+# OS junk
+.DS_Store
+Thumbs.db
+*.swp
+
+# build artifacts
+*.ipk
+/build/
+/bin/
+
+# local notes
+*.local
