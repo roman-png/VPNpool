@@ -10,6 +10,7 @@ var callStatus       = rpc.declare({ object: 'vpnpool', method: 'status' });
 var callSetOpt       = rpc.declare({ object: 'vpnpool', method: 'set_option',     params: [ 'name', 'value' ] });
 var callSetDomains   = rpc.declare({ object: 'vpnpool', method: 'set_domains',    params: [ 'domains' ] });
 var callSetCommunities = rpc.declare({ object: 'vpnpool', method: 'set_communities', params: [ 'communities' ] });
+var callSetClients = rpc.declare({ object: 'vpnpool', method: 'set_clients', params: [ 'mode', 'clients' ] });
 
 // itdoginfo/allow-domains community lists (SRS release assets)
 var COMMUNITIES = [
@@ -40,6 +41,10 @@ return view.extend({
 		var list = (box.value || '').split(/\r?\n/).map(function(s) { return s.trim(); }).filter(function(s) { return s.length; });
 		return callSetDomains(list).then(L.bind(function() { this.notify(_('Domains saved and applied.')); }, this));
 	},
+	handleSaveClients: function(sel, box) {
+		var list = (box.value || '').split(/\r?\n/).map(function(s) { return s.trim(); }).filter(function(s) { return s.length; });
+		return callSetClients(sel.value, list).then(L.bind(function() { this.notify(_('Per-client routing saved and applied.')); }, this));
+	},
 
 	load: function() { return callStatus(); },
 	render: function(st) {
@@ -61,6 +66,14 @@ return view.extend({
 		});
 
 		var domBox = E('textarea', { 'class': 'cbi-input-textarea', 'style': 'width:100%;height:140px' }, (st.domains || []).join('\n'));
+
+		var clMode = (st.settings && st.settings.client_mode) || 'all';
+		var clSel = E('select', { 'class': 'cbi-input-select' }, [
+			E('option', { 'value': 'all',     'selected': clMode === 'all'     ? 'selected' : null }, _('All LAN clients')),
+			E('option', { 'value': 'exclude', 'selected': clMode === 'exclude' ? 'selected' : null }, _('All except the listed clients (listed bypass VPN)')),
+			E('option', { 'value': 'include', 'selected': clMode === 'include' ? 'selected' : null }, _('Only the listed clients use the VPN'))
+		]);
+		var clBox = E('textarea', { 'class': 'cbi-input-textarea', 'style': 'width:100%;height:90px', 'placeholder': '192.168.1.50' }, (st.clients || []).join('\n'));
 
 		return E('div', { 'class': 'cbi-map' }, [
 			i18n.header(_('VPN Pool — Routing')),
@@ -84,6 +97,15 @@ return view.extend({
 				domBox,
 				E('div', { 'style': 'margin-top:6px' }, E('button', { 'class': 'btn cbi-button cbi-button-save',
 					'click': ui.createHandlerFn(this, 'handleSaveDomains', domBox) }, _('Save domains')))
+			]),
+
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('Per-client routing')),
+				clSel,
+				E('p', { 'style': 'color:#888;margin:6px 0' }, _('Client IPv4 addresses, one per line:')),
+				clBox,
+				E('div', { 'style': 'margin-top:6px' }, E('button', { 'class': 'btn cbi-button cbi-button-save',
+					'click': ui.createHandlerFn(this, 'handleSaveClients', clSel, clBox) }, _('Save per-client')))
 			])
 		]);
 	},

@@ -56,6 +56,9 @@ ASW=$(uci -q get vpnpool.main.auto_switch); [ -n "$ASW" ] || ASW=1
 TGE=$(uci -q get vpnpool.main.telegram_enabled); [ -n "$TGE" ] || TGE=0
 TGT=$(uci -q get vpnpool.main.telegram_token)
 TGC=$(uci -q get vpnpool.main.telegram_chat)
+CLM=$(uci -q get vpnpool.main.client_mode); [ -n "$CLM" ] || CLM=all
+CLIENTS=$(uci -q get vpnpool.main.client | tr ' ' '\n' | jq -R . | jq -s 'map(select(length>0))' 2>/dev/null)
+[ -n "$CLIENTS" ] || CLIENTS='[]'
 
 jq -n \
 	--argjson enabled "${ENABLED:-0}" \
@@ -79,6 +82,8 @@ jq -n \
 	--arg tgt "$TGT" \
 	--arg tgc "$TGC" \
 	--arg ipv6 "$IPV6" \
+	--arg clm "$CLM" \
+	--argjson clients "$CLIENTS" \
 	--argjson tup "${TUP:-0}" \
 	--argjson tdown "${TDOWN:-0}" \
 	--argjson tconn "${TCONN:-0}" \
@@ -104,6 +109,8 @@ jq -n \
 			ipv6: $ipv6,
 			telegram_enabled: ($tge==1),
 			telegram_token: $tgt,
-			telegram_chat: $tgc
-		}
+			telegram_chat: $tgc,
+			client_mode: $clm
+		},
+		clients: $clients
 	}'

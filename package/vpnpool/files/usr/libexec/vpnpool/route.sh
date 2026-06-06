@@ -26,6 +26,27 @@ up)
 		done
 	fi
 
+	# Per-client policy: build a client set + a rule that bypasses (exclude) or
+	# restricts to (include) the listed client IPs.
+	CL=$(uci -q get vpnpool.main.client 2>/dev/null | tr ' ' ',')
+	CLIENT_SET=""
+	CLIENT_RULE=""
+	if [ -n "$CL" ]; then
+		CLIENT_SET="	set clients {
+		type ipv4_addr
+		flags interval
+		auto-merge
+		elements = { $CL }
+	}
+"
+		case "$CLIENT_MODE" in
+			exclude) CLIENT_RULE="		ip saddr @clients return
+" ;;
+			include) CLIENT_RULE="		ip saddr != @clients return
+" ;;
+		esac
+	fi
+
 	ip route replace local 0.0.0.0/0 dev lo table "$RT_TABLE"
 	ip rule add fwmark "${FWMARK}/${FWMARK}" lookup "$RT_TABLE" priority "$RT_PRIO" 2>/dev/null
 	nft -f - <<NFT
@@ -36,9 +57,10 @@ table inet vpnpool {
 		auto-merge
 		elements = { 0.0.0.0/8, 10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3 }
 	}
-	chain prerouting {
+${CLIENT_SET}	chain prerouting {
 		type filter hook prerouting priority -90; policy accept;
 ${YIELD}		ip daddr @localv4 return
+${CLIENT_RULE}
 		iifname "$LAN_IF" meta l4proto tcp th dport { 80, 443 } meta mark set $FWMARK
 		iifname "$LAN_IF" meta l4proto udp th dport 443 meta mark set $FWMARK
 		meta mark & $FWMARK == $FWMARK meta l4proto tcp tproxy ip to 127.0.0.1:$TPROXY_PORT

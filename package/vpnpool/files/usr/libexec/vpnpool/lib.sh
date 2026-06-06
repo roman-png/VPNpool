@@ -37,6 +37,9 @@ COEXIST=$(uci -q get vpnpool.main.coexist); [ -n "$COEXIST" ] || COEXIST=auto
 # IPv6 policy: block (fail-closed: drop LAN v6 to internet so it can't bypass the
 # v4 VPN), off (don't touch v6), proxy (reserved for future v6 tproxy).
 IPV6=$(uci -q get vpnpool.main.ipv6); [ -n "$IPV6" ] || IPV6=block
+# Per-client routing: all (every LAN client) | exclude (listed bypass VPN) |
+# include (only listed go through VPN). Clients are IPv4 addresses (uci list 'client').
+CLIENT_MODE=$(uci -q get vpnpool.main.client_mode); [ -n "$CLIENT_MODE" ] || CLIENT_MODE=all
 
 # LAN interface: auto-detect (portable) unless pinned via uci. Falls back across
 # ubus l3_device -> network.lan.device -> br-lan.

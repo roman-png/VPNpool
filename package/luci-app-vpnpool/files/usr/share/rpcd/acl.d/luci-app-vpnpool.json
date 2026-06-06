@@ -8,7 +8,7 @@
 		},
 		"write": {
 			"ubus": {
-				"vpnpool": [ "set_enabled", "select", "refresh", "ping", "set_url", "del_subscription", "add_source", "del_source", "add_node", "del_node", "set_domains", "set_communities", "set_option", "tg_test" ]
+				"vpnpool": [ "set_enabled", "select", "refresh", "ping", "set_url", "del_subscription", "add_source", "del_source", "add_node", "del_node", "set_domains", "set_communities", "set_option", "set_clients", "tg_test" ]
 			}
 		}
 	}

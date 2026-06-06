@@ -17,7 +17,7 @@ signal_refetch() {
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "tg_test": {} }
+{ "status": {}, "diag": {}, "conntest": {}, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "tg_test": {} }
 L
 	;;
 call)
@@ -104,6 +104,17 @@ call)
 		uci -q delete vpnpool.routing.community
 		echo "$input" | jq -r '.communities[]? // empty' | while read -r c; do
 			[ -n "$c" ] && uci add_list vpnpool.routing.community="$c"
+		done
+		uci commit vpnpool
+		signal_reload
+		echo '{"ok":true}'
+		;;
+	set_clients)
+		m=$(echo "$input" | jq -r '.mode // "all"')
+		uci set vpnpool.main.client_mode="$m"
+		uci -q delete vpnpool.main.client
+		echo "$input" | jq -r '.clients[]? // empty' | while read -r c; do
+			[ -n "$c" ] && uci add_list vpnpool.main.client="$c"
 		done
 		uci commit vpnpool
 		signal_reload

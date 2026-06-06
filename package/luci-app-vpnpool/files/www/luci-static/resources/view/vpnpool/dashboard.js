@@ -121,7 +121,11 @@ return view.extend({
 
 	renderNodes: function(st) {
 		if (!st.running) return E('em', {}, _('Service is stopped — start it to see live node pings.'));
-		var nodes = st.nodes || [];
+		var nodes = (st.nodes || []).slice().sort(function(a, b) {
+			var da = (a.delay == null || a.delay <= 0) ? 1e9 : a.delay;
+			var db = (b.delay == null || b.delay <= 0) ? 1e9 : b.delay;
+			return da - db;
+		});
 		if (!nodes.length) return E('em', {}, _('No nodes yet (waiting for subscription / pings)…'));
 		var activeTag = (st.active === 'auto' || !st.active) ? st.auto_now : st.active;
 
