@@ -144,9 +144,11 @@ opkg update
 opkg install luci-app-vpnpool
 ```
 
-> The feed is unsigned. If opkg complains about a missing signature, either append
-> `option check_signature 0` near the top of `/etc/opkg.conf`, or add `--no-check`
-> to the `opkg` commands. Use Option A/B if you'd rather not touch opkg config.
+> The feed is unsigned, so opkg's signature check (enabled by default) rejects it
+> and drops the package list. Disable the check by **commenting out** (or deleting)
+> the `option check_signature` line in `/etc/opkg.conf` — note that setting it to
+> `0` is **not** enough, the line must be removed/commented — then run `opkg update`
+> again. Prefer Option A or B if you'd rather not change opkg's signature policy.
 
 ### Option D — build from source (OpenWrt SDK)
 
