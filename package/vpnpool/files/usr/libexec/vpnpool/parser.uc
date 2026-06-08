@@ -62,12 +62,25 @@ function parse_vless(line) {
 		server_port: int(m[3]),
 		uuid: m[1]
 	};
-	if (length(p.flow)) ob.flow = p.flow;
+	// sing-box only accepts an empty flow or exactly 'xtls-rprx-vision'. Public
+	// subscription lists often carry variants like 'xtls-rprx-vision-udp443' that
+	// sing-box rejects — and ONE such node makes `sing-box check` reject the WHOLE
+	// config. Normalise any vision variant to 'xtls-rprx-vision'; drop nodes whose
+	// flow we don't understand rather than poisoning the entire config.
+	if (length(p.flow)) {
+		if (substr(p.flow, 0, 16) == 'xtls-rprx-vision')
+			ob.flow = 'xtls-rprx-vision';
+		else
+			return null;
+	}
 
 	if (p.security == 'reality' || p.security == 'tls') {
 		let tls = { enabled: true };
 		if (length(p.sni)) tls.server_name = p.sni;
-		if (length(p.fp)) tls.utls = { enabled: true, fingerprint: p.fp };
+		if (length(p.fp))
+			tls.utls = { enabled: true, fingerprint: p.fp };
+		else if (p.security == 'reality')
+			tls.utls = { enabled: true, fingerprint: 'chrome' };   // reality REQUIRES uTLS in sing-box
 		if (p.security == 'reality') {
 			tls.reality = { enabled: true };
 			if (length(p.pbk)) tls.reality.public_key = p.pbk;
