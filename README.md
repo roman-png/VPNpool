@@ -210,6 +210,10 @@ RAM right away. Then set your subscription in **LuCI → Services → VPN Pool**
 and starts vpnpool automatically. If your WAN isn't named `wan`, edit `INTERFACE`
 in `/etc/hotplug.d/iface/99-vpnpool-singbox-ram`.
 
+> **Updating on small flash:** re‑run the same one‑liner. Do **not** use `opkg upgrade`
+> here — it resolves the `sing-box` dependency against flash and would try to pull the
+> ~38 MB binary into ROM (the install deliberately uses `--nodeps` to avoid that).
+
 <details>
 <summary>Manual steps (what the one‑liner does under the hood)</summary>
 
