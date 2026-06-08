@@ -189,6 +189,30 @@ into RAM (`/tmp`) on every boot**, triggered when the WAN interface comes up.
 OpenWrt already defines a RAM install destination in `/etc/opkg.conf`
 (`dest ram /tmp`), so `opkg install -d ram …` lands the binary under `/tmp`.
 
+### One‑liner (16 MB flash)
+
+Same installer as above, with `VPNPOOL_RAM_SINGBOX=1`:
+
+```sh
+VPNPOOL_RAM_SINGBOX=1 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
+```
+
+…or, if your `wget` lacks process substitution:
+
+```sh
+wget -O /tmp/vpnpool-install.sh https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh && VPNPOOL_RAM_SINGBOX=1 sh /tmp/vpnpool-install.sh
+```
+
+It installs zram‑swap, the lightweight deps and our packages into flash
+(`--nodeps`, no sing‑box), writes the WAN‑up boot hook, and installs sing‑box into
+RAM right away. Then set your subscription in **LuCI → Services → VPN Pool** and run
+`/etc/init.d/vpnpool start`. On every reboot the hook reinstalls sing‑box into RAM
+and starts vpnpool automatically. If your WAN isn't named `wan`, edit `INTERFACE`
+in `/etc/hotplug.d/iface/99-vpnpool-singbox-ram`.
+
+<details>
+<summary>Manual steps (what the one‑liner does under the hood)</summary>
+
 **1. Install zram‑swap** (gives the small router more usable memory for `opkg`):
 
 ```sh
@@ -239,6 +263,8 @@ chmod +x /etc/hotplug.d/iface/99-vpnpool-singbox-ram
 logread -e vpnpool        # should show "sing-box installed in RAM, vpnpool started"
 sing-box version          # confirms the RAM symlink resolves
 ```
+
+</details>
 
 > **Trade‑offs:** sing‑box (~14 MB ipk) is re‑downloaded into RAM on every boot, so
 > the router needs working internet at startup and enough free RAM (~128 MB+). If

@@ -16,14 +16,26 @@
 # Your settings in /etc/config/vpnpool (subscription, Telegram, routing) are a
 # conffile and are preserved across upgrades.
 #
+# Small-flash routers (16 MB): set VPNPOOL_RAM_SINGBOX=1 to install sing-box into
+# RAM instead of flash. vpnpool stays in flash (~128 KB); sing-box is (re)installed
+# into /tmp on every boot via a WAN-up hotplug hook. One-liner:
+#   VPNPOOL_RAM_SINGBOX=1 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
+#
 # Env overrides:
 #   VPNPOOL_VERSION=v1.0.0   install a specific release tag instead of latest
+#   VPNPOOL_RAM_SINGBOX=1    16 MB flash mode: sing-box lives in RAM (see above)
 set -eu
 
 REPO="roman-png/VPNpool"
 TAG="${VPNPOOL_VERSION:-latest}"
+RAM_SINGBOX="${VPNPOOL_RAM_SINGBOX:-0}"
 TMP="/tmp/vpnpool-install"
 PKGS="vpnpool luci-app-vpnpool"
+
+# lightweight deps of vpnpool (everything it needs EXCEPT sing-box) — used by the
+# small-flash flow, which installs sing-box into RAM separately.
+LIGHT_DEPS="jq curl ucode ucode-mod-fs ucode-mod-uci kmod-nft-tproxy ip-full luci-base ca-bundle"
+HOOK="/etc/hotplug.d/iface/99-vpnpool-singbox-ram"
 
 say()  { echo "[vpnpool] $*"; }
 die()  { echo "[vpnpool] ERROR: $*" >&2; exit 1; }
@@ -110,14 +122,76 @@ IPK_BASE="$(ls "$TMP"/vpnpool_*.ipk 2>/dev/null | head -n1)"
 IPK_LUCI="$(ls "$TMP"/luci-app-vpnpool_*.ipk 2>/dev/null | head -n1)"
 [ -n "$IPK_BASE" ] || die "vpnpool .ipk not downloaded"
 
-say "installing packages (dependencies come from the standard feeds)..."
-opkg install --force-reinstall "$IPK_BASE" || die "failed to install vpnpool (dependencies missing? run 'opkg update')"
-[ -n "$IPK_LUCI" ] && { opkg install --force-reinstall "$IPK_LUCI" || say "warning: luci-app-vpnpool install failed (CLI still works)"; }
+write_ram_hook() {
+	# Boot hook: (re)install sing-box into RAM and start vpnpool when WAN comes up.
+	# Runs on every reboot, so the router needs working internet at startup.
+	mkdir -p /etc/hotplug.d/iface
+	cat > "$HOOK" <<'EOF'
+#!/bin/sh
+[ "$ACTION" = "ifup" -a "$INTERFACE" = "wan" ] && {
+    logger -t vpnpool "WAN up: installing sing-box into RAM"
+    opkg update
+    opkg install -d ram --force-reinstall --force-overwrite sing-box
+    ln -sf /tmp/usr/bin/sing-box /usr/bin/sing-box
+    /etc/init.d/vpnpool start
+    logger -t vpnpool "sing-box installed in RAM, vpnpool started"
+}
+EOF
+	chmod +x "$HOOK"
+}
+
+if [ "$RAM_SINGBOX" = 1 ]; then
+	# === 16 MB flash flow: sing-box lives in RAM, vpnpool stays in flash ========
+	say "small-flash mode: sing-box will live in RAM (/tmp), reinstalled on every boot"
+
+	say "installing zram-swap (more usable memory for opkg)..."
+	if opkg install zram-swap >/dev/null 2>&1; then
+		/etc/init.d/zram enable >/dev/null 2>&1 || true
+		/etc/init.d/zram start  >/dev/null 2>&1 || true
+	else
+		say "warning: zram-swap not installed (continuing)"
+	fi
+
+	say "installing lightweight dependencies (no sing-box)..."
+	# shellcheck disable=SC2086
+	opkg install $LIGHT_DEPS >/dev/null 2>&1 || say "warning: some dependencies failed (continuing)"
+
+	# --nodeps so opkg won't try to drag sing-box (~38 MB) into flash
+	say "installing vpnpool packages (--nodeps, flash-only)..."
+	opkg install --nodeps --force-reinstall "$IPK_BASE" || die "failed to install vpnpool"
+	[ -n "$IPK_LUCI" ] && { opkg install --nodeps --force-reinstall "$IPK_LUCI" || say "warning: luci-app-vpnpool install failed (CLI still works)"; }
+
+	# Don't autostart at boot — sing-box isn't present until the WAN-up hook runs.
+	/etc/init.d/vpnpool disable >/dev/null 2>&1 || true
+
+	say "installing boot hook ($HOOK)..."
+	write_ram_hook
+
+	say "installing sing-box into RAM now (so it works without a reboot)..."
+	if opkg install -d ram --force-reinstall --force-overwrite sing-box; then
+		ln -sf /tmp/usr/bin/sing-box /usr/bin/sing-box
+		say "sing-box installed in RAM."
+	else
+		say "warning: could not install sing-box into RAM now; it will be installed on the next WAN-up / reboot"
+	fi
+else
+	# === normal flow: sing-box installed into flash from the standard feeds =====
+	say "installing packages (dependencies come from the standard feeds)..."
+	opkg install --force-reinstall "$IPK_BASE" || die "failed to install vpnpool (dependencies missing? run 'opkg update')"
+	[ -n "$IPK_LUCI" ] && { opkg install --force-reinstall "$IPK_LUCI" || say "warning: luci-app-vpnpool install failed (CLI still works)"; }
+fi
 
 # refresh LuCI caches so the menu appears immediately
 rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null || true
 /etc/init.d/rpcd reload >/dev/null 2>&1 || true
 
 rm -rf "$TMP"
-say "done. Open LuCI -> Services -> VPN Pool, set your subscription URL and turn it ON."
-say "(CLI: edit /etc/config/vpnpool, then /etc/init.d/vpnpool enable && /etc/init.d/vpnpool start)"
+if [ "$RAM_SINGBOX" = 1 ]; then
+	say "done (small-flash mode). Open LuCI -> Services -> VPN Pool, set your subscription URL."
+	say "sing-box is in RAM now; after setting the subscription, start it: /etc/init.d/vpnpool start"
+	say "On every reboot the WAN-up hook reinstalls sing-box into RAM and starts vpnpool automatically."
+	say "If your WAN interface is not named 'wan' (e.g. wan6/wwan), edit INTERFACE in $HOOK."
+else
+	say "done. Open LuCI -> Services -> VPN Pool, set your subscription URL and turn it ON."
+	say "(CLI: edit /etc/config/vpnpool, then /etc/init.d/vpnpool enable && /etc/init.d/vpnpool start)"
+fi
