@@ -22,7 +22,7 @@
 #   VPNPOOL_RAM_SINGBOX=1 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
 #
 # Env overrides:
-#   VPNPOOL_VERSION=v1.0.0   install a specific release tag instead of latest
+#   VPNPOOL_VERSION=v1.0.2   install a specific release tag instead of latest
 #   VPNPOOL_RAM_SINGBOX=1    16 MB flash mode: sing-box lives in RAM (see above)
 set -eu
 
