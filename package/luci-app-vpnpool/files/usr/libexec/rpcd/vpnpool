@@ -17,7 +17,7 @@ signal_refetch() {
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "probe_source": { "url": "x" }, "import_select": { "url": "x", "scope": [], "select": [] }, "tg_test": {} }
+{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "probe_source": { "url": "x" }, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
 L
 	;;
 call)
@@ -117,18 +117,25 @@ call)
 		/usr/libexec/vpnpool/probe.sh "$u"
 		;;
 	import_select)
-		# imported_node := (current - scope) + select. scope = ALL links the dialog
-		# showed for this source, select = the checked ones — so re-probing ("Refresh")
-		# and re-selecting cleanly replaces this source's contribution. The source URL
-		# is remembered in `source` so it can be refreshed later.
+		# The UI sends only { url, idx:[picked indices] }. We resolve those indices to
+		# links from the server-side probe cache (probe.sh wrote it), so the browser
+		# never uploads hundreds of links (that large request never reached rpcd).
+		# imported_node := (current - scopeOfThisSource) + picked, so re-probing
+		# ("Update") and re-selecting cleanly replaces just this source's contribution.
 		. /lib/functions.sh 2>/dev/null
+		u=$(echo "$input" | jq -r '.url // ""')
+		CACHE=/tmp/vpnpool/.probe-cache.json
+		SCOPE='[]'; SEL='[]'
+		if [ -f "$CACHE" ] && [ "$(jq -r '.url // ""' "$CACHE" 2>/dev/null)" = "$u" ]; then
+			SCOPE=$(jq -c '[.nodes[].link] | map(select(. != null and . != ""))' "$CACHE")
+			SEL=$(jq -c --argjson ix "$(echo "$input" | jq -c '.idx // []')" \
+				'[ .nodes[] | select(.i as $i | $ix | index($i)) | .link ] | map(select(. != null and . != ""))' "$CACHE")
+		fi
 		curf="/tmp/vpnpool/.imp.cur.$$"; mkdir -p /tmp/vpnpool; : > "$curf"
 		__io="$curf"; __ia() { printf '%s\n' "$1" >> "$__io"; }
 		config_load vpnpool 2>/dev/null
 		config_list_foreach main imported_node __ia 2>/dev/null
-		NEW=$(jq -n --rawfile cur "$curf" \
-			--argjson scope "$(echo "$input" | jq -c '.scope // []')" \
-			--argjson select "$(echo "$input" | jq -c '.select // []')" \
+		NEW=$(jq -n --rawfile cur "$curf" --argjson scope "$SCOPE" --argjson select "$SEL" \
 			'(($cur | split("\n") | map(select(length>0))) - $scope) + $select
 			 | reduce .[] as $x ([]; if (index($x)) then . else . + [$x] end)')
 		rm -f "$curf"
@@ -136,7 +143,6 @@ call)
 		echo "$NEW" | jq -r '.[]?' | while IFS= read -r l; do
 			[ -n "$l" ] && uci add_list vpnpool.main.imported_node="$l"
 		done
-		u=$(echo "$input" | jq -r '.url // ""')
 		if [ -n "$u" ] && ! uci -q get vpnpool.main.source | tr ' ' '\n' | grep -Fxq "$u"; then
 			uci add_list vpnpool.main.source="$u"
 		fi

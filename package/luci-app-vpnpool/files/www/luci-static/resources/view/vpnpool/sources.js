@@ -13,7 +13,7 @@ var callSetUrl   = rpc.declare({ object: 'vpnpool', method: 'set_url',          
 var callDelSub   = rpc.declare({ object: 'vpnpool', method: 'del_subscription' });
 var callDelSrc   = rpc.declare({ object: 'vpnpool', method: 'del_source',       params: [ 'url' ] });
 var callProbe    = rpc.declare({ object: 'vpnpool', method: 'probe_source',     params: [ 'url' ] });
-var callImport   = rpc.declare({ object: 'vpnpool', method: 'import_select',    params: [ 'url', 'scope', 'select' ] });
+var callImport   = rpc.declare({ object: 'vpnpool', method: 'import_select',    params: [ 'url', 'idx' ] });
 var callAddNode  = rpc.declare({ object: 'vpnpool', method: 'add_node',         params: [ 'link' ] });
 var callDelNode  = rpc.declare({ object: 'vpnpool', method: 'del_node',         params: [ 'link' ] });
 var callSetOpt   = rpc.declare({ object: 'vpnpool', method: 'set_option',       params: [ 'name', 'value' ] });
@@ -89,14 +89,13 @@ return view.extend({
 		var nodes = (res.nodes || []).slice().sort(function(a, b) {
 			var da = (a.delay == null) ? 1e9 : a.delay, db = (b.delay == null) ? 1e9 : b.delay; return da - db;
 		});
-		var rowNodes = nodes.filter(function(n) { return n.link && n.link.length; });
+		var rowNodes = nodes;                                       // all probed nodes (sorted)
 		this._impUrl = url;
-		this._impRows = rowNodes;                                   // checkbox i  <->  rowNodes[i]
-		this._impScope = rowNodes.map(function(n) { return n.link; });
+		this._impRows = rowNodes;                                   // checkbox i  <->  rowNodes[i].i
 
 		var rows = rowNodes.map(function(n) {
 			return E('label', { 'class': 'vp-imp-row', 'style': 'display:flex;align-items:center;gap:8px;margin:3px 0;cursor:pointer' }, [
-				E('input', { 'type': 'checkbox', 'data-link': n.link, 'checked': n.in_pool ? 'checked' : null }),
+				E('input', { 'type': 'checkbox', 'checked': n.in_pool ? 'checked' : null }),
 				E('span', { 'style': 'min-width:64px;text-align:right;font-weight:bold;color:' + pingColor(n.delay) }, pingText(n.delay)),
 				E('span', { 'style': 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, n.tag),
 				E('span', { 'style': 'color:#888;font-family:monospace;font-size:11px' }, (n.server || '') + ':' + (n.port || ''))
@@ -136,13 +135,13 @@ return view.extend({
 	saveImport: function() {
 		var boxes = document.querySelectorAll('#vp-imp-list input[type=checkbox]');
 		var rows = this._impRows || [];
-		var select = [];
+		var idx = [];
 		for (var i = 0; i < boxes.length; i++)
-			if (boxes[i].checked && rows[i] && rows[i].link) select.push(rows[i].link);
-		var url = this._impUrl, scope = this._impScope || [];
+			if (boxes[i].checked && rows[i] && typeof rows[i].i === 'number') idx.push(rows[i].i);
+		var url = this._impUrl;
 		ui.hideModal();
-		this.notify(_('Importing %d nodes…').replace('%d', select.length));
-		return callImport(url, scope, select).then(L.bind(function(r) {
+		this.notify(_('Importing %d nodes…').replace('%d', idx.length));
+		return callImport(url, idx).then(L.bind(function(r) {
 			this.notify(_('Imported %d nodes from this source.').replace('%d', (r && r.count != null) ? r.count : select.length));
 			this.reload();
 		}, this));
