@@ -18,11 +18,53 @@ cap_log() {
 	return 0
 }
 
-start_singbox() {
+# Stop our sing-box and WAIT until it's really gone before returning. The old code
+# did `kill; sleep 1; start` — if the old process hadn't released tproxy :1603 and the
+# cache.db lock within 1s, the NEW instance died with "address already in use" /
+# "initialize cache-file: timeout", the supervisor restarted it, and it crash-looped.
+# Match OUR sing-box only (by pidfile and by our own -c config path) so we never touch
+# podkop's sing-box.
+kill_singbox() {
+	# NOTE: busybox `pkill -f` did NOT reliably match the full cmdline here (it left
+	# instances alive -> orphans piled up, held :1603, and the crash loop / "imports
+	# don't activate" followed). Iterate the PIDs `pgrep -f` reports and kill each
+	# explicitly — that works.
+	local p i pids
+	i=0
+	while :; do
+		pids=$(pgrep -f "sing-box run -c $SB_CONF" 2>/dev/null)
+		[ -z "$pids" ] && break
+		i=$((i + 1))
+		for p in $pids; do
+			if [ "$i" -ge 5 ]; then kill -9 "$p" 2>/dev/null; else kill "$p" 2>/dev/null; fi
+		done
+		[ "$i" -ge 12 ] && break
+		sleep 1
+	done
+	rm -f "$SB_PIDFILE"
+	sleep 1   # let the kernel release the listening sockets before a re-bind
+}
+
+_do_start_singbox() {
+	kill_singbox   # ensure no previous/orphaned instance holds :1603 or the cache lock
 	cap_log
-	sing-box run -c "$SB_CONF" -D "$SB_DATA" >> "$SB_LOG" 2>&1 &
+	# 9>&- : close the flock fd in the child, otherwise the backgrounded sing-box
+	# INHERITS the lock fd and holds it for its whole lifetime — the next
+	# start_singbox would then block forever on flock and never reload the config.
+	sing-box run -c "$SB_CONF" -D "$SB_DATA" >> "$SB_LOG" 2>&1 9>&- &
 	echo $! > "$SB_PIDFILE"
-	log "sing-box started pid=$(cat "$SB_PIDFILE")"
+}
+
+# Serialise restarts with a lock: the USR1/USR2 signal handlers and the main
+# supervise loop can both call start_singbox; without a lock two of them raced and
+# spawned overlapping sing-box instances that fought over :1603 -> crash loop.
+start_singbox() {
+	if command -v flock >/dev/null 2>&1; then
+		( flock 9; _do_start_singbox; ) 9>/var/run/vpnpool-sb.lock
+	else
+		_do_start_singbox
+	fi
+	log "sing-box started pid=$(cat "$SB_PIDFILE" 2>/dev/null)"
 }
 
 singbox_alive() {
@@ -47,8 +89,7 @@ cleanup() {
 	log "stopping: removing routing and sing-box"
 	tg_notify "🔴 vpnpool: stopped"
 	"$LIBEXEC/route.sh" down
-	[ -f "$SB_PIDFILE" ] && kill "$(cat "$SB_PIDFILE")" 2>/dev/null
-	rm -f "$SB_PIDFILE"
+	kill_singbox
 	log "stopped cleanly"
 	exit 0
 }
@@ -58,9 +99,7 @@ cleanup() {
 reload_config() {
 	log "reload (USR1): rebuilding config + routing"
 	if "$LIBEXEC/build.sh"; then
-		[ -f "$SB_PIDFILE" ] && kill "$(cat "$SB_PIDFILE")" 2>/dev/null
-		sleep 1
-		start_singbox
+		start_singbox   # stops the old instance and waits for the port/lock to free
 		# re-apply routing so per-client / ipv6 / coexist / domain edits take effect
 		"$LIBEXEC/route.sh" down
 		"$LIBEXEC/route.sh" up
@@ -83,6 +122,7 @@ trap refetch_config USR2
 
 mkdir -p "$SB_DATA"
 log "vpnpoold starting (whole-LAN selective, coexist with podkop)"
+kill_singbox   # clear any orphaned sing-box left by a previously crashed daemon
 
 # initial subscription + config, with soft retry (e.g. WAN not ready at boot) —
 # never give up, so the service self-heals once connectivity appears.
@@ -129,9 +169,7 @@ while : ; do
 		LAST=$NOW
 		log "periodic subscription refresh"
 		if "$LIBEXEC/fetch.sh" && "$LIBEXEC/build.sh"; then
-			[ -f "$SB_PIDFILE" ] && kill "$(cat "$SB_PIDFILE")" 2>/dev/null
-			sleep 1
-			start_singbox
+			start_singbox   # stops the old instance and waits for the port/lock to free
 			log "subscription refreshed, sing-box reloaded"
 		else
 			log "refresh failed, keeping current config"
