@@ -135,20 +135,37 @@ dependencies. Then open **LuCI → Services → VPN Pool**.
 
 ### Option C — opkg feed (update with `opkg update`)
 
-Add our [GitHub Pages opkg feed](https://roman-png.github.io/VPNpool) once, then
-install/upgrade like any package:
+The [GitHub Pages opkg feed](https://roman-png.github.io/VPNpool) is **signed**
+with our usign key (fingerprint `807479500e0ce219`). Install the public key once
+so opkg can verify the feed, then add it and install/upgrade like any package —
+**signature checking stays on**:
 
 ```sh
+# 1. install our public key (keeps opkg signature verification enabled)
+wget -O /etc/opkg/keys/807479500e0ce219 https://roman-png.github.io/VPNpool/vpnpool-feed.pub
+# 2. add the feed and install
 echo "src/gz vpnpool https://roman-png.github.io/VPNpool" >> /etc/opkg/customfeeds.conf
 opkg update
 opkg install luci-app-vpnpool
 ```
 
-> The feed is unsigned, so opkg's signature check (enabled by default) rejects it
-> and drops the package list. Disable the check by **commenting out** (or deleting)
-> the `option check_signature` line in `/etc/opkg.conf` — note that setting it to
-> `0` is **not** enough, the line must be removed/commented — then run `opkg update`
-> again. Prefer Option A or B if you'd rather not change opkg's signature policy.
+<details>
+<summary>Fallback: install without the key (disables signature checking globally)</summary>
+
+If you don't install the key, opkg rejects the unsigned-to-it feed and drops the
+package list. You can instead disable opkg's signature check — but note this turns
+verification **off for every feed, including the official OpenWrt ones**, so the
+key method above is preferred.
+
+```sh
+# comment out the check_signature line (NOTE: setting it to 0 is NOT enough)
+sed -i '/^[[:space:]]*option[[:space:]]\+check_signature/s/^/# /' /etc/opkg.conf
+opkg update
+# ...later, to re-enable verification:
+sed -i 's/^#[[:space:]]*\(option[[:space:]]\+check_signature\)/\1/' /etc/opkg.conf
+```
+
+</details>
 
 ### Option D — build from source (OpenWrt SDK)
 

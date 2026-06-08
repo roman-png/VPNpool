@@ -45,25 +45,34 @@ jobs:
           FEEDNAME: vpnpool
           PACKAGES: vpnpool luci-app-vpnpool
           INDEX: 1
+          # usign secret key (key-build) -> opkg feed gets a signed Packages.sig,
+          # so users keep opkg signature verification ON. Public key is in
+          # keys/vpnpool-feed.pub (fingerprint 807479500e0ce219) and published
+          # below for users to install into /etc/opkg/keys/.
+          KEY_BUILD: ${{ secrets.USIGN_KEY_BUILD }}
 
       - name: Assemble feed
         run: |
           mkdir -p public
           # our packages
           find bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' \) -exec cp {} public/ \;
-          # opkg index produced by the SDK for our feed
+          # opkg index produced by the SDK for our feed (signed: Packages.sig)
           find bin -path '*vpnpool*' \( -name 'Packages' -o -name 'Packages.gz' -o -name 'Packages.sig' \) -exec cp {} public/ \; || true
+          # publish the usign public key so users can verify the feed signature
+          cp keys/vpnpool-feed.pub public/vpnpool-feed.pub
           # landing page
           cat > public/index.html <<'HTML'
           <!doctype html><meta charset=utf-8><title>vpnpool opkg feed</title>
           <h1>vpnpool — OpenWrt opkg feed</h1>
-          <p>Add this feed on your router:</p>
-          <pre>echo "src/gz vpnpool https://roman-png.github.io/VPNpool" &gt;&gt; /etc/opkg/customfeeds.conf
+          <p>The feed is <b>signed</b> (usign, fingerprint 807479500e0ce219). Install the public key once, then add the feed:</p>
+          <pre>wget -O /etc/opkg/keys/807479500e0ce219 https://roman-png.github.io/VPNpool/vpnpool-feed.pub
+          echo "src/gz vpnpool https://roman-png.github.io/VPNpool" &gt;&gt; /etc/opkg/customfeeds.conf
           opkg update
           opkg install luci-app-vpnpool</pre>
           <p><a href="https://github.com/roman-png/VPNpool">Project on GitHub</a></p>
           HTML
           echo "=== feed contents ==="; ls -l public
+          if [ ! -f public/Packages.sig ]; then echo "WARNING: Packages.sig missing — feed is NOT signed"; fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
