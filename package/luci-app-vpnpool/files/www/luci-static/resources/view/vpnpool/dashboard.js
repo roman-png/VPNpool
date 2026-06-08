@@ -197,7 +197,7 @@ return view.extend({
 					'click': ui.createHandlerFn(this, 'handleConfigAuto', st) }, '⚙ ' + _('Configure'))
 			])
 		]);
-		var rows = nodes.map(L.bind(function(n) {
+		var makeRow = L.bind(function(n) {
 			var act = (n.tag === activeTag);
 			var pooled = inPool(n.tag);
 			return E('tr', { 'class': 'tr', 'style': act ? 'background:rgba(46,125,50,.12)' : (pooled ? '' : 'opacity:.55') }, [
@@ -212,11 +212,27 @@ return view.extend({
 				E('td', { 'class': 'td' }, E('button', { 'class': 'btn cbi-button cbi-button-action',
 					'click': ui.createHandlerFn(this, 'handleSelect', n.tag) }, _('Use')))
 			]);
-		}, this));
+		}, this);
+		var order = [ 'subscription', 'imported', 'manual' ];
+		var labels = { subscription: _('Subscription'), imported: _('Imported'), manual: _('Manual') };
+		var byGroup = {};
+		nodes.forEach(function(n) { var g = n.group || 'subscription'; (byGroup[g] = byGroup[g] || []).push(n); });
+		var present = order.filter(function(g) { return byGroup[g] && byGroup[g].length; });
+		Object.keys(byGroup).forEach(function(g) { if (present.indexOf(g) < 0) { present.push(g); labels[g] = labels[g] || g; } });
+		var showHeaders = present.length > 1;
+		var bodyRows = [];
+		present.forEach(function(g) {
+			if (showHeaders)
+				bodyRows.push(E('tr', { 'class': 'tr' }, [
+					E('td', { 'class': 'td', 'colspan': '5', 'style': 'background:rgba(128,128,128,.12);font-weight:bold;padding:5px 8px' },
+						labels[g] + ' · ' + byGroup[g].length)
+				]));
+			byGroup[g].forEach(function(n) { bodyRows.push(makeRow(n)); });
+		});
 		return E('div', {}, [
 			E('div', { 'style': 'margin-bottom:6px' }, E('button', { 'class': 'btn cbi-button cbi-button-action',
 				'click': ui.createHandlerFn(this, 'handlePing') }, '↻ ' + _('Ping all nodes'))),
-			E('table', { 'class': 'table' }, [ header, autoRow ].concat(rows))
+			E('table', { 'class': 'table' }, [ header, autoRow ].concat(bodyRows))
 		]);
 	},
 

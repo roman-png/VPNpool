@@ -100,7 +100,25 @@ var DICT = {
 		'SRS cache present': 'SRS-кэш есть', 'SRS cache size (KB)': 'Размер SRS-кэша (КБ)',
 		'Test exit via VPN': 'Проверить выход через VPN', 'Testing exit via VPN…': 'Проверяю выход через VPN…',
 		'VPN exit: %s  (IP %s)': 'Выход через VPN: %s  (IP %s)',
-		'VPN exit test failed — is the service running?': 'Тест выхода не удался — служба запущена?'
+		'VPN exit test failed — is the service running?': 'Тест выхода не удался — служба запущена?',
+		'Imported': 'Импортированные', 'Manual': 'Ручные',
+		'Import from a source list': 'Импорт из списка-источника',
+		'Paste a URL with a vless:// list or base64 subscription, fetch it, then pick the nodes you want. Picked nodes join the pool and show under their own group in the dashboard.': 'Вставьте URL со списком vless:// или base64-подпиской, загрузите и выберите нужные узлы. Выбранные войдут в пул и появятся в дашборде отдельной группой.',
+		'Fetch & pick': 'Загрузить и выбрать', 'Saved sources': 'Сохранённые источники',
+		'(no saved sources yet)': '(пока нет сохранённых источников)',
+		'Update': 'Обновить', 'Re-fetch this source and pick nodes': 'Перезагрузить источник и выбрать узлы',
+		'Enter a source URL first.': 'Сначала введите URL источника.',
+		'Fetching source…': 'Загрузка источника…',
+		'Fetching and pinging nodes — this can take up to ~30 seconds.': 'Загрузка и пинг узлов — до ~30 секунд.',
+		'No usable nodes from this source': 'Из этого источника нет пригодных узлов',
+		'Probe failed': 'Ошибка загрузки', 'Pick nodes to import': 'Выберите узлы для импорта',
+		'Selected nodes join the auto-switch pool and appear in the dashboard under this source.': 'Выбранные узлы войдут в авто-пул и появятся в дашборде отдельным разделом.',
+		'Ping is ICMP (a server may block it — you can still pick it; the real latency shows in the dashboard).': 'Пинг — ICMP (сервер может его блокировать; узел всё равно можно выбрать — реальная задержка появится в дашборде).',
+		'%d nodes': '%d узлов',
+		'(showing first %d of %d — narrow the source if you need more)': '(показаны первые %d из %d — сузьте источник, если нужно больше)',
+		'All reachable': 'Все доступные', 'All': 'Все', 'None': 'Никакие',
+		'Save selection': 'Сохранить выбор', 'Importing %d nodes…': 'Импортирую %d узлов…',
+		'Imported %d nodes from this source.': 'Импортировано %d узлов из источника.'
 	}
 };
 
