@@ -89,10 +89,12 @@ return view.extend({
 		var nodes = (res.nodes || []).slice().sort(function(a, b) {
 			var da = (a.delay == null) ? 1e9 : a.delay, db = (b.delay == null) ? 1e9 : b.delay; return da - db;
 		});
+		var rowNodes = nodes.filter(function(n) { return n.link && n.link.length; });
 		this._impUrl = url;
-		this._impScope = nodes.map(function(n) { return n.link; }).filter(function(l) { return l && l.length; });
+		this._impRows = rowNodes;                                   // checkbox i  <->  rowNodes[i]
+		this._impScope = rowNodes.map(function(n) { return n.link; });
 
-		var rows = nodes.filter(function(n) { return n.link && n.link.length; }).map(function(n) {
+		var rows = rowNodes.map(function(n) {
 			return E('label', { 'class': 'vp-imp-row', 'style': 'display:flex;align-items:center;gap:8px;margin:3px 0;cursor:pointer' }, [
 				E('input', { 'type': 'checkbox', 'data-link': n.link, 'checked': n.in_pool ? 'checked' : null }),
 				E('span', { 'style': 'min-width:64px;text-align:right;font-weight:bold;color:' + pingColor(n.delay) }, pingText(n.delay)),
@@ -133,8 +135,10 @@ return view.extend({
 
 	saveImport: function() {
 		var boxes = document.querySelectorAll('#vp-imp-list input[type=checkbox]');
+		var rows = this._impRows || [];
 		var select = [];
-		for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) select.push(boxes[i].getAttribute('data-link'));
+		for (var i = 0; i < boxes.length; i++)
+			if (boxes[i].checked && rows[i] && rows[i].link) select.push(rows[i].link);
 		var url = this._impUrl, scope = this._impScope || [];
 		ui.hideModal();
 		this.notify(_('Importing %d nodes…').replace('%d', select.length));
