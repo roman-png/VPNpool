@@ -31,19 +31,35 @@ die()  { echo "[vpnpool] ERROR: $*" >&2; exit 1; }
 [ "$(id -u 2>/dev/null || echo 0)" = "0" ] || die "run as root"
 command -v opkg >/dev/null 2>&1 || die "opkg not found - is this OpenWrt?"
 
-# --- pick a downloader (uclient-fetch / wget / curl), all HTTPS-capable -----
+rm -rf "$TMP"; mkdir -p "$TMP"
+
+# --- pick a downloader (uclient-fetch / wget / curl), all HTTPS-capable ------
+# Retries a few times: GitHub (api.github.com / release downloads) is frequently
+# flaky or throttled on the networks this tool targets — a single 504/timeout
+# must not abort the whole install. Always fetches to a file (stdout requests
+# stream the file out afterwards) so a failed attempt can be retried cleanly.
+DL_RETRIES=4
 download() {
 	# download <url> <outfile|->
 	url="$1"; out="$2"
-	if command -v uclient-fetch >/dev/null 2>&1; then
-		if [ "$out" = "-" ]; then uclient-fetch -qO- "$url"; else uclient-fetch -qO "$out" "$url"; fi
-	elif command -v curl >/dev/null 2>&1; then
-		if [ "$out" = "-" ]; then curl -fsSL "$url"; else curl -fsSL -o "$out" "$url"; fi
-	elif command -v wget >/dev/null 2>&1; then
-		if [ "$out" = "-" ]; then wget -qO- "$url"; else wget -qO "$out" "$url"; fi
-	else
-		die "no downloader (uclient-fetch/curl/wget) available"
-	fi
+	dst="$out"; [ "$out" = "-" ] && dst="$TMP/.dl.$$"
+	n=0; ok=0
+	while [ "$n" -lt "$DL_RETRIES" ]; do
+		n=$((n + 1))
+		if command -v uclient-fetch >/dev/null 2>&1; then
+			uclient-fetch -T 30 -qO "$dst" "$url" && { ok=1; break; }
+		elif command -v curl >/dev/null 2>&1; then
+			curl -fsSL --connect-timeout 30 -o "$dst" "$url" && { ok=1; break; }
+		elif command -v wget >/dev/null 2>&1; then
+			wget -T 30 -qO "$dst" "$url" && { ok=1; break; }
+		else
+			die "no downloader (uclient-fetch/curl/wget) available"
+		fi
+		[ "$n" -lt "$DL_RETRIES" ] && { say "download attempt $n failed (GitHub can be flaky), retrying in 3s..."; sleep 3; }
+	done
+	[ "$ok" = 1 ] || return 1
+	if [ "$out" = "-" ]; then cat "$dst"; rm -f "$dst"; fi
+	return 0
 }
 
 say "refreshing package lists..."
@@ -68,11 +84,23 @@ URLS="$(download "$API" - | tr ',' '\n' | grep 'browser_download_url' | grep '\.
 	| sed -e 's/.*"browser_download_url": *"//' -e 's/".*//' | grep -E '/(vpnpool|luci-app-vpnpool)_')"
 [ -n "$URLS" ] || die "no .ipk assets found in release '$TAG' (check your internet / the release page)"
 
-rm -rf "$TMP"; mkdir -p "$TMP"
+# GitHub release downloads (github.com -> objects.githubusercontent.com) are the
+# flakiest hop on the target networks. Our GitHub Pages feed (github.io, served
+# by a CDN) mirrors the same _all .ipk by filename and is usually far more
+# reachable — use it as a fallback for the "latest" build.
+PAGES="https://roman-png.github.io/$(echo "$REPO" | cut -d/ -f2)"
 for u in $URLS; do
-	f="$TMP/$(basename "$u")"
-	say "downloading $(basename "$u")..."
-	download "$u" "$f" || die "download failed: $u"
+	bn="$(basename "$u")"
+	f="$TMP/$bn"
+	say "downloading $bn..."
+	if ! download "$u" "$f"; then
+		if [ "$TAG" = "latest" ]; then
+			say "release download failed; trying Pages mirror ($PAGES)..."
+			download "$PAGES/$bn" "$f" || die "download failed (GitHub and Pages both unreachable): $bn"
+		else
+			die "download failed: $u"
+		fi
+	fi
 done
 
 # --- install / upgrade ------------------------------------------------------
