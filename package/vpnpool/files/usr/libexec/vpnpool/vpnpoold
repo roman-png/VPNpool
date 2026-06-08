@@ -1,0 +1,146 @@
+#!/bin/sh
+# vpnpool control-plane daemon (real).
+# Orchestrates: fetch subscription -> build sing-box config -> run sing-box ->
+# bring routing up (whole-LAN selective, coexists with podkop). Then supervises
+# sing-box and periodically refreshes the subscription. On TERM it tears routing
+# down and stops sing-box. Auto-ping + failover between nodes is done by the
+# sing-box "urltest" outbound; this daemon supervises and refreshes.
+. /usr/libexec/vpnpool/lib.sh
+
+SB_PIDFILE=/var/run/vpnpool-singbox.pid
+LIBEXEC=/usr/libexec/vpnpool
+
+SB_LOG="$SB_DATA/sing-box.log"
+LOG_CAP=524288   # 512 KiB — keep the volatile /tmp log bounded
+
+cap_log() {
+	[ -f "$SB_LOG" ] && [ "$(wc -c < "$SB_LOG" 2>/dev/null || echo 0)" -gt "$LOG_CAP" ] && : > "$SB_LOG"
+	return 0
+}
+
+start_singbox() {
+	cap_log
+	sing-box run -c "$SB_CONF" -D "$SB_DATA" >> "$SB_LOG" 2>&1 &
+	echo $! > "$SB_PIDFILE"
+	log "sing-box started pid=$(cat "$SB_PIDFILE")"
+}
+
+singbox_alive() {
+	local p
+	p=$(cat "$SB_PIDFILE" 2>/dev/null)
+	[ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+
+# the node actually carrying traffic (resolve selector 'auto' to the urltest pick)
+current_node() {
+	local p sel
+	p=$(curl -s -m3 "http://$CLASH_API/proxies" 2>/dev/null)
+	sel=$(echo "$p" | jq -r '.proxies.proxy.now // ""' 2>/dev/null)
+	if [ -z "$sel" ] || [ "$sel" = "auto" ]; then
+		echo "$p" | jq -r '.proxies.auto.now // ""' 2>/dev/null
+	else
+		echo "$sel"
+	fi
+}
+
+cleanup() {
+	log "stopping: removing routing and sing-box"
+	tg_notify "🔴 vpnpool: stopped"
+	"$LIBEXEC/route.sh" down
+	[ -f "$SB_PIDFILE" ] && kill "$(cat "$SB_PIDFILE")" 2>/dev/null
+	rm -f "$SB_PIDFILE"
+	log "stopped cleanly"
+	exit 0
+}
+
+# USR1 = rebuild config from cache + manual nodes and hot-reload sing-box.
+# Sent by the LuCI backend after manual node / domain edits so they apply live.
+reload_config() {
+	log "reload (USR1): rebuilding config + routing"
+	if "$LIBEXEC/build.sh"; then
+		[ -f "$SB_PIDFILE" ] && kill "$(cat "$SB_PIDFILE")" 2>/dev/null
+		sleep 1
+		start_singbox
+		# re-apply routing so per-client / ipv6 / coexist / domain edits take effect
+		"$LIBEXEC/route.sh" down
+		"$LIBEXEC/route.sh" up
+		log "reloaded: sing-box + routing"
+	else
+		log "reload: build failed, keeping current config"
+	fi
+}
+
+# USR2 = re-fetch all sources, then rebuild + hot-reload (source/subscription edits).
+refetch_config() {
+	log "refetch (USR2): fetching sources"
+	"$LIBEXEC/fetch.sh"
+	reload_config
+}
+
+trap cleanup TERM INT
+trap reload_config USR1
+trap refetch_config USR2
+
+mkdir -p "$SB_DATA"
+log "vpnpoold starting (whole-LAN selective, coexist with podkop)"
+
+# initial subscription + config, with soft retry (e.g. WAN not ready at boot) —
+# never give up, so the service self-heals once connectivity appears.
+while : ; do
+	"$LIBEXEC/fetch.sh" || log "fetch failed (will use cache if present)"
+	if "$LIBEXEC/build.sh"; then
+		break
+	fi
+	log "initial build failed (no nodes/cache yet), retrying in 15s"
+	sleep 15 & wait $!
+done
+
+start_singbox
+sleep 3
+"$LIBEXEC/route.sh" up
+log "routing is UP"
+tg_notify "🟢 vpnpool: routing is up"
+
+REFRESH=$(interval_seconds)
+LAST=$(date +%s)
+LAST_NODE=""
+
+# main supervise/refresh loop. sleep in bg + wait so TERM is handled promptly.
+while : ; do
+	sleep 15 & wait $!
+	cap_log
+
+	if ! singbox_alive; then
+		log "sing-box not running, restarting"
+		start_singbox
+		sleep 2
+	fi
+
+	# detect node change (failover / manual switch) and notify
+	NODE=$(current_node)
+	if [ -n "$NODE" ] && [ "$NODE" != "$LAST_NODE" ]; then
+		[ -n "$LAST_NODE" ] && { log "active node -> $NODE"; tg_notify "🔁 vpnpool: switched to $NODE"; }
+		LAST_NODE="$NODE"
+	fi
+
+	REFRESH=$(interval_seconds)
+	NOW=$(date +%s)
+	if [ $(( NOW - LAST )) -ge "$REFRESH" ]; then
+		LAST=$NOW
+		log "periodic subscription refresh"
+		if "$LIBEXEC/fetch.sh" && "$LIBEXEC/build.sh"; then
+			[ -f "$SB_PIDFILE" ] && kill "$(cat "$SB_PIDFILE")" 2>/dev/null
+			sleep 1
+			start_singbox
+			log "subscription refreshed, sing-box reloaded"
+		else
+			log "refresh failed, keeping current config"
+		fi
+		# subscription expiry warning
+		EXP=$(cat "$CONF_DIR/sub.expire" 2>/dev/null)
+		if [ -n "$EXP" ]; then
+			DAYS=$(( (EXP - $(date +%s)) / 86400 ))
+			[ "$DAYS" -ge 0 ] && [ "$DAYS" -le 3 ] && tg_notify "⚠️ vpnpool: subscription expires in ${DAYS}d"
+		fi
+	fi
+done

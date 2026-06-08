@@ -1,0 +1,73 @@
+name: Publish opkg feed (GitHub Pages)
+
+# Builds the .ipk + opkg index (Packages/Packages.gz) and publishes them to
+# GitHub Pages, so users can add a custom feed and `opkg update && opkg install`
+# vpnpool directly. Our packages are arch-independent (_all), so one feed serves
+# every router; dependencies (sing-box, …) come from the stock OpenWrt feeds.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'package/**'
+      - '.github/workflows/pages.yml'
+  release:
+    types: [ published ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-feed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build packages + index (OpenWrt SDK)
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: x86_64-24.10.4
+          FEEDNAME: vpnpool
+          PACKAGES: vpnpool luci-app-vpnpool
+          INDEX: 1
+
+      - name: Assemble feed
+        run: |
+          mkdir -p public
+          # our packages
+          find bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' \) -exec cp {} public/ \;
+          # opkg index produced by the SDK for our feed
+          find bin -path '*vpnpool*' \( -name 'Packages' -o -name 'Packages.gz' -o -name 'Packages.sig' \) -exec cp {} public/ \; || true
+          # landing page
+          cat > public/index.html <<'HTML'
+          <!doctype html><meta charset=utf-8><title>vpnpool opkg feed</title>
+          <h1>vpnpool — OpenWrt opkg feed</h1>
+          <p>Add this feed on your router:</p>
+          <pre>echo "src/gz vpnpool https://roman-png.github.io/VPNpool" &gt;&gt; /etc/opkg/customfeeds.conf
+          opkg update
+          opkg install luci-app-vpnpool</pre>
+          <p><a href="https://github.com/roman-png/VPNpool">Project on GitHub</a></p>
+          HTML
+          echo "=== feed contents ==="; ls -l public
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build-feed
+    runs-on: ubuntu-latest
+    #environment:
+    #  name: github-pages
+    #  url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

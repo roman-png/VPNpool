@@ -1,0 +1,63 @@
+name: Build .ipk
+
+# Builds opkg packages (vpnpool + luci-app-vpnpool) for several OpenWrt targets
+# using the official OpenWrt SDK, so the app is installable via opkg on most
+# router hardware. On a published release the .ipk files are attached to it.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'package/**'
+      - '.github/workflows/build.yml'
+  pull_request:
+  release:
+    types: [ published ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - aarch64_cortex-a53-24.10.4   # MediaTek Filogic (Cudy TR3000 etc.)
+          - x86_64-24.10.4               # x86 / VM routers
+          - mipsel_24kc-24.10.4          # ramips MT76x8 (older routers)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build packages (OpenWrt SDK)
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}
+          FEEDNAME: vpnpool_feed
+          PACKAGES: vpnpool luci-app-vpnpool
+
+      - name: Collect .ipk
+        run: |
+          mkdir -p artifacts
+          find bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' \) -exec cp {} artifacts/ \; || true
+          ls -l artifacts || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipk-${{ matrix.arch }}
+          path: artifacts/*.ipk
+          if-no-files-found: warn
+
+      # Our packages are arch-independent (_all): every matrix job produces the
+      # SAME two .ipk filenames. Attach from ONE job only, otherwise the upload
+      # steps collide on duplicate asset names.
+      - name: Attach to release
+        if: github.event_name == 'release' && matrix.arch == 'x86_64-24.10.4'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.ipk

@@ -1,0 +1,22 @@
+# OS junk
+.DS_Store
+Thumbs.db
+*.swp
+
+# build artifacts
+*.ipk
+/build/
+/bin/
+
+# local notes
+*.local
+
+# Markdown notes / design docs stay local — only the top-level READMEs are
+# published (they may reference infra details / personal data otherwise).
+*.md
+!/README.md
+!/README.ru.md
+
+# editor / tooling caches
+.serena/
+.vscode/
