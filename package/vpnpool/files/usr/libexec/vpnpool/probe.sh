@@ -73,13 +73,22 @@ jq -R -s 'split("\n") | map(select(length>0) | split("\t"))
 	| map({ (.[0]): ((.[1] // "") | if . == "" then null else (tonumber? // null) end) }) | add // {}' \
 	"$P/ping.tsv" > "$P/delay.json"
 
-jq --argjson total "$TOTAL" --argjson capped "$CAPPED" \
-   --slurpfile d "$P/delay.json" --rawfile imp "$P/imported.links" '
+# Enrich each node with a stable index, its ping and whether it's already imported.
+ENRICHED=$(jq -c --slurpfile d "$P/delay.json" --rawfile imp "$P/imported.links" '
 	($d[0] // {}) as $dm
 	| ($imp | split("\n") | map(select(length > 0))) as $impset
-	| { total: $total, capped: $capped, shown: (. | length),
-	    nodes: map({
-		tag: .tag, server: .server, port: .server_port,
-		link: (._link // ""), delay: ($dm[.tag] // null),
-		in_pool: ((((._link // "")) as $l | $impset | index($l)) != null)
-	    }) }' "$P/nodes.json"
+	| to_entries | map(.value + {
+		_i: .key,
+		_delay: ($dm[.value.tag] // null),
+		_in: ((((.value._link // "")) as $l | $impset | index($l)) != null)
+	})' "$P/nodes.json")
+
+# Cache the FULL list (with links) on the router, keyed by URL. import_select reads
+# it and resolves the user-picked INDICES to links — so the browser only ever sends
+# a tiny array of integers, never hundreds of links (which overflowed the rpc path).
+printf '%s' "$ENRICHED" | jq -c --arg url "$URL" '{ url: $url, nodes: map({ i: ._i, link: (._link // ""), tag: .tag }) }' > /tmp/vpnpool/.probe-cache.json
+
+# Response to the UI: NO links (keeps it small), just the index `i` to send back.
+printf '%s' "$ENRICHED" | jq --argjson total "$TOTAL" --argjson capped "$CAPPED" '
+	{ total: $total, capped: $capped, shown: (. | length),
+	  nodes: map({ i: ._i, tag: .tag, server: .server, port: .server_port, delay: ._delay, in_pool: ._in }) }'
