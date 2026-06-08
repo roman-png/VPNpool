@@ -77,6 +77,18 @@ while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 done
 
 mv "$SB_CONF.new" "$SB_CONF"
+
+# Reconcile nodes.json with what actually survived into the live config, so the
+# dashboard never lists phantom nodes that sing-box check rejected and we pruned
+# (they would show up but be un-pingable / un-selectable — they aren't in sing-box).
+if [ "$dropped" -gt 0 ]; then
+	CFGTAGS=$(jq -c '[.outbounds[].tag]' "$SB_CONF" 2>/dev/null)
+	if [ -n "$CFGTAGS" ]; then
+		jq --argjson ct "$CFGTAGS" 'map(select(.tag as $x | $ct | index($x)))' "$NODES" > "$NODES.f" 2>/dev/null \
+			&& mv "$NODES.f" "$NODES"
+	fi
+fi
+
 if [ "$dropped" -gt 0 ]; then
 	log "build: ok ($((CNT - dropped)) nodes; dropped $dropped unsupported)"
 else
