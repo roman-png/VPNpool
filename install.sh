@@ -126,12 +126,19 @@ write_ram_hook() {
 	# Boot hook: (re)install sing-box into RAM and start vpnpool when WAN comes up.
 	# Runs on every reboot, so the router needs working internet at startup.
 	mkdir -p /etc/hotplug.d/iface
+	# Remove any OTHER vpnpool iface hooks first. Two hooks both running
+	# `opkg install -d ram sing-box` in parallel on a low-RAM router race each
+	# other, OOM mid-extraction and leave a corrupt/non-executable binary.
+	for f in /etc/hotplug.d/iface/*vpnpool* /etc/hotplug.d/iface/*singbox-ram*; do
+		[ -e "$f" ] && [ "$f" != "$HOOK" ] && rm -f "$f"
+	done
 	cat > "$HOOK" <<'EOF'
 #!/bin/sh
 [ "$ACTION" = "ifup" -a "$INTERFACE" = "wan" ] && {
     logger -t vpnpool "WAN up: installing sing-box into RAM"
     opkg update
     opkg install -d ram --force-reinstall --force-overwrite sing-box
+    chmod +x /tmp/usr/bin/sing-box 2>/dev/null
     ln -sf /tmp/usr/bin/sing-box /usr/bin/sing-box
     /etc/init.d/vpnpool start
     logger -t vpnpool "sing-box installed in RAM, vpnpool started"
@@ -169,6 +176,7 @@ if [ "$RAM_SINGBOX" = 1 ]; then
 
 	say "installing sing-box into RAM now (so it works without a reboot)..."
 	if opkg install -d ram --force-reinstall --force-overwrite sing-box; then
+		chmod +x /tmp/usr/bin/sing-box 2>/dev/null
 		ln -sf /tmp/usr/bin/sing-box /usr/bin/sing-box
 		say "sing-box installed in RAM."
 	else

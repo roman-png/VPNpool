@@ -269,6 +269,15 @@ sing-box version          # confirms the RAM symlink resolves
 > **Trade‑offs:** sing‑box (~14 MB ipk) is re‑downloaded into RAM on every boot, so
 > the router needs working internet at startup and enough free RAM (~128 MB+). If
 > your WAN is named differently (e.g. `wan6`, `wwan`), adjust the `INTERFACE` check.
+>
+> **Tested on:** Xiaomi Mi Router 4A Gigabit (MediaTek MT7621, 16 MB flash / 128 MB
+> RAM, OpenWrt 24.10) — fresh one‑liner install, reboot, and live VPN exit all OK.
+>
+> **Keep a single boot hook.** Only one WAN‑up hook may install sing‑box into RAM.
+> Two hooks racing `opkg install -d ram sing-box` on a 128 MB router OOM each other
+> and corrupt the binary (symptom: `sing-box: Bus error` / `Permission denied`). The
+> one‑liner removes stale `*vpnpool*` iface hooks before writing its own, so just
+> don't add a second one by hand.
 
 ---
 

@@ -25,7 +25,9 @@ normalize() {   # $1 = raw body file -> decoded text on stdout
 			if head -c 8 "$1" 2>/dev/null | grep -q '://'; then
 				cat "$1"                                       # plain link list
 			else
-				tr -d '\r\n' < "$1" | base64 -d 2>/dev/null || cat "$1"   # base64 blob
+				# base64 blob: if it isn't valid base64, base64 -d exits early and
+				# tr would SIGPIPE — silence tr's stderr too, then fall back to raw.
+				tr -d '\r\n' < "$1" 2>/dev/null | base64 -d 2>/dev/null || cat "$1"
 			fi ;;
 	esac
 }
