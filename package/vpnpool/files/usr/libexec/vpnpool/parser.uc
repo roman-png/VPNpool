@@ -14,6 +14,11 @@ import { readfile, stdin } from 'fs';
 let nodes = [];
 let seen = {};
 let tagcount = {};
+// When true (CLI flag --keep-link), attach the original link as `_link` to each
+// node parsed from a link line. Used by probe.sh so the UI can store the exact
+// links the user picks. The live build does NOT pass the flag, so the config-bound
+// nodes.json never carries `_link` (it would leak into sing-box outbounds).
+let KEEP_LINK = false;
 
 function url_decode(s) {
 	return replace(s, /%[0-9A-Fa-f][0-9A-Fa-f]/g, function (m) {
@@ -46,6 +51,8 @@ function add_node(ob, dedupkey) {
 		tagcount[base] = 1;
 		ob.tag = base;
 	}
+	if (KEEP_LINK && type(dedupkey) == 'string' && index(dedupkey, '://') >= 0)
+		ob._link = dedupkey;
 	push(nodes, ob);
 }
 
@@ -246,8 +253,14 @@ function process_text(raw) {
 }
 
 // ---- inputs: every ARGV entry is a file; if none, read stdin ----
-if (length(ARGV)) {
-	for (let f in ARGV) {
+// Optional leading flag `--keep-link` makes link nodes carry their original link.
+let files = ARGV;
+if (length(files) && files[0] == '--keep-link') {
+	KEEP_LINK = true;
+	files = slice(files, 1);
+}
+if (length(files)) {
+	for (let f in files) {
 		let raw = readfile(f);
 		if (raw != null) process_text(raw);
 	}

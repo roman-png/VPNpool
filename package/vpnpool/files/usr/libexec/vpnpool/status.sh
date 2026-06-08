@@ -49,14 +49,22 @@ NODES_FILE=/tmp/vpnpool/nodes.json
 PROXF="$SB_DATA/.prox.json"; printf '%s' "$PROX" > "$PROXF" 2>/dev/null
 NODESF="$SB_DATA/.nodesout.json"
 
+# Tag origin for dashboard grouping: parse the (small, user-curated) imported/manual
+# link files to learn their tags; everything else came from the subscription.
+IMPTAGS=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/imported.links" 2>/dev/null | jq -c '[.[].tag]' 2>/dev/null); [ -n "$IMPTAGS" ] || IMPTAGS='[]'
+MANTAGS=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/manual.links" 2>/dev/null | jq -c '[.[].tag]' 2>/dev/null); [ -n "$MANTAGS" ] || MANTAGS='[]'
+
 jq -n \
 	--slurpfile p "$PROXF" \
 	--slurpfile n <(cat "$NODES_FILE" 2>/dev/null || echo '[]') \
+	--argjson imp "$IMPTAGS" \
+	--argjson man "$MANTAGS" \
 	'(($p[0] // {}) | .proxies // {}) as $px | ($n[0] // []) | map({
 		tag: .tag,
 		server: .server,
 		port: .server_port,
-		delay: (($px[.tag].history // []) | last | .delay // null)
+		delay: (($px[.tag].history // []) | last | .delay // null),
+		group: (.tag as $t | if ($imp | index($t)) then "imported" elif ($man | index($t)) then "manual" else "subscription" end)
 	})' > "$NODESF" 2>/dev/null
 [ -s "$NODESF" ] || echo '[]' > "$NODESF"
 
