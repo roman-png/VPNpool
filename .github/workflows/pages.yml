@@ -30,6 +30,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # See build.yml: drop .git so the SDK action's chown can't race git repack
+      # on .git/objects (intermittent "chown: cannot access" job failure).
+      - name: Drop .git (avoid gh-action-sdk chown race)
+        run: rm -rf .git
+
       - name: Build packages + index (OpenWrt SDK)
         uses: openwrt/gh-action-sdk@main
         env:
