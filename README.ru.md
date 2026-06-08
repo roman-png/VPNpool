@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/roman-png/VPNpool/actions/workflows/build.yml"><img alt="Build .ipk" src="https://github.com/roman-png/VPNpool/actions/workflows/build.yml/badge.svg"></a>
-  <img alt="License: GPL-2.0" src="https://img.shields.io/badge/License-GPL--2.0-blue.svg">
+  <img alt="License: GPL-3.0" src="https://img.shields.io/badge/License-GPL--3.0-blue.svg">
   <img alt="OpenWrt" src="https://img.shields.io/badge/OpenWrt-23.05%20%7C%2024.10-blue">
   <img alt="Engine" src="https://img.shields.io/badge/engine-sing--box-success">
 </p>
@@ -360,4 +360,4 @@ Issues и PR приветствуются. Весь проект — это ucod
 
 ## 📄 Лицензия
 
-[GPL‑2.0‑only](LICENSE) © 2026 roman‑png
+[GPL‑3.0‑only](LICENSE) © 2026 roman‑png

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: GPL-3.0-only
 # OpenWrt package: vpnpool — VLESS/Reality subscription manager with auto-failover
 include $(TOPDIR)/rules.mk
 
@@ -6,7 +6,7 @@ PKG_NAME:=vpnpool
 PKG_VERSION:=1.0.0
 PKG_RELEASE:=1
 PKG_MAINTAINER:=roman-png
-PKG_LICENSE:=GPL-2.0-only
+PKG_LICENSE:=GPL-3.0-only
 PKG_LICENSE_FILES:=LICENSE
 
 include $(INCLUDE_DIR)/package.mk
