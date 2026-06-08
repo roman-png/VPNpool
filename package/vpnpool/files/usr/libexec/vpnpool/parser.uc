@@ -90,7 +90,11 @@ function parse_vless(line) {
 			tls.utls = { enabled: true, fingerprint: 'chrome' };   // reality REQUIRES uTLS in sing-box
 		if (p.security == 'reality') {
 			tls.reality = { enabled: true };
-			if (length(p.pbk)) tls.reality.public_key = p.pbk;
+			// reality needs a valid x25519 pubkey (32 bytes -> 43/44 base64 chars);
+			// junk lists carry malformed keys that stall probe pruning — drop here.
+			if (!length(p.pbk) || !match(p.pbk, /^[A-Za-z0-9_\/+-]{43,44}={0,1}$/))
+				return null;
+			tls.reality.public_key = p.pbk;
 			if (p.sid != null) tls.reality.short_id = p.sid;
 		}
 		ob.tls = tls;
