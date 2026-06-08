@@ -17,7 +17,7 @@ signal_refetch() {
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "tg_test": {} }
+{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "probe_source": { "url": "x" }, "import_select": { "url": "x", "scope": [], "select": [] }, "tg_test": {} }
 L
 	;;
 call)
@@ -107,8 +107,42 @@ call)
 		;;
 	add_source)
 		u=$(echo "$input" | jq -r '.url // ""')
-		[ -n "$u" ] && { uci add_list vpnpool.main.source="$u"; uci commit vpnpool; signal_refetch; }
+		[ -n "$u" ] && { uci add_list vpnpool.main.source="$u"; uci commit vpnpool; }
 		echo '{"ok":true}'
+		;;
+	probe_source)
+		# fetch + parse + ICMP-ping one URL; read-only, returns nodes for the dialog
+		u=$(echo "$input" | jq -r '.url // ""')
+		[ -n "$u" ] || { echo '{"error":"no url","total":0,"nodes":[]}'; exit 0; }
+		/usr/libexec/vpnpool/probe.sh "$u"
+		;;
+	import_select)
+		# imported_node := (current - scope) + select. scope = ALL links the dialog
+		# showed for this source, select = the checked ones — so re-probing ("Refresh")
+		# and re-selecting cleanly replaces this source's contribution. The source URL
+		# is remembered in `source` so it can be refreshed later.
+		. /lib/functions.sh 2>/dev/null
+		curf="/tmp/vpnpool/.imp.cur.$$"; mkdir -p /tmp/vpnpool; : > "$curf"
+		__io="$curf"; __ia() { printf '%s\n' "$1" >> "$__io"; }
+		config_load vpnpool 2>/dev/null
+		config_list_foreach main imported_node __ia 2>/dev/null
+		NEW=$(jq -n --rawfile cur "$curf" \
+			--argjson scope "$(echo "$input" | jq -c '.scope // []')" \
+			--argjson select "$(echo "$input" | jq -c '.select // []')" \
+			'(($cur | split("\n") | map(select(length>0))) - $scope) + $select
+			 | reduce .[] as $x ([]; if (index($x)) then . else . + [$x] end)')
+		rm -f "$curf"
+		uci -q delete vpnpool.main.imported_node
+		echo "$NEW" | jq -r '.[]?' | while IFS= read -r l; do
+			[ -n "$l" ] && uci add_list vpnpool.main.imported_node="$l"
+		done
+		u=$(echo "$input" | jq -r '.url // ""')
+		if [ -n "$u" ] && ! uci -q get vpnpool.main.source | tr ' ' '\n' | grep -Fxq "$u"; then
+			uci add_list vpnpool.main.source="$u"
+		fi
+		uci commit vpnpool
+		signal_reload
+		echo "{\"ok\":true,\"count\":$(echo "$NEW" | jq 'length')}"
 		;;
 	del_source)
 		u=$(echo "$input" | jq -r '.url // ""')

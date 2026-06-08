@@ -8,17 +8,28 @@ mkdir -p "$SB_DATA"
 SRCDIR="$SB_DATA/sources"
 NODES="$SB_DATA/nodes.json"
 
-# manual nodes (uci: list manual_node 'vless://...') as their own file
-: > "$SB_DATA/manual.links"
-uci -q get vpnpool.main.manual_node 2>/dev/null | tr ' ' '\n' >> "$SB_DATA/manual.links"
+# manual nodes (uci: list manual_node 'vless://...') and imported nodes (uci: list
+# imported_node — links the user hand-picked from a probed source) each as their own
+# file. vless:// links never contain spaces, so a uci LIST read is safe here.
+. /lib/functions.sh 2>/dev/null
+write_links() {   # $1=uci option  $2=outfile
+	: > "$2"
+	__wl_out="$2"
+	__wl_add() { printf '%s\n' "$1" >> "$__wl_out"; }
+	config_load vpnpool 2>/dev/null
+	config_list_foreach main "$1" __wl_add 2>/dev/null
+}
+write_links manual_node   "$SB_DATA/manual.links"
+write_links imported_node "$SB_DATA/imported.links"
 
-# gather input files: every source file + manual links (parser auto-detects format
-# per file and merges with global dedup + unique tags)
+# gather input files: every source file + manual + imported links (parser
+# auto-detects format per file and merges with global dedup + unique tags)
 FILES=""
 for f in "$SRCDIR"/*.raw; do
 	[ -f "$f" ] && FILES="$FILES $f"
 done
-[ -s "$SB_DATA/manual.links" ] && FILES="$FILES $SB_DATA/manual.links"
+[ -s "$SB_DATA/manual.links" ]   && FILES="$FILES $SB_DATA/manual.links"
+[ -s "$SB_DATA/imported.links" ] && FILES="$FILES $SB_DATA/imported.links"
 
 # shellcheck disable=SC2086
 ucode /usr/libexec/vpnpool/parser.uc $FILES > "$NODES" 2>"$SB_DATA/build.err"

@@ -63,10 +63,10 @@ if [ -n "$SUB_URL" ]; then
 	fetch_best "$SUB_URL" 1 "$SRCDIR/$(printf '%03d' "$n").raw" && ok=1
 	n=$((n + 1))
 fi
-for s in $(uci -q get vpnpool.main.source 2>/dev/null); do
-	fetch_best "$s" 0 "$SRCDIR/$(printf '%03d' "$n").raw" && ok=1
-	n=$((n + 1))
-done
+# NOTE: extra `source` URLs are NOT bulk-merged anymore — a public list can carry
+# hundreds/thousands of nodes and flood the pool. They are now "probe-only": the
+# UI fetches a source, the user picks specific nodes, and those are stored as
+# `imported_node` links (merged in build.sh). See probe.sh / add_imported.
 
 if [ "$ok" = "1" ]; then
 	rm -rf "$CACHEDIR"; cp -a "$SRCDIR" "$CACHEDIR" 2>/dev/null
