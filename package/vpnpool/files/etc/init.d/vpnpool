@@ -1,0 +1,38 @@
+#!/bin/sh /etc/rc.common
+# vpnpool procd service (stage 1 skeleton).
+# Supervises the control-plane daemon. Does NOT touch podkop/zapret/routing yet.
+
+USE_PROCD=1
+START=99
+STOP=10
+
+PROG=/usr/libexec/vpnpool/vpnpoold
+
+start_service() {
+	config_load vpnpool
+
+	local enabled
+	config_get_bool enabled main enabled 0
+	if [ "$enabled" != "1" ]; then
+		logger -t vpnpool "disabled in /etc/config/vpnpool (option enabled '0'); not starting"
+		return 0
+	fi
+
+	procd_open_instance
+	procd_set_param command "$PROG"
+	procd_set_param respawn 3600 5 0
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_set_param pidfile /var/run/vpnpool.pid
+	procd_close_instance
+}
+
+stop_service() {
+	# Stage 1: nothing extra to tear down.
+	# Later stages will remove our nft table / ip rule / routes here.
+	return 0
+}
+
+service_triggers() {
+	procd_add_reload_trigger "vpnpool"
+}

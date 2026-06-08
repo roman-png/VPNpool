@@ -1,0 +1,198 @@
+#!/bin/sh
+# rpcd backend for luci-app-vpnpool. Exposes ubus object "vpnpool".
+# Methods: status (read) + control actions (write).
+. /usr/libexec/vpnpool/lib.sh 2>/dev/null
+CLASH=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH" ] || CLASH=127.0.0.1:9091
+
+# Tell the running daemon to rebuild config + hot-reload sing-box (manual/domain edits).
+signal_reload() {
+	kill -USR1 "$(cat /var/run/vpnpool.pid 2>/dev/null)" 2>/dev/null
+}
+
+# Tell the running daemon to re-fetch all sources, then rebuild (source/url edits).
+signal_refetch() {
+	kill -USR2 "$(cat /var/run/vpnpool.pid 2>/dev/null)" 2>/dev/null
+}
+
+case "$1" in
+list)
+	cat <<'L'
+{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "tg_test": {} }
+L
+	;;
+call)
+	input="$(cat)"
+	case "$2" in
+	status)
+		/usr/libexec/vpnpool/status.sh
+		;;
+	diag)
+		/usr/libexec/vpnpool/diag.sh
+		;;
+	export)
+		cfg=$(uci export vpnpool 2>/dev/null)
+		jq -n --arg c "$cfg" '{ config: $c }'
+		;;
+	import)
+		cfg=$(echo "$input" | jq -r '.config // ""')
+		if [ -n "$cfg" ]; then
+			printf '%s\n' "$cfg" | uci import vpnpool 2>/dev/null
+			uci commit vpnpool
+			signal_refetch
+			echo '{"ok":true}'
+		else
+			echo '{"error":"empty config"}'
+		fi
+		;;
+	conntest)
+		TP=$(uci -q get vpnpool.main.test_port); [ -n "$TP" ] || TP=1605
+		J=$(curl -s -m 12 --proxy "socks5h://127.0.0.1:$TP" https://ifconfig.co/json 2>/dev/null)
+		IP=$(echo "$J" | jq -r '.ip // ""' 2>/dev/null)
+		CO=$(echo "$J" | jq -r '.country_iso // .country // ""' 2>/dev/null)
+		jq -n --arg ip "$IP" --arg co "$CO" '{ ok: ($ip != ""), ip: $ip, country: $co }'
+		;;
+	set_enabled)
+		en=$(echo "$input" | jq -r '.enabled')
+		if [ "$en" = "true" ] || [ "$en" = "1" ]; then
+			uci set vpnpool.main.enabled='1'; uci commit vpnpool
+			/etc/init.d/vpnpool enable; /etc/init.d/vpnpool restart
+		else
+			uci set vpnpool.main.enabled='0'; uci commit vpnpool
+			/etc/init.d/vpnpool stop; /etc/init.d/vpnpool disable
+		fi
+		echo '{"ok":true}'
+		;;
+	select)
+		tag=$(echo "$input" | jq -r '.tag')
+		# persist the pick so it survives reload / subscription updates ('auto' clears it)
+		if [ "$tag" = "auto" ]; then
+			uci set vpnpool.main.selected_node=''
+		else
+			uci set vpnpool.main.selected_node="$tag"
+		fi
+		uci commit vpnpool
+		code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "http://$CLASH/proxies/proxy" \
+			--data "$(jq -n --arg n "$tag" '{name:$n}')")
+		echo "{\"ok\":true,\"http\":\"$code\"}"
+		;;
+	refresh)
+		if [ "$(uci -q get vpnpool.main.enabled)" = "1" ]; then
+			/etc/init.d/vpnpool restart
+		fi
+		echo '{"ok":true}'
+		;;
+	ping)
+		HU=$(uci -q get vpnpool.main.health_url); [ -n "$HU" ] || HU=http://cp.cloudflare.com/generate_204
+		ENCU=$(jq -rn --arg s "$HU" '$s|@uri')
+		jq -r '.[].tag' /tmp/vpnpool/nodes.json 2>/dev/null | while read -r tag; do
+			[ -n "$tag" ] || continue
+			enc=$(jq -rn --arg s "$tag" '$s|@uri')
+			curl -s -m 7 "http://$CLASH/proxies/$enc/delay?url=$ENCU&timeout=5000" >/dev/null 2>&1 &
+		done
+		wait
+		echo '{"ok":true}'
+		;;
+	set_url)
+		u=$(echo "$input" | jq -r '.url // ""')
+		uci set vpnpool.main.subscription_url="$u"; uci commit vpnpool
+		signal_refetch
+		echo '{"ok":true}'
+		;;
+	del_subscription)
+		uci -q delete vpnpool.main.subscription_url
+		uci commit vpnpool
+		rm -f /etc/vpnpool/sub.expire
+		signal_refetch
+		echo '{"ok":true}'
+		;;
+	add_source)
+		u=$(echo "$input" | jq -r '.url // ""')
+		[ -n "$u" ] && { uci add_list vpnpool.main.source="$u"; uci commit vpnpool; signal_refetch; }
+		echo '{"ok":true}'
+		;;
+	del_source)
+		u=$(echo "$input" | jq -r '.url // ""')
+		[ -n "$u" ] && { uci del_list vpnpool.main.source="$u"; uci commit vpnpool; signal_refetch; }
+		echo '{"ok":true}'
+		;;
+	set_communities)
+		uci -q delete vpnpool.routing.community
+		echo "$input" | jq -r '.communities[]? // empty' | while read -r c; do
+			[ -n "$c" ] && uci add_list vpnpool.routing.community="$c"
+		done
+		uci commit vpnpool
+		signal_reload
+		echo '{"ok":true}'
+		;;
+	set_auto_members)
+		# Which node tags take part in urltest auto-switching. Empty list = ALL
+		# nodes (default; future nodes auto-join). A non-empty list pins the pool.
+		uci -q delete vpnpool.main.auto_member
+		echo "$input" | jq -r '.members[]? // empty' | while read -r m; do
+			[ -n "$m" ] && uci add_list vpnpool.main.auto_member="$m"
+		done
+		uci commit vpnpool
+		signal_reload
+		echo '{"ok":true}'
+		;;
+	set_clients)
+		m=$(echo "$input" | jq -r '.mode // "all"')
+		uci set vpnpool.main.client_mode="$m"
+		uci -q delete vpnpool.main.client
+		echo "$input" | jq -r '.clients[]? // empty' | while read -r c; do
+			[ -n "$c" ] && uci add_list vpnpool.main.client="$c"
+		done
+		uci commit vpnpool
+		signal_reload
+		echo '{"ok":true}'
+		;;
+	set_option)
+		k=$(echo "$input" | jq -r '.name // ""')
+		v=$(echo "$input" | jq -r '.value // ""')
+		case "$k" in
+		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|subscription_ua|telegram_enabled|telegram_token|telegram_chat|ipv6)
+			uci set vpnpool.main."$k"="$v"; uci commit vpnpool
+			case "$k" in
+				subscription_interval|telegram_*) : ;;   # read live by the daemon, no reload
+				*) signal_reload ;;
+			esac
+			echo '{"ok":true}'
+			;;
+		*)
+			echo '{"error":"unknown option"}'
+			;;
+		esac
+		;;
+	tg_test)
+		code=$(tg_send "✅ vpnpool: test message" 2>/dev/null)
+		if [ "$code" = "200" ]; then
+			echo '{"ok":true}'
+		else
+			echo "{\"ok\":false,\"http\":\"${code:-000}\"}"
+		fi
+		;;
+	add_node)
+		l=$(echo "$input" | jq -r '.link // ""')
+		[ -n "$l" ] && { uci add_list vpnpool.main.manual_node="$l"; uci commit vpnpool; signal_reload; }
+		echo '{"ok":true}'
+		;;
+	del_node)
+		l=$(echo "$input" | jq -r '.link // ""')
+		[ -n "$l" ] && { uci del_list vpnpool.main.manual_node="$l"; uci commit vpnpool; signal_reload; }
+		echo '{"ok":true}'
+		;;
+	set_domains)
+		uci -q delete vpnpool.routing.domain
+		echo "$input" | jq -r '.domains[]? // empty' | while read -r d; do
+			[ -n "$d" ] && uci add_list vpnpool.routing.domain="$d"
+		done
+		uci commit vpnpool
+		signal_reload
+		echo '{"ok":true}'
+		;;
+	*)
+		echo '{"error":"unknown method"}'
+		;;
+	esac
+	;;
+esac

@@ -1,0 +1,21 @@
+# This repository targets Linux/OpenWrt only. Force LF on checkout everywhere so
+# shell/ucode/config files never get CRLF (which breaks #!/bin/sh and busybox).
+* text=auto eol=lf
+
+# Explicit: scripts and configs are always LF text
+*.sh        text eol=lf
+*.uc        text eol=lf
+*.js        text eol=lf
+*.json      text eol=lf
+*.lua       text eol=lf
+Makefile    text eol=lf
+*.md        text eol=lf
+vpnpool     text eol=lf
+vpnpoold    text eol=lf
+
+# Binary artifacts
+*.ipk       binary
+*.srs       binary
+*.db        binary
+*.png       binary
+*.jpg       binary

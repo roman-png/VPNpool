@@ -1,0 +1,50 @@
+# vpnpool - control-plane over sing-box (analog of v2RayTun / Happ)
+# Coexists with podkop (separate sing-box instance). Editable via uci / LuCI.
+# NOTE: stage 1 skeleton - the daemon does not route any traffic yet.
+
+config vpnpool 'main'
+	option enabled '0'
+	option mode 'selective'
+	option subscription_url ''
+	option subscription_ua 'v2rayNG/1.8.5'
+	option subscription_interval '6h'
+	option health_url 'http://cp.cloudflare.com/generate_204'
+	option failover_interval '60'
+	option failover_tolerance '50'
+	option auto_switch '1'
+	# persisted manual node pick (empty = AUTO/urltest); set by the UI "Use" button
+	option selected_node ''
+	# IPv6 policy: block (fail-closed) | off | proxy
+	option ipv6 'block'
+	# Per-client routing: all | exclude (listed bypass) | include (only listed).
+	# Clients are IPv4 addresses, e.g.:  list client '192.168.1.50'
+	option client_mode 'all'
+	# Telegram alerts (failover / subscription / lifecycle)
+	option telegram_enabled '0'
+	option telegram_token ''
+	option telegram_chat ''
+	# --- non-colliding resources (discovered; MUST differ from podkop/zapret) ---
+	# podkop: mark 0x100000, table podkop(pri105), tproxy :1602, clash :9090
+	# zapret: mark 0x20000000 / ct 0x40000000
+	option fwmark '0x400000'
+	option route_table '142'
+	option route_priority '106'
+	option tproxy_port '1603'
+	option test_port '1605'
+	option clash_api '127.0.0.1:9091'
+	option singbox_config '/etc/vpnpool/sing-box.json'
+	option log_level 'warn'
+	# lan_if empty = auto-detect (portable). coexist: auto|on|off — yield traffic
+	# already marked by podkop/other proxies so we don't double-intercept it.
+	option lan_if ''
+	option coexist 'auto'
+
+# Selective routing lists. Starter set mirrors podkop; fully editable.
+config routing 'routing'
+	list community 'telegram'
+	list community 'russia_inside'
+
+# Manual VLESS nodes (in addition to the subscription). Example:
+# config node
+#	option link 'vless://...#name'
+#	option enabled '1'
