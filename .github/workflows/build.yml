@@ -33,12 +33,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # The OpenWrt SDK action chowns the whole workspace; git's background repack
-      # can delete loose objects mid-chown -> "chown: cannot access .git/objects/..."
-      # -> the job flakes red. The SDK only needs the package/ tree, not history,
-      # so drop .git to remove the race entirely.
-      - name: Drop .git (avoid gh-action-sdk chown race)
-        run: rm -rf .git
+      # The OpenWrt SDK action chowns the whole workspace; post-checkout git
+      # maintenance can remove loose objects mid-chown -> "chown: cannot access
+      # .git/objects/..." -> the job flakes red. Pack all loose objects up front
+      # (synchronously) so .git/objects holds only stable packfiles during the
+      # action's chown. .git stays valid (the action runs git internally).
+      - name: Pack git objects (avoid gh-action-sdk chown race)
+        run: |
+          git config gc.auto 0
+          git repack -ad || true
+          git gc --prune=now || true
 
       - name: Build packages (OpenWrt SDK)
         uses: openwrt/gh-action-sdk@main
