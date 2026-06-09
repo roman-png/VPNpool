@@ -60,8 +60,14 @@ IMPTAGS=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/imported.links" 2>/dev/
 MANTAGS=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/manual.links" 2>/dev/null | jq -c '[.[].tag]' 2>/dev/null); [ -n "$MANTAGS" ] || MANTAGS='[]'
 # saved node tags (persistent favourites that survive subscription expiry — the
 # INACTIVE archive) and the subset the user promoted back into the live pool.
-SAVEDTAGS=$(saved_tags_json 2>/dev/null | jq -c . 2>/dev/null); [ -n "$SAVEDTAGS" ] || SAVEDTAGS='[]'
-ACTSAVEDTAGS=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/active_saved.links" 2>/dev/null | jq -c '[.[].tag]' 2>/dev/null); [ -n "$ACTSAVEDTAGS" ] || ACTSAVEDTAGS='[]'
+# Parse the saved archive ONCE; reuse for the ⭐ flag (identity match) and the inactive
+# list. Identity = server:port:uuid:sni:short_id — display tags/links are unreliable in
+# this subscription (one uuid reused, same server under many country names), so matching
+# saved nodes by tag wrongly dropped the ⭐ off live saved nodes. nid is defined per jq.
+saved_archive_json 2>/dev/null | jq -r '.[].link' 2>/dev/null > "$SB_DATA/.archive.links"
+ARCHIVE_NODES=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/.archive.links" 2>/dev/null | jq -c '.' 2>/dev/null); [ -n "$ARCHIVE_NODES" ] || ARCHIVE_NODES='[]'
+ARCHIVE_IDS=$(echo "$ARCHIVE_NODES" | jq -c 'def nid: (.server|tostring)+":"+(.server_port|tostring)+":"+(.uuid//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//""); [ .[] | nid ]' 2>/dev/null); [ -n "$ARCHIVE_IDS" ] || ARCHIVE_IDS='[]'
+ACTSAVED_IDS=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/active_saved.links" 2>/dev/null | jq -c 'def nid: (.server|tostring)+":"+(.server_port|tostring)+":"+(.uuid//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//""); [ .[] | nid ]' 2>/dev/null); [ -n "$ACTSAVED_IDS" ] || ACTSAVED_IDS='[]'
 
 # Per-node + per-client LIVE traffic, aggregated from clash connections (bytes,
 # cumulative per connection). Read-only; written to small files for the final jq.
@@ -102,17 +108,18 @@ jq -n \
 	--slurpfile ul "$UNLOCKF" \
 	--argjson imp "$IMPTAGS" \
 	--argjson man "$MANTAGS" \
-	--argjson savd "$SAVEDTAGS" \
-	--argjson actsavd "$ACTSAVEDTAGS" \
-	'(($p[0] // {}) | .proxies // {}) as $px | ($nt[0] // {}) as $tr | ($ul[0] // {}) as $un | ($n[0] // []) | map({
+	--argjson archids "$ARCHIVE_IDS" \
+	--argjson actsavids "$ACTSAVED_IDS" \
+	'def nid: (.server|tostring)+":"+(.server_port|tostring)+":"+(.uuid//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//"");
+	(($p[0] // {}) | .proxies // {}) as $px | ($nt[0] // {}) as $tr | ($ul[0] // {}) as $un | ($n[0] // []) | map({
 		tag: .tag,
 		server: .server,
 		port: .server_port,
 		delay: (($px[.tag].history // []) | last | .delay // null),
 		up: ($tr[.tag].up // 0),
 		down: ($tr[.tag].down // 0),
-		saved: (.tag as $t | ($savd | index($t)) != null),
-		active_saved: (.tag as $t | ($actsavd | index($t)) != null),
+		saved: (nid as $id | ($archids | index($id)) != null),
+		active_saved: (nid as $id | ($actsavids | index($id)) != null),
 		unlock: ($un[.tag] // null),
 		group: (.tag as $t | if ($imp | index($t)) then "imported" elif ($man | index($t)) then "manual" else "subscription" end)
 	})' > "$NODESF" 2>/dev/null
@@ -125,8 +132,10 @@ jq -n \
 # country names, so tags and even base links can't tell duplicates apart). Parse the
 # archive links and diff against the parsed active nodes (nodes.json) on that key.
 ACTIVE_IDS=$(jq -c '[ .[] | (.server|tostring)+":"+(.server_port|tostring)+":"+(.uuid//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//"") ]' "$NODES_FILE" 2>/dev/null); [ -n "$ACTIVE_IDS" ] || ACTIVE_IDS='[]'
-saved_archive_json 2>/dev/null | jq -r '.[].link' 2>/dev/null > "$SB_DATA/.archive.links"
-SAVEDINACTIVE=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/.archive.links" 2>/dev/null \
+# Inactive saved list = archived nodes whose identity is NOT currently live. Active saved
+# nodes are shown with a 💾 marker in the MAIN list instead; here we list only the ones
+# that fell out of the subscription, each with an "Add to active" button.
+SAVEDINACTIVE=$(echo "$ARCHIVE_NODES" \
 	| jq -c --argjson act "$ACTIVE_IDS" '
 		def nid: (.server|tostring)+":"+(.server_port|tostring)+":"+(.uuid//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//"");
 		map(. + {_id: nid}) | unique_by(._id)

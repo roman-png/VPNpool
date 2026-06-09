@@ -438,7 +438,6 @@ return view.extend({
 			return E('tr', { 'class': 'tr', 'style': act ? 'background:rgba(46,125,50,.12)' : (pooled ? '' : 'opacity:.55') }, [
 				E('td', { 'class': 'td' }, act ? '★' : ''),
 				E('td', { 'class': 'td' }, [
-					n.saved ? E('span', { 'style': 'color:#e0a800;margin-right:4px;font-size:12px', 'title': _('Saved from subscription (kept after it expires)') }, '⭐') : '',
 					E('span', {}, n.tag),
 					n.active_saved ? E('span', { 'style': 'margin-left:5px;font-size:12px;color:#1565c0;vertical-align:middle', 'title': _('A saved node you promoted into the active pool') }, '➕') : '',
 					pooled ? '' : E('span', { 'style': 'margin-left:6px;font-size:10px;color:#888;border:1px solid #888;border-radius:8px;padding:0 5px',
@@ -454,7 +453,7 @@ return view.extend({
 						'click': ui.createHandlerFn(this, 'handleSelect', n.tag) }, _('Use')),
 					' ',
 					E('button', { 'class': 'btn cbi-button', 'title': n.saved ? _('Remove from saved') : _('Save node (keep after subscription expires)'),
-						'click': ui.createHandlerFn(this, n.saved ? 'handleUnsaveNode' : 'handleSaveNode', n.tag) }, n.saved ? '☆' : '⭐'),
+						'click': ui.createHandlerFn(this, n.saved ? 'handleUnsaveNode' : 'handleSaveNode', n.tag) }, n.saved ? '💾' : '⭐'),
 					' ',
 					n.active_saved ? E('button', { 'class': 'btn cbi-button', 'title': _('Remove from the active pool (keeps it saved)'),
 						'click': ui.createHandlerFn(this, 'handleDeactivateSaved', n.tag) }, '⏏') : '',
@@ -526,7 +525,6 @@ return view.extend({
 		var rows = list.map(L.bind(function(n) {
 			return E('tr', { 'class': 'tr', 'style': 'opacity:.85' }, [
 				E('td', { 'class': 'td' }, [
-					E('span', { 'style': 'margin-right:4px;color:#e0a800;font-size:12px', 'title': _('Saved from subscription') }, '⭐'),
 					E('span', {}, n.tag)
 				]),
 				E('td', { 'class': 'td', 'style': 'font-family:monospace;color:#666' }, (n.server || '') + ':' + (n.port || '')),
@@ -538,7 +536,7 @@ return view.extend({
 						'click': ui.createHandlerFn(this, 'handleShowLink', n.tag) }, '🔗'),
 					' ',
 					E('button', { 'class': 'btn cbi-button', 'title': _('Remove from saved'),
-						'click': ui.createHandlerFn(this, 'handleUnsaveNode', n.tag) }, '☆')
+						'click': ui.createHandlerFn(this, 'handleUnsaveNode', n.tag) }, '💾')
 				])
 			]);
 		}, this));
