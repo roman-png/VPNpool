@@ -137,9 +137,20 @@ push(outbounds, {
 	interrupt_exist_connections: true
 });
 
-// the actual node outbounds
-for (let n in nodes)
+// the actual node outbounds. Anti-DPI: when enabled, ask sing-box to fragment the
+// TLS ClientHello (tls_fragment) so SNI-based DPI can't match the handshake. Applied
+// to TLS-bearing node types. NOTE: requires a sing-box build that supports the
+// tls_fragment dial field (>=1.12); if not, `sing-box check` rejects the new config
+// and build.sh keeps the PREVIOUS working one (so the worst case is "no effect").
+let antidpi = opt('main', 'antidpi', '0');
+let TLS_TYPES = { vless: 1, trojan: 1, vmess: 1, shadowtls: 1, http: 1 };
+for (let n in nodes) {
+	if (antidpi == '1' && TLS_TYPES[n.type]) {
+		n.tls_fragment = true;
+		n.tls_fragment_fallback_delay = '500ms';
+	}
 	push(outbounds, n);
+}
 
 // direct egress
 push(outbounds, { type: 'direct', tag: 'direct' });
@@ -160,6 +171,18 @@ if (length(comm_tags))
 	push(rules, { rule_set: comm_tags, outbound: listed_ob });
 if (length(domains))
 	push(rules, { domain_suffix: domains, outbound: listed_ob });
+
+// Adaptive routing: domains auto-detected as blocked-for-direct (adaptive.sh) always
+// go through the proxy, regardless of selective/exclude mode.
+let adaptive = opt('main', 'adaptive_routing', '0');
+let auto_domains = uci.get('vpnpool', 'routing', 'auto_domain') ?? [];
+if (type(auto_domains) != 'array')
+	auto_domains = [auto_domains];
+let auto_dom_clean = [];
+for (let d in auto_domains)
+	if (length(d)) push(auto_dom_clean, d);
+if (adaptive == '1' && length(auto_dom_clean))
+	push(rules, { domain_suffix: auto_dom_clean, outbound: 'proxy' });
 
 let route = {
 	rules: rules,

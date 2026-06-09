@@ -18,6 +18,8 @@ var callImport   = rpc.declare({ object: 'vpnpool', method: 'import_select',    
 var callAddNode  = rpc.declare({ object: 'vpnpool', method: 'add_node',         params: [ 'link' ] });
 var callDelNode  = rpc.declare({ object: 'vpnpool', method: 'del_node',         params: [ 'link' ] });
 var callSetOpt   = rpc.declare({ object: 'vpnpool', method: 'set_option',       params: [ 'name', 'value' ] });
+var callAddExtraSub = rpc.declare({ object: 'vpnpool', method: 'add_sub',       params: [ 'url' ] });
+var callDelExtraSub = rpc.declare({ object: 'vpnpool', method: 'del_sub',       params: [ 'url' ] });
 
 function nodeName(l) {
 	var h = l.indexOf('#');
@@ -30,7 +32,8 @@ function pingColor(d) { if (d == null) return '#999'; if (d < 150) return '#2e7d
 return view.extend({
 	reload: function() { return callStatus().then(L.bind(function(st) { this.st = st;
 		dom.content(document.getElementById('vp-srclist'), this.renderSources(st));
-		dom.content(document.getElementById('vp-manlist'), this.renderManual(st)); }, this)); },
+		dom.content(document.getElementById('vp-manlist'), this.renderManual(st));
+		var es = document.getElementById('vp-extrasublist'); if (es) dom.content(es, this.renderExtraSubs(st)); }, this)); },
 
 	notify: function(msg) { ui.addNotification(null, E('p', msg), 'info'); },
 
@@ -48,6 +51,24 @@ return view.extend({
 		return E('ul', { 'style': 'list-style:none;padding-left:0' },
 			items.length ? items : [ E('li', { 'style': 'color:#888' }, _('(no saved sources yet)')) ]);
 	},
+	renderExtraSubs: function(st) {
+		var self = this;
+		var items = (st.extra_subs || []).map(function(u) {
+			return E('li', { 'style': 'margin:4px 0' }, [
+				E('button', { 'class': 'btn cbi-button cbi-button-remove', 'style': 'margin-right:8px',
+					'click': ui.createHandlerFn(self, 'handleDelExtraSub', u) }, _('Remove')),
+				E('span', { 'style': 'font-family:monospace;font-size:12px;word-break:break-all' }, u)
+			]);
+		});
+		return E('ul', { 'style': 'list-style:none;padding-left:0' },
+			items.length ? items : [ E('li', { 'style': 'color:#888' }, _('(no extra subscriptions)')) ]);
+	},
+	handleAddExtraSub: function(inp) {
+		var v = (inp.value || '').trim(); if (!v) { ui.addNotification(null, E('p', _('Enter a subscription URL first.')), 'warning'); return; }
+		return callAddExtraSub(v).then(L.bind(function() { inp.value = ''; this.notify(_('Extra subscription added — fetching…')); this.reload(); }, this));
+	},
+	handleDelExtraSub: function(u) { return callDelExtraSub(u).then(L.bind(function() { this.notify(_('Extra subscription removed.')); this.reload(); }, this)); },
+
 	renderManual: function(st) {
 		var self = this;
 		var items = (st.manual_nodes || []).map(function(l) {
@@ -170,6 +191,8 @@ return view.extend({
 			'value': (st.subscription && st.subscription.url) || '', 'placeholder': 'https://…/sub' });
 		var srcInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:100%',
 			'placeholder': 'https://raw.githubusercontent.com/…' });
+		var extraSubInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:100%',
+			'placeholder': 'https://…/sub' });
 		var manInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:100%', 'placeholder': 'vless://…' });
 		var intInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:120px',
 			'value': (st.settings && st.settings.subscription_interval) || '6h' });
@@ -190,6 +213,15 @@ return view.extend({
 					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleSaveInterval', intInput) }, _('Save')),
 					E('span', { 'style': 'color:#888;margin-left:8px' }, _('e.g. 6h, 30m, 12h'))
 				])
+			]),
+
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('Extra subscriptions')),
+				E('p', { 'style': 'color:#888' }, _('Additional full subscriptions are bulk-merged into the pool alongside the main one (quota/expiry come only from the main subscription).')),
+				extraSubInput,
+				E('button', { 'class': 'btn cbi-button cbi-button-add', 'style': 'margin-top:6px',
+					'click': ui.createHandlerFn(this, 'handleAddExtraSub', extraSubInput) }, _('Add subscription')),
+				E('div', { 'id': 'vp-extrasublist', 'style': 'margin-top:8px' }, this.renderExtraSubs(st))
 			]),
 
 			E('div', { 'class': 'cbi-section' }, [

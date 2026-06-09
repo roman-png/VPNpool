@@ -44,7 +44,9 @@ fetch_best() {   # $1=url $2=primary(0/1) $3=outfile
 		if [ "$cnt" -gt "$best" ]; then
 			best="$cnt"; bestua="$ua"; cp "$SB_DATA/n.tmp" "$outfile"
 			if [ "$primary" = "1" ]; then
-				EXP=$(grep -i '^subscription-userinfo:' "$SB_DATA/h.tmp" 2>/dev/null | grep -o 'expire=[0-9]*' | head -1 | cut -d= -f2)
+				UINFO=$(grep -i '^subscription-userinfo:' "$SB_DATA/h.tmp" 2>/dev/null | head -1); EXP=$(echo "$UINFO" | grep -o 'expire=[0-9]*' | head -1 | cut -d= -f2)
+					UP=$(echo "$UINFO" | grep -o 'upload=[0-9]*' | head -1 | cut -d= -f2); DN=$(echo "$UINFO" | grep -o 'download=[0-9]*' | head -1 | cut -d= -f2); TOT=$(echo "$UINFO" | grep -o 'total=[0-9]*' | head -1 | cut -d= -f2)
+					[ -n "$TOT" ] && [ "$TOT" -gt 0 ] 2>/dev/null && echo "${UP:-0} ${DN:-0} ${TOT}" > "$CONF_DIR/sub.usage"
 				[ -n "$EXP" ] && echo "$EXP" > "$CONF_DIR/sub.expire"
 			fi
 		fi
@@ -63,6 +65,16 @@ if [ -n "$SUB_URL" ]; then
 	fetch_best "$SUB_URL" 1 "$SRCDIR/$(printf '%03d' "$n").raw" && ok=1
 	n=$((n + 1))
 fi
+
+# Extra FULL subscriptions (uci list extra_sub): bulk-merged into the pool like the
+# primary, each into its own NNN.raw (build.sh merges every *.raw). Quota/expiry are
+# only taken from the PRIMARY subscription (primary=0 here). vless:// links have no
+# spaces, so a plain `uci get` list read is safe.
+for esub in $(uci -q get vpnpool.main.extra_sub); do
+	[ -n "$esub" ] || continue
+	fetch_best "$esub" 0 "$SRCDIR/$(printf '%03d' "$n").raw" && ok=1
+	n=$((n + 1))
+done
 # NOTE: extra `source` URLs are NOT bulk-merged anymore — a public list can carry
 # hundreds/thousands of nodes and flood the pool. They are now "probe-only": the
 # UI fetches a source, the user picks specific nodes, and those are stored as

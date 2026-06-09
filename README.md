@@ -33,6 +33,37 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
 - 🔀 **Automatic ping + failover** — sing‑box `urltest` health‑checks every node and
   **switches to a working VLESS server automatically** when the active one stops
   responding. Manual override and manual "ping all" too.
+- ⭐ **Preferred node with switch‑back** — pin a favourite node: it's used while it's
+  reachable, control is handed to auto if it dies, and it **switches back** when it
+  recovers (anti‑flap hysteresis on top of urltest tolerance).
+- 📊 **Subscription data quota** — parses the panel's `subscription‑userinfo` header
+  and shows **used / total GB** with a progress bar (plus a Telegram alert when
+  <10% remains), alongside the expiry date.
+- 💾 **Saved nodes** — promote any subscription node into a **separate persistent
+  store** (⭐) so it stays usable **after the subscription expires**. Optional
+  **auto‑snapshot** keeps a bounded fallback set of currently‑reachable nodes
+  saved automatically (manual ⭐ picks are never evicted).
+- 🔎 **Search / filter / sort nodes** — find a node by name/server, show only
+  reachable ones, sort by ping/name/traffic — handy with hundreds of nodes.
+- ⚡ **Per‑node real speed test** — on‑demand throughput (Mbit/s), not just ping.
+- 📈 **Live per‑node & per‑client traffic** — see how much goes through each node
+  and **each LAN device** (with DHCP hostnames).
+- ⏰ **Scheduler** — turn the VPN on/off and refresh the subscription on a daily
+  timetable (cron), e.g. off overnight, refresh every morning.
+- 🔗 **Share / export nodes** — per‑node **share link + offline QR** (move a node to
+  your phone), and **export** saved/manual/all nodes as a base64 subscription. QR is
+  generated **client‑side** so node secrets never leave the router.
+- 🧩 **Multiple subscriptions** — add extra full subscriptions that are bulk‑merged
+  into the pool alongside the main one.
+- 🤖 **Two‑way Telegram bot** — `/status /nodes /switch /speedtest /quota /saved
+  /clients /on /off /refresh`, locked to your chat id, tunnelled through the VPN.
+- 🧠 **Adaptive routing** — auto‑detects domains that are **blocked for a direct
+  connection** (RST/timeout) and routes just those through the VPN, so the proxy
+  list maintains itself for *your* ISP. Plus a one‑click “this site is blocked”.
+- 🎬 **Per‑node unlock test** — check what each node opens (YouTube / ChatGPT /
+  Netflix / Instagram / Telegram / Google) and see badges right in the dashboard.
+- 🛡️ **Anti‑DPI** — one toggle to fragment the TLS ClientHello (sing‑box
+  `tls_fragment`) and defeat SNI‑based DPI.
 - 🎛️ **Configurable auto‑pool** — on the Dashboard, click **⚙ Configure** next to the
   AUTO row to pick **exactly which nodes take part in automatic switching**.
   Unchecked nodes stay available for manual selection but are never auto‑picked.
@@ -45,11 +76,16 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
   (they bypass the VPN), or allow **only** specific devices.
 - 🧩 **Protocols** — VLESS (Reality + `xtls‑rprx‑vision`), VMess, Trojan, Shadowsocks,
   plus sing‑box JSON configs.
-- 🛡️ **IPv6 leak guard** (fail‑closed), **Clash API bound to loopback** (not exposed
-  on the LAN), **kill‑switch‑style** fail‑closed behaviour.
+- 🛡️ **Leak protection** — **IPv6 leak guard** (fail‑closed), opt‑in **kill‑switch**
+  (fail‑closed IPv4 in full‑tunnel mode, so nothing leaks if the VPN drops) and
+  opt‑in **DNS‑leak guard** (routes LAN DNS through the tunnel). **Clash API bound
+  to loopback** (not exposed on the LAN).
 - 🤝 **Coexists** with [podkop](https://github.com/itdoginfo/podkop) and zapret
   (auto‑detected, non‑colliding marks/tables/ports) — or runs **standalone**.
-- 🔔 **Telegram alerts** — node failover, subscription expiry, start/stop.
+- 🔔 **Telegram alerts + two‑way control bot** — alerts on failover, subscription
+  expiry/quota and start/stop; an optional bot accepts **/status, /nodes, /switch,
+  /on, /off, /refresh** (locked to your chat id). Telegram traffic is **tunnelled
+  through the VPN**, so the bot works even where `api.telegram.org` is blocked.
 - 🖥️ **LuCI dashboard** (5 tabs, auto **RU/EN**): live node pings, traffic & connection
   stats, on/off, manual select, sources, routing, settings, diagnostics (incl. a real
   **"test exit via VPN"** check), backup/restore.
@@ -331,11 +367,25 @@ the data plane is **sing‑box**, exactly like v2RayTun/Happ wrap an engine.
 | Engine | sing‑box | sing‑box | xray/sing‑box | sing‑box |
 | Auto‑updating subscription | ✅ multi‑source, multi‑UA | partial | ✅ | ✅ |
 | **Auto ping + failover** | ✅ urltest + watchdog | manual select | ✅ | ✅ |
+| **Preferred node + switch‑back** | ✅ | — | — | — |
 | **Pick which nodes auto‑switch** | ✅ | — | — | — |
+| **Subscription data quota** | ✅ used/total + bar | — | — | — |
+| **Saved nodes (survive expiry)** | ✅ | — | — | — |
+| **Per‑node speed test** | ✅ throughput | — | — | — |
+| **Per‑node & per‑client stats** | ✅ live | — | partial | partial |
+| **On/off + refresh scheduler** | ✅ | — | — | — |
+| **Share link + offline QR / export** | ✅ | — | — | — |
+| **Multiple full subscriptions** | ✅ | — | partial | ✅ |
+| **Two‑way Telegram control bot** | ✅ | — | — | — |
+| **Adaptive routing (auto‑detect blocks)** | ✅ | — | — | — |
+| **Per‑node unlock test (YT/AI/NF…)** | ✅ | — | — | — |
+| **Anti‑DPI TLS fragmentation** | ✅ toggle | — | — | — |
+| **Kill‑switch + DNS‑leak guard** | ✅ opt‑in | partial | ✅ | partial |
 | Community SRS lists | ✅ (itdoginfo) | ✅ | own | own |
 | Per‑client routing | ✅ | — | ✅ | partial |
 | VPN‑exit self‑test | ✅ | ✅ | partial | — |
 | Telegram alerts | ✅ | — | — | — |
+| **Two‑way Telegram control bot** | ✅ (tunnelled) | — | — | — |
 | Coexists with podkop | ✅ (by design) | n/a | — | — |
 | Auto RU/EN UI | ✅ | RU/EN | RU/EN | EN/ZH |
 
@@ -354,9 +404,11 @@ the data plane is **sing‑box**, exactly like v2RayTun/Happ wrap an engine.
 ## 🗺️ Roadmap
 
 - Near‑instant active‑probe failover (below the urltest interval)
-- DoH‑over‑proxy DNS for fully leak‑free selective routing
+- Full sing‑box DNS/FakeIP with DoH‑over‑proxy for fully leak‑free selective routing
+  (current DNS guard covers LAN clients that query public resolvers directly)
 - Full IPv6 tproxy (proxy mode, not just block)
-- Clash YAML subscription parsing; node search/filter
+- Clash YAML subscription parsing
+- Multi‑hop / chain proxy (entry in one country, exit in another)
 
 ## 🤝 Contributing
 
