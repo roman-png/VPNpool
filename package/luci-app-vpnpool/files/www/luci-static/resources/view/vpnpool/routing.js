@@ -75,7 +75,7 @@ return view.extend({
 		]);
 		var clBox = E('textarea', { 'class': 'cbi-input-textarea', 'style': 'width:100%;height:90px', 'placeholder': '192.168.1.50' }, (st.clients || []).join('\n'));
 
-		return E('div', { 'class': 'cbi-map' }, [
+		return E('div', { 'class': 'cbi-map vpnpool-view' }, [
 			i18n.header(_('VPN Pool — Routing')),
 
 			E('div', { 'class': 'cbi-section' }, [

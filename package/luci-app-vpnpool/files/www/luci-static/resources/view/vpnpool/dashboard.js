@@ -16,6 +16,8 @@ var callPing       = rpc.declare({ object: 'vpnpool', method: 'ping' });
 var callSetAutoMembers = rpc.declare({ object: 'vpnpool', method: 'set_auto_members', params: [ 'members' ] });
 var callSaveNode   = rpc.declare({ object: 'vpnpool', method: 'save_node',   params: [ 'tag' ] });
 var callUnsaveNode = rpc.declare({ object: 'vpnpool', method: 'unsave_node', params: [ 'tag' ] });
+var callActivateSaved   = rpc.declare({ object: 'vpnpool', method: 'activate_saved',   params: [ 'tag' ] });
+var callDeactivateSaved = rpc.declare({ object: 'vpnpool', method: 'deactivate_saved', params: [ 'tag' ] });
 var callSpeedtest  = rpc.declare({ object: 'vpnpool', method: 'speedtest',   params: [ 'tag' ] });
 var callSpeedRes   = rpc.declare({ object: 'vpnpool', method: 'speedtest_result' });
 var callNodeLink   = rpc.declare({ object: 'vpnpool', method: 'node_link',    params: [ 'tag' ] });
@@ -138,14 +140,28 @@ return view.extend({
 		}, this));
 	},
 	handleSaveNode: function(tag) {
+		// archive-only change (no config rebuild) -> refresh right away so the star
+		// appears immediately; the backend wrote the map before returning.
 		return callSaveNode(tag).then(L.bind(function() {
 			ui.addNotification(null, E('p', _('Node saved: %s').format(tag)), 'info');
-			window.setTimeout(L.bind(this.refresh, this), 1500);
+			return this.refresh();
 		}, this));
 	},
 	handleUnsaveNode: function(tag) {
 		return callUnsaveNode(tag).then(L.bind(function() {
 			ui.addNotification(null, E('p', _('Node removed from saved: %s').format(tag)), 'info');
+			window.setTimeout(L.bind(this.refresh, this), 1200);
+		}, this));
+	},
+	handleActivateSaved: function(tag) {
+		return callActivateSaved(tag).then(L.bind(function() {
+			ui.addNotification(null, E('p', _('Added to the active pool: %s').format(tag)), 'info');
+			window.setTimeout(L.bind(this.refresh, this), 1500);
+		}, this));
+	},
+	handleDeactivateSaved: function(tag) {
+		return callDeactivateSaved(tag).then(L.bind(function() {
+			ui.addNotification(null, E('p', _('Removed from the active pool: %s').format(tag)), 'info');
 			window.setTimeout(L.bind(this.refresh, this), 1500);
 		}, this));
 	},
@@ -278,9 +294,11 @@ return view.extend({
 		return callStatus().then(L.bind(function(st) {
 			this._st = st;
 			var a = document.getElementById('vp-status'), b = document.getElementById('vp-nodes'), c = document.getElementById('vp-clients');
+			var d = document.getElementById('vp-saved-inactive');
 			if (a) dom.content(a, this.renderStatus(st));
 			if (b) dom.content(b, this.renderNodes(st));
 			if (c) dom.content(c, this.renderClients(st));
+			if (d) dom.content(d, this.renderSavedInactive(st));
 		}, this));
 	},
 
@@ -420,8 +438,9 @@ return view.extend({
 			return E('tr', { 'class': 'tr', 'style': act ? 'background:rgba(46,125,50,.12)' : (pooled ? '' : 'opacity:.55') }, [
 				E('td', { 'class': 'td' }, act ? '★' : ''),
 				E('td', { 'class': 'td' }, [
-					n.saved ? E('span', { 'style': 'color:#e0a800;margin-right:4px', 'title': _('Saved') }, '⭐') : '',
+					n.saved ? E('span', { 'style': 'color:#e0a800;margin-right:4px;font-size:12px', 'title': _('Saved from subscription (kept after it expires)') }, '⭐') : '',
 					E('span', {}, n.tag),
+					n.active_saved ? E('span', { 'style': 'margin-left:5px;font-size:12px;color:#1565c0;vertical-align:middle', 'title': _('A saved node you promoted into the active pool') }, '➕') : '',
 					pooled ? '' : E('span', { 'style': 'margin-left:6px;font-size:10px;color:#888;border:1px solid #888;border-radius:8px;padding:0 5px',
 						'title': _('Excluded from auto-switching (manual only)') }, _('manual')),
 					unlockBadges(n.unlock)
@@ -437,6 +456,9 @@ return view.extend({
 					E('button', { 'class': 'btn cbi-button', 'title': n.saved ? _('Remove from saved') : _('Save node (keep after subscription expires)'),
 						'click': ui.createHandlerFn(this, n.saved ? 'handleUnsaveNode' : 'handleSaveNode', n.tag) }, n.saved ? '☆' : '⭐'),
 					' ',
+					n.active_saved ? E('button', { 'class': 'btn cbi-button', 'title': _('Remove from the active pool (keeps it saved)'),
+						'click': ui.createHandlerFn(this, 'handleDeactivateSaved', n.tag) }, '⏏') : '',
+					n.active_saved ? ' ' : '',
 					E('button', { 'class': 'btn cbi-button', 'title': _('Real speed test'),
 						'click': ui.createHandlerFn(this, 'handleSpeedtest', n.tag) }, '⚡'),
 					' ',
@@ -467,7 +489,9 @@ return view.extend({
 				]));
 			byGroup[g].forEach(function(n) { bodyRows.push(makeRow(n)); });
 		});
-		return E('table', { 'class': 'table' }, [ header, autoRow ].concat(bodyRows));
+		// vp-table -> responsive: on phones the rows reflow into wrapping cards (see
+		// the @media rule injected by i18n) so nothing is clipped or scrolled sideways.
+		return E('table', { 'class': 'table vp-table' }, [ header, autoRow ].concat(bodyRows));
 	},
 
 	// per-client (LAN device) live traffic, top consumers
@@ -487,19 +511,55 @@ return view.extend({
 				E('td', { 'class': 'td' }, c.conns || 0)
 			]);
 		});
-		return E('table', { 'class': 'table' }, [ header ].concat(rows));
+		return E('table', { 'class': 'table vp-table' }, [ header ].concat(rows));
+	},
+
+	// saved-from-subscription nodes NOT in the live pool right now: a separate INACTIVE
+	// list. Each can be promoted into the active pool, shared, or dropped from the archive.
+	renderSavedInactive: function(st) {
+		var list = st.saved_inactive || [];
+		if (!list.length) return E('em', { 'style': 'color:#888' },
+			_('No inactive saved nodes. Star a node to keep it here after the subscription drops it.'));
+		var header = E('tr', { 'class': 'tr table-titles' }, [
+			E('th', { 'class': 'th' }, _('Node')), E('th', { 'class': 'th' }, _('Server')), E('th', { 'class': 'th' }, _('Actions'))
+		]);
+		var rows = list.map(L.bind(function(n) {
+			return E('tr', { 'class': 'tr', 'style': 'opacity:.85' }, [
+				E('td', { 'class': 'td' }, [
+					E('span', { 'style': 'margin-right:4px;color:#e0a800;font-size:12px', 'title': _('Saved from subscription') }, '⭐'),
+					E('span', {}, n.tag)
+				]),
+				E('td', { 'class': 'td', 'style': 'font-family:monospace;color:#666' }, (n.server || '') + ':' + (n.port || '')),
+				E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, [
+					E('button', { 'class': 'btn cbi-button cbi-button-action', 'title': _('Add this saved node to the active pool'),
+						'click': ui.createHandlerFn(this, 'handleActivateSaved', n.tag) }, '➕ ' + _('Add to active')),
+					' ',
+					E('button', { 'class': 'btn cbi-button', 'title': _('Share link / QR'),
+						'click': ui.createHandlerFn(this, 'handleShowLink', n.tag) }, '🔗'),
+					' ',
+					E('button', { 'class': 'btn cbi-button', 'title': _('Remove from saved'),
+						'click': ui.createHandlerFn(this, 'handleUnsaveNode', n.tag) }, '☆')
+				])
+			]);
+		}, this));
+		return E('table', { 'class': 'table vp-table' }, [ header ].concat(rows));
 	},
 
 	load: function() { return callStatus(); },
 	render: function(st) {
 		this._st = st;
-		var c = E('div', { 'class': 'cbi-map' }, [
+		var c = E('div', { 'class': 'cbi-map vpnpool-view' }, [
 			i18n.header(_('VPN Pool — Dashboard')),
 			E('div', { 'class': 'cbi-section' }, [ E('div', { 'id': 'vp-status' }, this.renderStatus(st)) ]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Nodes')),
 				this.renderToolbar(),
 				E('div', { 'id': 'vp-nodes' }, this.renderNodes(st))
+			]),
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('Saved from subscription (inactive)')),
+				E('p', { 'style': 'color:#666;margin:2px 0 8px' }, _('Saved nodes are kept here even after the subscription drops them. They are NOT in the active pool until you add them.')),
+				E('div', { 'id': 'vp-saved-inactive' }, this.renderSavedInactive(st))
 			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Per-client traffic')),

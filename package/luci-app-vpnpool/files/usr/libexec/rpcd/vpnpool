@@ -17,7 +17,7 @@ signal_refetch() {
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
+{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
 L
 	;;
 call)
@@ -257,7 +257,12 @@ call)
 		[ -f "$LINKS" ] && link=$(jq -r --arg t "$tag" 'map(select(.tag==$t)) | .[0].link // ""' "$LINKS" 2>/dev/null)
 		if [ -n "$tag" ] && [ -n "$link" ]; then
 			jq --arg t "$tag" --arg l "$link" '.[$t]=$l' "$MAP" > "$MAP.tmp" 2>/dev/null && mv "$MAP.tmp" "$MAP"
-			rebuild_saved_list; signal_reload
+			# Saving only updates the INACTIVE archive — it does NOT change the live
+			# sing-box config, so NO signal_reload here (that full rebuild is what made
+			# the ⭐ feel laggy/flaky and needlessly bounced the tunnel). rebuild_saved_list
+			# refreshes the uci saved_node archive list for export; the dashboard star
+			# reflects the map write immediately on the next status poll.
+			rebuild_saved_list
 			echo '{"ok":true}'
 		else
 			echo '{"ok":false,"error":"no link for tag"}'
@@ -265,21 +270,53 @@ call)
 		;;
 	unsave_node)
 		# remove from BOTH the manual map and the auto-snapshot map, so an unsaved
-		# node doesn't immediately reappear on the next snapshot.
+		# node doesn't immediately reappear on the next snapshot. If it was promoted
+		# into the live pool (active_saved), drop it there too (that DOES need a reload).
 		tag=$(echo "$input" | jq -r '.tag // ""')
 		MAP=/etc/vpnpool/saved.map.json
 		[ -f "$MAP" ] || echo '{}' > "$MAP"
+		link=$(saved_link_for_tag "$tag")
 		jq --arg t "$tag" 'del(.[$t])' "$MAP" > "$MAP.tmp" 2>/dev/null && mv "$MAP.tmp" "$MAP"
 		[ -f "$SNAP_MAP" ] && { jq --arg t "$tag" 'del(.[$t])' "$SNAP_MAP" > "$SNAP_MAP.tmp" 2>/dev/null && mv "$SNAP_MAP.tmp" "$SNAP_MAP"; }
-		rebuild_saved_list; signal_reload
+		reload=0
+		if [ -n "$link" ] && uci -q get vpnpool.main.active_saved | tr ' ' '\n' | grep -Fxq "$link"; then
+			uci del_list vpnpool.main.active_saved="$link"; reload=1
+		fi
+		rebuild_saved_list                      # commits vpnpool (incl. the del_list above)
+		[ "$reload" = 1 ] && signal_reload
+		echo '{"ok":true}'
+		;;
+	activate_saved)
+		# promote an archived (inactive) saved node into the live active pool.
+		tag=$(echo "$input" | jq -r '.tag // ""')
+		link=$(saved_link_for_tag "$tag")
+		if [ -n "$link" ]; then
+			if uci -q get vpnpool.main.active_saved | tr ' ' '\n' | grep -Fxq "$link"; then :; else
+				uci add_list vpnpool.main.active_saved="$link"; uci commit vpnpool; signal_reload
+			fi
+			echo '{"ok":true}'
+		else
+			echo '{"ok":false,"error":"no link for tag"}'
+		fi
+		;;
+	deactivate_saved)
+		# demote a promoted saved node back to the inactive archive (stays saved).
+		tag=$(echo "$input" | jq -r '.tag // ""')
+		link=$(saved_link_for_tag "$tag")
+		[ -n "$link" ] || link=$(jq -r --arg t "$tag" 'map(select(.tag==$t)) | .[0].link // ""' /etc/vpnpool/links.json 2>/dev/null)
+		if [ -n "$link" ]; then
+			uci del_list vpnpool.main.active_saved="$link" 2>/dev/null; uci commit vpnpool; signal_reload
+		fi
 		echo '{"ok":true}'
 		;;
 	node_link)
 		# return the original vless:// (etc.) link for a node tag, for share/QR.
+		# Falls back to the saved archive so inactive saved nodes can still be shared.
 		tag=$(echo "$input" | jq -r '.tag // ""')
 		LINKS=/etc/vpnpool/links.json
 		link=""
 		[ -f "$LINKS" ] && link=$(jq -r --arg t "$tag" 'map(select(.tag==$t)) | .[0].link // ""' "$LINKS" 2>/dev/null)
+		[ -n "$link" ] || link=$(saved_link_for_tag "$tag")
 		jq -n --arg l "$link" '{ ok: ($l != ""), link: $l }'
 		;;
 	export_nodes)

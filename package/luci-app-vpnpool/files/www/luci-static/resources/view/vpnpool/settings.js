@@ -137,7 +137,7 @@ return view.extend({
 			return E('div', { 'style': 'margin:3px 0' }, [ E('b', { 'style': 'display:inline-block;width:180px' }, label), E('span', { 'style': 'font-family:monospace' }, val == null ? '—' : String(val)) ]);
 		}
 
-		return E('div', { 'class': 'cbi-map' }, [
+		return E('div', { 'class': 'cbi-map vpnpool-view' }, [
 			i18n.header(_('VPN Pool — Settings')),
 
 			E('div', { 'class': 'cbi-section' }, [

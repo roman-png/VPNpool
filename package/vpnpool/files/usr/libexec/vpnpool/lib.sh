@@ -81,6 +81,24 @@ saved_tags_json() {
 		'[ (($a[0]//{})|keys[]), (($b[0]//{})|keys[]) ] | unique' 2>/dev/null
 }
 
+# Resolve a saved tag -> its archived vless:// link (manual map first, then snapshot).
+# Used to (de)activate a saved node even when it's no longer in the live subscription.
+saved_link_for_tag() {   # $1=tag
+	[ -f "$SAVED_MAP" ] || echo '{}' > "$SAVED_MAP"
+	[ -f "$SNAP_MAP" ]  || echo '{}' > "$SNAP_MAP"
+	jq -rn --slurpfile a "$SAVED_MAP" --slurpfile b "$SNAP_MAP" --arg t "$1" \
+		'(($a[0]//{})[$t]) // (($b[0]//{})[$t]) // ""' 2>/dev/null
+}
+
+# JSON array [{tag,link}] of the whole saved archive (manual UNION snapshot), the
+# source for the dashboard's inactive "saved" list.
+saved_archive_json() {
+	[ -f "$SAVED_MAP" ] || echo '{}' > "$SAVED_MAP"
+	[ -f "$SNAP_MAP" ]  || echo '{}' > "$SNAP_MAP"
+	jq -n --slurpfile a "$SAVED_MAP" --slurpfile b "$SNAP_MAP" \
+		'[ (($a[0]//{})|to_entries[]), (($b[0]//{})|to_entries[]) ] | unique_by(.key) | map({tag:.key, link:.value})' 2>/dev/null
+}
+
 SUB_URL=$(uci -q get vpnpool.main.subscription_url)
 SUB_UA=$(uci -q get vpnpool.main.subscription_ua); [ -n "$SUB_UA" ] || SUB_UA="v2rayNG/1.8.5"
 TPROXY_PORT=$(uci -q get vpnpool.main.tproxy_port); [ -n "$TPROXY_PORT" ] || TPROXY_PORT=1603

@@ -21,7 +21,10 @@ write_links() {   # $1=uci option  $2=outfile
 }
 write_links manual_node   "$SB_DATA/manual.links"
 write_links imported_node "$SB_DATA/imported.links"
-write_links saved_node    "$SB_DATA/saved.links"
+# Saved nodes are an INACTIVE archive (kept so they survive subscription expiry) and
+# do NOT auto-join the live config. Only the ones the user explicitly promoted to the
+# active pool (uci list active_saved) are merged as real outbounds.
+write_links active_saved  "$SB_DATA/active_saved.links"
 
 # gather input files: every source file + manual + imported links (parser
 # auto-detects format per file and merges with global dedup + unique tags)
@@ -29,9 +32,9 @@ FILES=""
 for f in "$SRCDIR"/*.raw; do
 	[ -f "$f" ] && FILES="$FILES $f"
 done
-[ -s "$SB_DATA/manual.links" ]   && FILES="$FILES $SB_DATA/manual.links"
-[ -s "$SB_DATA/imported.links" ] && FILES="$FILES $SB_DATA/imported.links"
-[ -s "$SB_DATA/saved.links" ]    && FILES="$FILES $SB_DATA/saved.links"
+[ -s "$SB_DATA/manual.links" ]       && FILES="$FILES $SB_DATA/manual.links"
+[ -s "$SB_DATA/imported.links" ]     && FILES="$FILES $SB_DATA/imported.links"
+[ -s "$SB_DATA/active_saved.links" ] && FILES="$FILES $SB_DATA/active_saved.links"
 
 # shellcheck disable=SC2086
 ucode /usr/libexec/vpnpool/parser.uc $FILES > "$NODES" 2>"$SB_DATA/build.err"

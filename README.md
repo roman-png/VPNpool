@@ -39,10 +39,12 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
 - 📊 **Subscription data quota** — parses the panel's `subscription‑userinfo` header
   and shows **used / total GB** with a progress bar (plus a Telegram alert when
   <10% remains), alongside the expiry date.
-- 💾 **Saved nodes** — promote any subscription node into a **separate persistent
-  store** (⭐) so it stays usable **after the subscription expires**. Optional
-  **auto‑snapshot** keeps a bounded fallback set of currently‑reachable nodes
-  saved automatically (manual ⭐ picks are never evicted).
+- 💾 **Saved nodes** — star (⭐) any node to keep it in a **separate persistent
+  archive** that survives subscription expiry. Saved nodes that are no longer in the
+  live subscription show up in a dedicated **“Saved (inactive)”** list on the
+  dashboard; **add them back to the active pool** (or remove) with one button.
+  Optional **auto‑snapshot** keeps a bounded fallback set of currently‑reachable
+  nodes saved automatically (manual ⭐ picks are never evicted).
 - 🔎 **Search / filter / sort nodes** — find a node by name/server, show only
   reachable ones, sort by ping/name/traffic — handy with hundreds of nodes.
 - ⚡ **Per‑node real speed test** — on‑demand throughput (Mbit/s), not just ping.

@@ -197,7 +197,7 @@ return view.extend({
 		var intInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:120px',
 			'value': (st.settings && st.settings.subscription_interval) || '6h' });
 
-		return E('div', { 'class': 'cbi-map' }, [
+		return E('div', { 'class': 'cbi-map vpnpool-view' }, [
 			i18n.header(_('VPN Pool — Sources')),
 
 			E('div', { 'class': 'cbi-section' }, [

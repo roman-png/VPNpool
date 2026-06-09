@@ -58,8 +58,10 @@ NODESF="$SB_DATA/.nodesout.json"
 # link files to learn their tags; everything else came from the subscription.
 IMPTAGS=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/imported.links" 2>/dev/null | jq -c '[.[].tag]' 2>/dev/null); [ -n "$IMPTAGS" ] || IMPTAGS='[]'
 MANTAGS=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/manual.links" 2>/dev/null | jq -c '[.[].tag]' 2>/dev/null); [ -n "$MANTAGS" ] || MANTAGS='[]'
-# saved node tags (persistent favourites that survive subscription expiry)
+# saved node tags (persistent favourites that survive subscription expiry — the
+# INACTIVE archive) and the subset the user promoted back into the live pool.
 SAVEDTAGS=$(saved_tags_json 2>/dev/null | jq -c . 2>/dev/null); [ -n "$SAVEDTAGS" ] || SAVEDTAGS='[]'
+ACTSAVEDTAGS=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/active_saved.links" 2>/dev/null | jq -c '[.[].tag]' 2>/dev/null); [ -n "$ACTSAVEDTAGS" ] || ACTSAVEDTAGS='[]'
 
 # Per-node + per-client LIVE traffic, aggregated from clash connections (bytes,
 # cumulative per connection). Read-only; written to small files for the final jq.
@@ -101,6 +103,7 @@ jq -n \
 	--argjson imp "$IMPTAGS" \
 	--argjson man "$MANTAGS" \
 	--argjson savd "$SAVEDTAGS" \
+	--argjson actsavd "$ACTSAVEDTAGS" \
 	'(($p[0] // {}) | .proxies // {}) as $px | ($nt[0] // {}) as $tr | ($ul[0] // {}) as $un | ($n[0] // []) | map({
 		tag: .tag,
 		server: .server,
@@ -109,10 +112,26 @@ jq -n \
 		up: ($tr[.tag].up // 0),
 		down: ($tr[.tag].down // 0),
 		saved: (.tag as $t | ($savd | index($t)) != null),
+		active_saved: (.tag as $t | ($actsavd | index($t)) != null),
 		unlock: ($un[.tag] // null),
 		group: (.tag as $t | if ($imp | index($t)) then "imported" elif ($man | index($t)) then "manual" else "subscription" end)
 	})' > "$NODESF" 2>/dev/null
 [ -s "$NODESF" ] || echo '[]' > "$NODESF"
+
+# Inactive saved list = archived nodes (manual ⭐ ∪ auto-snapshot) that are NOT currently
+# live. A node is "inactive" only if activating it would actually ADD a new outbound, so
+# we compare by the real identity the build dedups on — server:port:uuid:sni:short_id —
+# NOT the display tag or raw link (this subscription reuses one uuid/server under many
+# country names, so tags and even base links can't tell duplicates apart). Parse the
+# archive links and diff against the parsed active nodes (nodes.json) on that key.
+ACTIVE_IDS=$(jq -c '[ .[] | (.server|tostring)+":"+(.server_port|tostring)+":"+(.uuid//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//"") ]' "$NODES_FILE" 2>/dev/null); [ -n "$ACTIVE_IDS" ] || ACTIVE_IDS='[]'
+saved_archive_json 2>/dev/null | jq -r '.[].link' 2>/dev/null > "$SB_DATA/.archive.links"
+SAVEDINACTIVE=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/.archive.links" 2>/dev/null \
+	| jq -c --argjson act "$ACTIVE_IDS" '
+		def nid: (.server|tostring)+":"+(.server_port|tostring)+":"+(.uuid//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//"");
+		map(. + {_id: nid}) | unique_by(._id)
+		| map(select(._id as $i | ($act | index($i)) == null))
+		| map({tag, server, port:.server_port})' 2>/dev/null); [ -n "$SAVEDINACTIVE" ] || SAVEDINACTIVE='[]'
 
 EXPIRE=$(cat "$CONF_DIR/sub.expire" 2>/dev/null)
 case "$EXPIRE" in (*[!0-9]*|"") EXPIRE=null ;; esac
@@ -171,6 +190,7 @@ jq -n \
 	--arg url "$URL" \
 	--argjson expire "$EXPIRE" \
 	--slurpfile nodes "$NODESF" \
+	--argjson savedinactive "$SAVEDINACTIVE" \
 	--argjson domains "$DOMAINS" \
 	--argjson manual "$MANUAL" \
 	--argjson sources "$SOURCES" \
@@ -217,6 +237,7 @@ jq -n \
 		auto_now: $auto_now,
 		subscription: { url: $url, expire: $expire, used: ($sup+$sdn), total: $stot },
 		nodes: ($nodes[0] // []),
+			saved_inactive: $savedinactive,
 		auto_members: $automem,
 		traffic: { up_total: $tup, down_total: $tdown, connections: $tconn },
 		client_traffic: ($ct[0] // []),
