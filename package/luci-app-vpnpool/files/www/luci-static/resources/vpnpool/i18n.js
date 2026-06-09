@@ -110,6 +110,8 @@ var DICT = {
 		'Enter a source URL first.': 'Сначала введите URL источника.',
 		'Fetching source…': 'Загрузка источника…',
 		'Fetching and pinging nodes — this can take up to ~30 seconds.': 'Загрузка и пинг узлов — до ~30 секунд.',
+		'Fetching and pinging nodes — this can take up to a minute on slow routers.': 'Загрузка и пинг узлов — до минуты на медленных роутерах.',
+		'Probe timed out.': 'Проба не уложилась во время.',
 		'No usable nodes from this source': 'Из этого источника нет пригодных узлов',
 		'Probe failed': 'Ошибка загрузки', 'Pick nodes to import': 'Выберите узлы для импорта',
 		'Selected nodes join the auto-switch pool and appear in the dashboard under this source.': 'Выбранные узлы войдут в авто-пул и появятся в дашборде отдельным разделом.',
