@@ -13,6 +13,7 @@ var callSetUrl   = rpc.declare({ object: 'vpnpool', method: 'set_url',          
 var callDelSub   = rpc.declare({ object: 'vpnpool', method: 'del_subscription' });
 var callDelSrc   = rpc.declare({ object: 'vpnpool', method: 'del_source',       params: [ 'url' ] });
 var callProbe    = rpc.declare({ object: 'vpnpool', method: 'probe_source',     params: [ 'url' ] });
+var callProbeRes = rpc.declare({ object: 'vpnpool', method: 'probe_result' });
 var callImport   = rpc.declare({ object: 'vpnpool', method: 'import_select',    params: [ 'url', 'idx' ] });
 var callAddNode  = rpc.declare({ object: 'vpnpool', method: 'add_node',         params: [ 'link' ] });
 var callDelNode  = rpc.declare({ object: 'vpnpool', method: 'del_node',         params: [ 'link' ] });
@@ -71,17 +72,32 @@ return view.extend({
 	handleProbe: function(urlOrInput) {
 		var url = (typeof urlOrInput === 'string') ? urlOrInput : ((urlOrInput && urlOrInput.value) || '').trim();
 		if (!url) { ui.addNotification(null, E('p', _('Enter a source URL first.')), 'warning'); return; }
+		var self = this;
 		ui.showModal(_('Fetching source…'), [
-			E('p', { 'class': 'spinning' }, _('Fetching and pinging nodes — this can take up to ~30 seconds.'))
+			E('p', { 'class': 'spinning' }, _('Fetching and pinging nodes — this can take up to a minute on slow routers.'))
 		]);
-		return callProbe(url).then(L.bind(function(res) {
+		var fail = function(msg) { ui.hideModal(); ui.addNotification(null, E('p', msg), 'error'); };
+		var done = function(res) {
 			if (!res || res.error || !(res.nodes || []).length) {
-				ui.hideModal();
-				ui.addNotification(null, E('p', _('No usable nodes from this source') + (res && res.error ? (': ' + res.error) : '.')), 'error');
+				fail(_('No usable nodes from this source') + (res && res.error ? (': ' + res.error) : '.'));
 				return;
 			}
-			this.showImportModal(url, res);
-		}, this)).catch(function(e) { ui.hideModal(); ui.addNotification(null, E('p', _('Probe failed') + ': ' + e), 'error'); });
+			self.showImportModal(url, res);
+		};
+		// probe runs in the background on the router; poll for the result
+		var tries = 0;
+		var poll = function() {
+			return callProbeRes().then(function(res) {
+				if (res && res.running) {
+					if (++tries > 45) { fail(_('Probe timed out.')); return; }
+					return new Promise(function(r) { window.setTimeout(r, 3000); }).then(poll);
+				}
+				done(res);
+			});
+		};
+		return callProbe(url).then(function() {
+			return new Promise(function(r) { window.setTimeout(r, 2000); }).then(poll);
+		}).catch(function(e) { fail(_('Probe failed') + ': ' + e); });
 	},
 
 	showImportModal: function(url, res) {

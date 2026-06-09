@@ -17,7 +17,7 @@ signal_refetch() {
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "probe_source": { "url": "x" }, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
+{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
 L
 	;;
 call)
@@ -111,10 +111,26 @@ call)
 		echo '{"ok":true}'
 		;;
 	probe_source)
-		# fetch + parse + ICMP-ping one URL; read-only, returns nodes for the dialog
+		# Fetch + parse + ICMP-ping one URL. On a slow (mips) router this can exceed
+		# rpcd's exec timeout, so run it in the BACKGROUND and let the UI poll
+		# probe_result. Read-only w.r.t. the live config.
 		u=$(echo "$input" | jq -r '.url // ""')
-		[ -n "$u" ] || { echo '{"error":"no url","total":0,"nodes":[]}'; exit 0; }
-		/usr/libexec/vpnpool/probe.sh "$u"
+		[ -n "$u" ] || { echo '{"error":"no url"}'; exit 0; }
+		mkdir -p /tmp/vpnpool
+		if [ -f /tmp/vpnpool/.probe-running ]; then echo '{"running":true,"already":true}'; exit 0; fi
+		: > /tmp/vpnpool/.probe-running
+		rm -f /tmp/vpnpool/.probe-result.json
+		setsid sh -c '/usr/libexec/vpnpool/probe.sh "$1" > /tmp/vpnpool/.probe-result.json 2>/dev/null; rm -f /tmp/vpnpool/.probe-running' _ "$u" >/dev/null 2>&1 &
+		echo '{"running":true,"started":true}'
+		;;
+	probe_result)
+		if [ -f /tmp/vpnpool/.probe-running ]; then
+			echo '{"running":true}'
+		elif [ -f /tmp/vpnpool/.probe-result.json ]; then
+			jq '. + {running:false}' /tmp/vpnpool/.probe-result.json 2>/dev/null || echo '{"running":false,"error":"bad result","nodes":[]}'
+		else
+			echo '{"running":false,"nodes":[]}'
+		fi
 		;;
 	import_select)
 		# The UI sends only { url, idx:[picked indices] }. We resolve those indices to
@@ -122,25 +138,21 @@ call)
 		# never uploads hundreds of links (that large request never reached rpcd).
 		# imported_node := (current - scopeOfThisSource) + picked, so re-probing
 		# ("Update") and re-selecting cleanly replaces just this source's contribution.
-		. /lib/functions.sh 2>/dev/null
 		u=$(echo "$input" | jq -r '.url // ""')
 		CACHE=/tmp/vpnpool/.probe-cache.json
-		SCOPE='[]'; SEL='[]'
+		MAP=/etc/vpnpool/imported.map.json
+		mkdir -p /etc/vpnpool; [ -f "$MAP" ] || echo '{}' > "$MAP"
+		# resolve picked indices -> links from the probe cache (must be for this url)
+		SEL='[]'
 		if [ -f "$CACHE" ] && [ "$(jq -r '.url // ""' "$CACHE" 2>/dev/null)" = "$u" ]; then
-			SCOPE=$(jq -c '[.nodes[].link] | map(select(. != null and . != ""))' "$CACHE")
 			SEL=$(jq -c --argjson ix "$(echo "$input" | jq -c '.idx // []')" \
 				'[ .nodes[] | select(.i as $i | $ix | index($i)) | .link ] | map(select(. != null and . != ""))' "$CACHE")
 		fi
-		curf="/tmp/vpnpool/.imp.cur.$$"; mkdir -p /tmp/vpnpool; : > "$curf"
-		__io="$curf"; __ia() { printf '%s\n' "$1" >> "$__io"; }
-		config_load vpnpool 2>/dev/null
-		config_list_foreach main imported_node __ia 2>/dev/null
-		NEW=$(jq -n --rawfile cur "$curf" --argjson scope "$SCOPE" --argjson select "$SEL" \
-			'(($cur | split("\n") | map(select(length>0))) - $scope) + $select
-			 | reduce .[] as $x ([]; if (index($x)) then . else . + [$x] end)')
-		rm -f "$curf"
+		# store this source's picks (replaces its previous set), then regenerate the
+		# flat imported_node list as the unique union of every source's links.
+		jq --arg u "$u" --argjson sel "$SEL" '.[$u] = $sel' "$MAP" > "$MAP.tmp" 2>/dev/null && mv "$MAP.tmp" "$MAP"
 		uci -q delete vpnpool.main.imported_node
-		echo "$NEW" | jq -r '.[]?' | while IFS= read -r l; do
+		jq -r '[.[][]] | unique | .[]' "$MAP" 2>/dev/null | while IFS= read -r l; do
 			[ -n "$l" ] && uci add_list vpnpool.main.imported_node="$l"
 		done
 		if [ -n "$u" ] && ! uci -q get vpnpool.main.source | tr ' ' '\n' | grep -Fxq "$u"; then
@@ -148,11 +160,23 @@ call)
 		fi
 		uci commit vpnpool
 		signal_reload
-		echo "{\"ok\":true,\"count\":$(echo "$NEW" | jq 'length')}"
+		echo "{\"ok\":true,\"count\":$(echo "$SEL" | jq 'length')}"
 		;;
 	del_source)
+		# forget the source URL AND drop the nodes imported from it (they must leave
+		# the pool / dashboard, not linger).
 		u=$(echo "$input" | jq -r '.url // ""')
-		[ -n "$u" ] && { uci del_list vpnpool.main.source="$u"; uci commit vpnpool; signal_refetch; }
+		MAP=/etc/vpnpool/imported.map.json
+		if [ -n "$u" ]; then
+			uci del_list vpnpool.main.source="$u" 2>/dev/null
+			[ -f "$MAP" ] && { jq --arg u "$u" 'del(.[$u])' "$MAP" > "$MAP.tmp" 2>/dev/null && mv "$MAP.tmp" "$MAP"; }
+			uci -q delete vpnpool.main.imported_node
+			[ -f "$MAP" ] && jq -r '[.[][]] | unique | .[]' "$MAP" 2>/dev/null | while IFS= read -r l; do
+				[ -n "$l" ] && uci add_list vpnpool.main.imported_node="$l"
+			done
+			uci commit vpnpool
+			signal_reload
+		fi
 		echo '{"ok":true}'
 		;;
 	set_communities)
