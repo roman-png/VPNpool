@@ -290,7 +290,12 @@ call)
 		SAVEDMAP=/etc/vpnpool/saved.map.json
 		case "$scope" in
 		saved)
-			[ -f "$SAVEDMAP" ] && jq -c '[.[]] | unique' "$SAVEDMAP" 2>/dev/null || echo '[]'
+			# the canonical saved set = manual stars (saved.map) UNION auto-snapshot
+			# (snapshot.map), already merged into the uci saved_node list by
+			# rebuild_saved_list — the SAME set the dashboard marks with a star. Reading
+			# only saved.map.json here missed every auto-snapshot node (export showed
+			# "none" while stars were visible). Links are URLs (no spaces) -> safe to split.
+			uci -q get vpnpool.main.saved_node | tr ' ' '\n' | grep '://' | jq -R . | jq -s 'unique' 2>/dev/null || echo '[]'
 			;;
 		manual|imported)
 			opt=$([ "$scope" = manual ] && echo manual_node || echo imported_node)
