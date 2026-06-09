@@ -132,10 +132,11 @@ var DICT = {
 		'Scan the QR with your phone VPN app, or copy the link.': 'Отсканируйте QR в VPN-приложении на телефоне или скопируйте ссылку.',
 		'Copy link': 'Копировать ссылку', 'Close': 'Закрыть',
 		'Export': 'Экспорт', 'Export nodes as subscription': 'Экспорт узлов как подписки',
-		'Pick which nodes to export. You get a base64 subscription you can import elsewhere.':
-			'Выберите узлы для экспорта. Получите base64-подписку, которую можно импортировать в другом месте.',
+		'Pick which nodes to export. You get the raw vless:// links and a base64 subscription you can import elsewhere.':
+			'Выберите узлы для экспорта. Получите готовые vless://-ссылки и base64-подписку для импорта в другом месте.',
 		'All nodes': 'Все узлы', 'Nothing to export in this set.': 'В этом наборе нечего экспортировать.',
 		'%d nodes': 'узлов: %d', 'Copy base64': 'Копировать base64', 'Download': 'Скачать',
+		'Copy': 'Копировать', 'vless:// links': 'vless://-ссылки', 'base64 subscription': 'base64-подписка',
 		'Extra subscriptions': 'Дополнительные подписки',
 		'Additional full subscriptions are bulk-merged into the pool alongside the main one (quota/expiry come only from the main subscription).':
 			'Дополнительные полные подписки целиком подмешиваются в пул вместе с основной (квота/срок берутся только из основной подписки).',

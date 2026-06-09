@@ -236,7 +236,7 @@ return view.extend({
 			return E('button', { 'class': 'btn cbi-button', 'style': 'margin:3px', 'click': function() { self.doExport(scope); } }, label);
 		};
 		ui.showModal(_('Export nodes as subscription'), [
-			E('p', {}, _('Pick which nodes to export. You get a base64 subscription you can import elsewhere.')),
+			E('p', {}, _('Pick which nodes to export. You get the raw vless:// links and a base64 subscription you can import elsewhere.')),
 			E('div', {}, [ mk('saved', _('Saved')), mk('manual', _('Manual')), mk('all', _('All nodes')) ]),
 			E('div', { 'id': 'vp-export-out', 'style': 'margin-top:10px' }, ''),
 			E('div', { 'class': 'right', 'style': 'margin-top:8px' }, E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Close')))
@@ -251,16 +251,26 @@ return view.extend({
 			var text = links.join('\n');
 			var b64 = '';
 			try { b64 = btoa(unescape(encodeURIComponent(text))); } catch (e) { b64 = ''; }
-			var ta = E('textarea', { 'rows': '5', 'readonly': 'readonly', 'style': 'width:100%;font-family:monospace;font-size:11px' }, b64);
+			// one reusable block: a labelled, read-only textarea + Copy + Download.
+			var block = function(label, value, filename) {
+				var ta = E('textarea', { 'rows': '5', 'readonly': 'readonly',
+					'style': 'width:100%;font-family:monospace;font-size:11px' }, value);
+				return E('div', { 'style': 'margin-top:8px' }, [
+					E('p', { 'style': 'margin:4px 0' }, E('b', {}, label)),
+					ta,
+					E('div', { 'style': 'margin-top:6px' }, [
+						E('button', { 'class': 'btn cbi-button cbi-button-action',
+							'click': function() { ta.select(); try { document.execCommand('copy'); } catch (e) {} } }, _('Copy')),
+						' ',
+						E('a', { 'class': 'btn cbi-button', 'download': filename,
+							'href': 'data:text/plain;charset=utf-8,' + encodeURIComponent(value) }, _('Download'))
+					])
+				]);
+			};
 			dom.content(out, [
-				E('p', { 'style': 'margin:4px 0' }, E('b', {}, _('%d nodes').format(links.length)) ),
-				ta,
-				E('div', { 'style': 'margin-top:6px' }, [
-					E('button', { 'class': 'btn cbi-button cbi-button-action', 'click': function() { ta.select(); try { document.execCommand('copy'); } catch (e) {} } }, _('Copy base64')),
-					' ',
-					E('a', { 'class': 'btn cbi-button', 'download': 'vpnpool-subscription.txt',
-						'href': 'data:text/plain;charset=utf-8,' + encodeURIComponent(b64) }, _('Download'))
-				])
+				E('p', { 'style': 'margin:4px 0' }, E('b', {}, _('%d nodes').format(links.length))),
+				block(_('vless:// links'), text, 'vpnpool-nodes.txt'),
+				block(_('base64 subscription'), b64, 'vpnpool-subscription.txt')
 			]);
 		});
 	},
