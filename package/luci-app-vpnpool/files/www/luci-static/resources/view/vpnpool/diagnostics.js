@@ -79,7 +79,7 @@ return view.extend({
 
 	load: function() { return callDiag(); },
 	render: function(d) {
-		var c = E('div', { 'class': 'cbi-map' }, [
+		var c = E('div', { 'class': 'cbi-map vpnpool-view' }, [
 			i18n.header(_('VPN Pool — Diagnostics')),
 			E('div', { 'style': 'margin-bottom:8px' }, E('button', { 'class': 'btn cbi-button cbi-button-action',
 				'click': ui.createHandlerFn(this, 'refresh') }, '↻ ' + _('Refresh'))),

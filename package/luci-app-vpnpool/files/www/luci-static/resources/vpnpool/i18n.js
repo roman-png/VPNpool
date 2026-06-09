@@ -36,6 +36,18 @@ var DICT = {
 			'Выберите узлы, участвующие в авто-переключении (urltest). Невыбранные останутся доступны только для ручного выбора.',
 		'Select at least one node for auto-switching.': 'Выберите хотя бы один узел для авто-переключения.',
 		'Excluded from auto-switching (manual only)': 'Не участвует в авто-переключении (только вручную)',
+		'Saved from subscription (kept after it expires)': 'Сохранён из подписки (остаётся после её окончания)',
+		'saved': 'сохранён', 'activated': 'активирован', 'Add to active': 'В активные', 'Actions': 'Действия',
+		'A saved node you promoted into the active pool': 'Сохранённый узел, добавленный в активный пул',
+		'Remove from the active pool (keeps it saved)': 'Убрать из активного пула (останется сохранённым)',
+		'Add this saved node to the active pool': 'Добавить этот сохранённый узел в активный пул',
+		'Saved from subscription (inactive)': 'Сохранённые из подписки (неактивные)',
+		'Saved nodes are kept here even after the subscription drops them. They are NOT in the active pool until you add them.':
+			'Сохранённые узлы остаются здесь даже после того, как подписка их убрала. В активный пул они не входят, пока вы их не добавите.',
+		'No inactive saved nodes. Star a node to keep it here after the subscription drops it.':
+			'Нет неактивных сохранённых узлов. Отметьте узел звездой ⭐, чтобы он остался здесь после исчезновения из подписки.',
+		'Added to the active pool: %s': 'Добавлен в активный пул: %s',
+		'Removed from the active pool: %s': 'Убран из активного пула: %s',
 		'Traffic': 'Трафик', 'connections': 'соединений', 'total': 'всего',
 		'VPN Pool — Sources': 'VPN Pool — Источники', 'Main subscription': 'Основная подписка',
 		'Save URL': 'Сохранить URL', 'Delete subscription': 'Удалить подписку',
@@ -199,6 +211,30 @@ var DICT = {
 var LANG = (function () {
 	var b = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
 	return (b.indexOf('ru') === 0) ? 'ru' : 'en';
+})();
+
+// Inject the responsive stylesheet ONCE (this module is required by every vpnpool
+// view). On phones (<=600px) the dense tables reflow into wrapping cards and fixed
+// inline labels stack above full-width inputs, so nothing is clipped or scrolls sideways.
+(function injectResponsiveCss() {
+	if (typeof document === 'undefined' || document.getElementById('vpnpool-responsive')) return;
+	var css = [
+		'@media (max-width:600px){',
+		'.vpnpool-view .table{display:block;min-width:0 !important;width:100%}',
+		'.vpnpool-view .table .tr.table-titles{display:none}',
+		'.vpnpool-view .table .tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;border:1px solid #e6e6e6;border-radius:8px;margin:0 0 8px;padding:6px 8px}',
+		'.vpnpool-view .table .td{border:0 !important;padding:1px 0 !important;white-space:normal !important;max-width:100%}',
+		'.vpnpool-view b[style*="inline-block"],.vpnpool-view label[style*="inline-block"]{display:block !important;width:auto !important;margin-bottom:2px}',
+		'.vpnpool-view input,.vpnpool-view select,.vpnpool-view textarea{max-width:100% !important;box-sizing:border-box}',
+		'.vpnpool-view input.cbi-input-text[style*="width"]{width:100% !important}',
+		'.vpnpool-view div[style*="width:280px"]{width:100% !important;max-width:280px}',
+		'}'
+	].join('\n');
+	var st = document.createElement('style');
+	st.id = 'vpnpool-responsive';
+	st.type = 'text/css';
+	st.appendChild(document.createTextNode(css));
+	(document.head || document.documentElement).appendChild(st);
 })();
 
 return baseclass.extend({
