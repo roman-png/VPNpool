@@ -137,20 +137,10 @@ push(outbounds, {
 	interrupt_exist_connections: true
 });
 
-// the actual node outbounds. Anti-DPI: when enabled, ask sing-box to fragment the
-// TLS ClientHello (tls_fragment) so SNI-based DPI can't match the handshake. Applied
-// to TLS-bearing node types. NOTE: requires a sing-box build that supports the
-// tls_fragment dial field (>=1.12); if not, `sing-box check` rejects the new config
-// and build.sh keeps the PREVIOUS working one (so the worst case is "no effect").
-let antidpi = opt('main', 'antidpi', '0');
-let TLS_TYPES = { vless: 1, trojan: 1, vmess: 1, shadowtls: 1, http: 1 };
-for (let n in nodes) {
-	if (antidpi == '1' && TLS_TYPES[n.type]) {
-		n.tls_fragment = true;
-		n.tls_fragment_fallback_delay = '500ms';
-	}
+// the actual node outbounds (anti-DPI is applied as a route rule action below,
+// not as an outbound field — sing-box only exposes tls_fragment via route-options).
+for (let n in nodes)
 	push(outbounds, n);
-}
 
 // direct egress
 push(outbounds, { type: 'direct', tag: 'direct' });
@@ -164,6 +154,19 @@ let listed_ob = (mode == 'exclude') ? 'direct' : 'proxy';
 let final_ob  = (mode == 'exclude') ? 'proxy'  : 'direct';
 
 let rules = [ { action: 'sniff' } ];
+// Anti-DPI: fragment the outgoing TLS ClientHello so SNI-based DPI can't match the
+// handshake (incl. the Reality handshake to proxy servers). sing-box exposes this ONLY
+// as the non-final "route-options" rule action (since 1.12.0) — NOT as an outbound dial
+// field — so it is applied here, before the outbound-selecting rules. On a sing-box that
+// predates 1.12 the field is rejected at decode time and build.sh keeps the previous
+// working config (worst case: "no effect"), so the toggle is always safe.
+let antidpi = opt('main', 'antidpi', '0');
+if (antidpi == '1')
+	push(rules, {
+		action: 'route-options',
+		tls_fragment: true,
+		tls_fragment_fallback_delay: '500ms'
+	});
 // the local test/SOCKS inbound always egresses through the proxy (for the
 // "test exit via VPN" diagnostic and as a handy local proxy port)
 push(rules, { inbound: [ 'test-mixed-in' ], outbound: 'proxy' });

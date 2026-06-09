@@ -67,14 +67,17 @@ else
 	fail "status did not return JSON"
 fi
 
-hdr "8. Anti-DPI: does THIS sing-box accept tls_fragment?"
+hdr "8. Anti-DPI: does THIS sing-box accept the tls_fragment route action?"
+# vpnpool applies anti-DPI as a non-final "route-options" rule action (the ONLY place
+# sing-box exposes tls_fragment, since 1.12.0) — NOT as an outbound dial field. Test by
+# appending such a rule to a throwaway copy of the live config and validating it.
 if [ -f "$SB_CONF" ]; then
-	jq '(.outbounds[] | select(.type=="vless" or .type=="trojan" or .type=="vmess" or .type=="shadowtls" or .type=="http"))
-	    |= (. + {tls_fragment:true, tls_fragment_fallback_delay:"500ms"})' "$SB_CONF" > /tmp/vp-frag.json 2>/dev/null
+	jq '.route.rules += [{"action":"route-options","tls_fragment":true,"tls_fragment_fallback_delay":"500ms"}]' \
+	   "$SB_CONF" > /tmp/vp-frag.json 2>/dev/null
 	if sing-box check -c /tmp/vp-frag.json 2>/tmp/vp-frag.err; then
-		ok "tls_fragment SUPPORTED -> anti-DPI toggle is safe to enable"
+		ok "tls_fragment route action SUPPORTED -> anti-DPI toggle actually works on this build"
 	else
-		info "tls_fragment NOT accepted by this sing-box build:"
+		info "tls_fragment route action NOT accepted by this sing-box build (<1.12?):"
 		sed 's/^/       /' /tmp/vp-frag.err | head -3
 		info "the anti-DPI toggle will be a no-op here (resilient build keeps the working config)"
 	fi
