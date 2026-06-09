@@ -17,7 +17,7 @@ signal_refetch() {
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
+{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
 L
 	;;
 call)
@@ -214,10 +214,10 @@ call)
 		k=$(echo "$input" | jq -r '.name // ""')
 		v=$(echo "$input" | jq -r '.value // ""')
 		case "$k" in
-		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|subscription_ua|telegram_enabled|telegram_token|telegram_chat|ipv6)
+		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|subscription_ua|telegram_enabled|telegram_token|telegram_chat|telegram_control|telegram_via_proxy|ipv6|killswitch|dns_protect|preferred_node|auto_snapshot|auto_snapshot_max|antidpi|adaptive_routing|adaptive_max_per_run)
 			uci set vpnpool.main."$k"="$v"; uci commit vpnpool
 			case "$k" in
-				subscription_interval|telegram_*) : ;;   # read live by the daemon, no reload
+				subscription_interval|telegram_*|preferred_node|auto_snapshot|auto_snapshot_max|adaptive_max_per_run) : ;;   # read live by the daemon, no reload
 				*) signal_reload ;;
 			esac
 			echo '{"ok":true}'
@@ -244,6 +244,156 @@ call)
 		l=$(echo "$input" | jq -r '.link // ""')
 		[ -n "$l" ] && { uci del_list vpnpool.main.manual_node="$l"; uci commit vpnpool; signal_reload; }
 		echo '{"ok":true}'
+		;;
+	save_node)
+		# persist a subscription node into the separate "saved" store so it stays
+		# available after the subscription expires. Resolve tag -> original link
+		# from the build-time map, keep a tag->link map, regenerate the uci list.
+		tag=$(echo "$input" | jq -r '.tag // ""')
+		MAP=/etc/vpnpool/saved.map.json
+		LINKS=/etc/vpnpool/links.json
+		mkdir -p /etc/vpnpool; [ -f "$MAP" ] || echo '{}' > "$MAP"
+		link=""
+		[ -f "$LINKS" ] && link=$(jq -r --arg t "$tag" 'map(select(.tag==$t)) | .[0].link // ""' "$LINKS" 2>/dev/null)
+		if [ -n "$tag" ] && [ -n "$link" ]; then
+			jq --arg t "$tag" --arg l "$link" '.[$t]=$l' "$MAP" > "$MAP.tmp" 2>/dev/null && mv "$MAP.tmp" "$MAP"
+			rebuild_saved_list; signal_reload
+			echo '{"ok":true}'
+		else
+			echo '{"ok":false,"error":"no link for tag"}'
+		fi
+		;;
+	unsave_node)
+		# remove from BOTH the manual map and the auto-snapshot map, so an unsaved
+		# node doesn't immediately reappear on the next snapshot.
+		tag=$(echo "$input" | jq -r '.tag // ""')
+		MAP=/etc/vpnpool/saved.map.json
+		[ -f "$MAP" ] || echo '{}' > "$MAP"
+		jq --arg t "$tag" 'del(.[$t])' "$MAP" > "$MAP.tmp" 2>/dev/null && mv "$MAP.tmp" "$MAP"
+		[ -f "$SNAP_MAP" ] && { jq --arg t "$tag" 'del(.[$t])' "$SNAP_MAP" > "$SNAP_MAP.tmp" 2>/dev/null && mv "$SNAP_MAP.tmp" "$SNAP_MAP"; }
+		rebuild_saved_list; signal_reload
+		echo '{"ok":true}'
+		;;
+	node_link)
+		# return the original vless:// (etc.) link for a node tag, for share/QR.
+		tag=$(echo "$input" | jq -r '.tag // ""')
+		LINKS=/etc/vpnpool/links.json
+		link=""
+		[ -f "$LINKS" ] && link=$(jq -r --arg t "$tag" 'map(select(.tag==$t)) | .[0].link // ""' "$LINKS" 2>/dev/null)
+		jq -n --arg l "$link" '{ ok: ($l != ""), link: $l }'
+		;;
+	export_nodes)
+		# export a set of node links as a JSON array (the browser turns it into a
+		# base64 subscription). scope: saved | manual | imported | all.
+		scope=$(echo "$input" | jq -r '.scope // "all"')
+		LINKS=/etc/vpnpool/links.json
+		SAVEDMAP=/etc/vpnpool/saved.map.json
+		case "$scope" in
+		saved)
+			[ -f "$SAVEDMAP" ] && jq -c '[.[]] | unique' "$SAVEDMAP" 2>/dev/null || echo '[]'
+			;;
+		manual|imported)
+			opt=$([ "$scope" = manual ] && echo manual_node || echo imported_node)
+			uci -q get vpnpool.main."$opt" | tr ' ' '\n' | grep '://' | jq -R . | jq -s '.' 2>/dev/null || echo '[]'
+			;;
+		*)
+			[ -f "$LINKS" ] && jq -c '[.[].link] | map(select(. != null and . != "")) | unique' "$LINKS" 2>/dev/null || echo '[]'
+			;;
+		esac | jq -c '{ ok: ((.|length) > 0), links: . }'
+		;;
+	add_sub)
+		# extra FULL subscription (bulk-merged into the pool, unlike probe-only sources)
+		u=$(echo "$input" | jq -r '.url // ""')
+		if [ -n "$u" ] && ! uci -q get vpnpool.main.extra_sub | tr ' ' '\n' | grep -Fxq "$u"; then
+			uci add_list vpnpool.main.extra_sub="$u"; uci commit vpnpool; signal_refetch
+		fi
+		echo '{"ok":true}'
+		;;
+	del_sub)
+		u=$(echo "$input" | jq -r '.url // ""')
+		[ -n "$u" ] && { uci del_list vpnpool.main.extra_sub="$u" 2>/dev/null; uci commit vpnpool; signal_refetch; }
+		echo '{"ok":true}'
+		;;
+	set_schedule)
+		en=$(echo "$input" | jq -r '.enabled')
+		on=$(echo "$input" | jq -r '.on // ""')
+		off=$(echo "$input" | jq -r '.off // ""')
+		ref=$(echo "$input" | jq -r '.refresh // ""')
+		if [ "$en" = "true" ] || [ "$en" = "1" ]; then uci set vpnpool.main.sched_enabled='1'; else uci set vpnpool.main.sched_enabled='0'; fi
+		uci set vpnpool.main.sched_on="$on"
+		uci set vpnpool.main.sched_off="$off"
+		uci set vpnpool.main.sched_refresh="$ref"
+		uci commit vpnpool
+		/usr/libexec/vpnpool/sched.sh apply >/dev/null 2>&1
+		echo '{"ok":true}'
+		;;
+	unlock)
+		# per-node service-unblock test — background (flips egress briefly), poll unlock_result.
+		tag=$(echo "$input" | jq -r '.tag // ""')
+		[ -n "$tag" ] || { echo '{"error":"no tag"}'; exit 0; }
+		mkdir -p /tmp/vpnpool
+		if [ -f /tmp/vpnpool/.unlock-running ]; then echo '{"running":true,"already":true}'; exit 0; fi
+		: > /tmp/vpnpool/.unlock-running
+		rm -f /tmp/vpnpool/.unlock-result.json
+		setsid sh -c '/usr/libexec/vpnpool/unlock.sh "$1"; rm -f /tmp/vpnpool/.unlock-running' _ "$tag" >/dev/null 2>&1 &
+		echo '{"running":true,"started":true}'
+		;;
+	unlock_result)
+		if [ -f /tmp/vpnpool/.unlock-running ]; then
+			echo '{"running":true}'
+		elif [ -f /tmp/vpnpool/.unlock-result.json ]; then
+			jq '. + {running:false}' /tmp/vpnpool/.unlock-result.json 2>/dev/null || echo '{"running":false,"ok":false}'
+		else
+			echo '{"running":false}'
+		fi
+		;;
+	add_auto_domain)
+		# manual "this site is blocked" -> add to the adaptive proxy-route list
+		d=$(echo "$input" | jq -r '.domain // ""' | tr 'A-Z' 'a-z' | sed 's,^https\?://,,; s,/.*$,,')
+		if [ -n "$d" ] && ! uci -q get vpnpool.routing.auto_domain | tr ' ' '\n' | grep -Fxq "$d"; then
+			uci add_list vpnpool.routing.auto_domain="$d"; uci commit vpnpool; signal_reload
+		fi
+		echo '{"ok":true}'
+		;;
+	del_auto_domain)
+		d=$(echo "$input" | jq -r '.domain // ""')
+		[ -n "$d" ] && { uci del_list vpnpool.routing.auto_domain="$d" 2>/dev/null; uci commit vpnpool; signal_reload; }
+		echo '{"ok":true}'
+		;;
+	run_adaptive)
+		# trigger one adaptive-routing scan now (background; it self-guards on the toggle)
+		setsid sh -c '/usr/libexec/vpnpool/adaptive.sh' >/dev/null 2>&1 &
+		echo '{"ok":true,"started":true}'
+		;;
+	speedtest)
+		# real throughput test for ONE node — runs in the background (it briefly
+		# routes router traffic through the node), poll speedtest_result.
+		tag=$(echo "$input" | jq -r '.tag // ""')
+		[ -n "$tag" ] || { echo '{"error":"no tag"}'; exit 0; }
+		# Low-memory guard: on a 16 MB router an extra curl+jq burst can push an
+		# already-tight box into OOM and kill sing-box. Refuse (with a clear message)
+		# unless there is at least speedtest_min_mem_kb of available RAM.
+		MINKB=$(uci -q get vpnpool.main.speedtest_min_mem_kb); [ -n "$MINKB" ] || MINKB=8192
+		AVAIL=$(awk '/^MemAvailable:/{print $2; found=1} END{if(!found) exit 1}' /proc/meminfo 2>/dev/null)
+		[ -n "$AVAIL" ] || AVAIL=$(awk '/^MemFree:/{f=$2}/^Buffers:/{b=$2}/^Cached:/{c=$2}END{print f+b+c}' /proc/meminfo 2>/dev/null)
+		if [ -n "$AVAIL" ] && [ "$AVAIL" -lt "$MINKB" ]; then
+			echo "{\"ok\":false,\"lowmem\":true,\"avail_kb\":${AVAIL:-0},\"need_kb\":$MINKB}"; exit 0
+		fi
+		mkdir -p /tmp/vpnpool
+		if [ -f /tmp/vpnpool/.speedtest-running ]; then echo '{"running":true,"already":true}'; exit 0; fi
+		: > /tmp/vpnpool/.speedtest-running
+		rm -f /tmp/vpnpool/.speedtest-result.json
+		setsid sh -c '/usr/libexec/vpnpool/speedtest.sh "$1"; rm -f /tmp/vpnpool/.speedtest-running' _ "$tag" >/dev/null 2>&1 &
+		echo '{"running":true,"started":true}'
+		;;
+	speedtest_result)
+		if [ -f /tmp/vpnpool/.speedtest-running ]; then
+			echo '{"running":true}'
+		elif [ -f /tmp/vpnpool/.speedtest-result.json ]; then
+			jq '. + {running:false}' /tmp/vpnpool/.speedtest-result.json 2>/dev/null || echo '{"running":false,"ok":false}'
+		else
+			echo '{"running":false}'
+		fi
 		;;
 	set_domains)
 		uci -q delete vpnpool.routing.domain

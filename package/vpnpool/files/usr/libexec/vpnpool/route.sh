@@ -47,6 +47,21 @@ up)
 		esac
 	fi
 
+	# Extra marking rules (run after the default 80/443 marking, before tproxy):
+	#  - DNS-leak guard: send LAN DNS to the tunnel (local dst already returned above)
+	#  - kill-switch: in full-tunnel (exclude) mode mark EVERY port so nothing leaks
+	#    past the VPN; if sing-box is down, marked traffic dead-ends at the lo table.
+	EXTRA_MARK=""
+	if [ "$DNS_PROTECT" = "1" ]; then
+		EXTRA_MARK="${EXTRA_MARK}		iifname \"$LAN_IF\" meta l4proto { tcp, udp } th dport 53 meta mark set $FWMARK
+"
+	fi
+	if [ "$KILLSWITCH" = "1" ] && [ "$MODE" = "exclude" ]; then
+		EXTRA_MARK="${EXTRA_MARK}		iifname \"$LAN_IF\" meta l4proto tcp meta mark set $FWMARK
+		iifname \"$LAN_IF\" meta l4proto udp meta mark set $FWMARK
+"
+	fi
+
 	ip route replace local 0.0.0.0/0 dev lo table "$RT_TABLE"
 	ip rule add fwmark "${FWMARK}/${FWMARK}" lookup "$RT_TABLE" priority "$RT_PRIO" 2>/dev/null
 	nft -f - <<NFT
@@ -63,7 +78,7 @@ ${YIELD}		ip daddr @localv4 return
 ${CLIENT_RULE}
 		iifname "$LAN_IF" meta l4proto tcp th dport { 80, 443 } meta mark set $FWMARK
 		iifname "$LAN_IF" meta l4proto udp th dport 443 meta mark set $FWMARK
-		meta mark & $FWMARK == $FWMARK meta l4proto tcp tproxy ip to 127.0.0.1:$TPROXY_PORT
+${EXTRA_MARK}		meta mark & $FWMARK == $FWMARK meta l4proto tcp tproxy ip to 127.0.0.1:$TPROXY_PORT
 		meta mark & $FWMARK == $FWMARK meta l4proto udp tproxy ip to 127.0.0.1:$TPROXY_PORT
 	}
 }

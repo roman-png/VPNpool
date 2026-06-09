@@ -6,6 +6,9 @@ config vpnpool 'main'
 	option enabled '0'
 	option mode 'selective'
 	option subscription_url ''
+	# Extra FULL subscriptions, bulk-merged into the pool like the primary one
+	# (quota/expiry are read only from the primary). Managed via the UI.
+	# list extra_sub 'https://...'
 	option subscription_ua 'v2rayNG/1.8.5'
 	option subscription_interval '6h'
 	option health_url 'http://cp.cloudflare.com/generate_204'
@@ -14,15 +17,51 @@ config vpnpool 'main'
 	option auto_switch '1'
 	# persisted manual node pick (empty = AUTO/urltest); set by the UI "Use" button
 	option selected_node ''
+	# preferred node: soft pin with switch-back (empty = pure auto/urltest)
+	option preferred_node ''
 	# IPv6 policy: block (fail-closed) | off | proxy
 	option ipv6 'block'
+	# Kill-switch: fail-closed for IPv4 in full-tunnel (exclude) mode (opt-in)
+	option killswitch '0'
+	# DNS-leak guard: route LAN DNS through the tunnel (opt-in)
+	option dns_protect '0'
 	# Per-client routing: all | exclude (listed bypass) | include (only listed).
 	# Clients are IPv4 addresses, e.g.:  list client '192.168.1.50'
 	option client_mode 'all'
+	# Saved nodes: links promoted from the subscription into a persistent store so
+	# they stay usable after the subscription expires (managed via the UI ⭐ button).
+	# list saved_node 'vless://...'
+	# Auto-snapshot: periodically persist the currently-reachable nodes into the
+	# saved store (bounded to auto_snapshot_max) so a working fallback survives
+	# subscription expiry. Opt-in.
+	option auto_snapshot '0'
+	option auto_snapshot_max '20'
+	# Scheduler (HH:MM, router local time): off/on the service + refresh subscription
+	option sched_enabled '0'
+	option sched_on ''
+	option sched_off ''
+	option sched_refresh ''
+	# On-demand per-node speed test target (sized download endpoint)
+	option speedtest_url 'https://speed.cloudflare.com/__down?bytes=10000000'
+	# Anti-DPI: fragment the TLS ClientHello (sing-box tls_fragment) to defeat SNI
+	# DPI. Needs sing-box >= 1.12; if unsupported, the resilient build keeps the
+	# previous config (no effect). Opt-in.
+	option antidpi '0'
+	# Adaptive routing: auto-detect domains blocked for a DIRECT connection and route
+	# them through the proxy (stored in routing.auto_domain). Opt-in.
+	option adaptive_routing '0'
+	option adaptive_max_per_run '8'
+	# Minimum available RAM (kB) required to run a speed test — guards tiny (16 MB)
+	# routers from OOM-killing sing-box during the test.
+	option speedtest_min_mem_kb '8192'
 	# Telegram alerts (failover / subscription / lifecycle)
 	option telegram_enabled '0'
 	option telegram_token ''
 	option telegram_chat ''
+	# Two-way control bot (/status /nodes /switch /on /off /refresh)
+	option telegram_control '0'
+	# Reach Telegram through the tunnel (api.telegram.org is blocked in RU)
+	option telegram_via_proxy '1'
 	# --- non-colliding resources (discovered; MUST differ from podkop/zapret) ---
 	# podkop: mark 0x100000, table podkop(pri105), tproxy :1602, clash :9090
 	# zapret: mark 0x20000000 / ct 0x40000000
@@ -43,6 +82,9 @@ config vpnpool 'main'
 config routing 'routing'
 	list community 'telegram'
 	list community 'russia_inside'
+	# auto_domain: domains auto-detected as blocked-for-direct by adaptive routing
+	# (always routed through the proxy when adaptive_routing=1). Managed via the UI.
+	# list auto_domain 'example.com'
 
 # Manual VLESS nodes (in addition to the subscription). Example:
 # config node

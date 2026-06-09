@@ -8,6 +8,7 @@
 . /usr/libexec/vpnpool/lib.sh
 
 SB_PIDFILE=/var/run/vpnpool-singbox.pid
+TGBOT_PIDFILE=/var/run/vpnpool-tgbot.pid
 LIBEXEC=/usr/libexec/vpnpool
 
 SB_LOG="$SB_DATA/sing-box.log"
@@ -85,9 +86,67 @@ current_node() {
 	fi
 }
 
+# ---- two-way Telegram control bot (optional, telegram_control=1) ----
+tgbot_enabled() {
+	[ "$(uci -q get vpnpool.main.telegram_control)" = "1" ] || return 1
+	[ -n "$(uci -q get vpnpool.main.telegram_token)" ] || return 1
+	[ -n "$(uci -q get vpnpool.main.telegram_chat)" ] || return 1
+}
+tgbot_alive() {
+	local p; p=$(cat "$TGBOT_PIDFILE" 2>/dev/null)
+	[ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+start_tgbot() {
+	tgbot_enabled || return 0
+	tgbot_alive && return 0
+	# 9>&- so the bot doesn't inherit the restart lock fd (same trap as sing-box).
+	"$LIBEXEC/tgbot.sh" >/dev/null 2>&1 9>&- &
+	echo $! > "$TGBOT_PIDFILE"
+	log "tgbot started pid=$(cat "$TGBOT_PIDFILE" 2>/dev/null)"
+}
+kill_tgbot() {
+	local p; p=$(cat "$TGBOT_PIDFILE" 2>/dev/null)
+	[ -n "$p" ] && kill "$p" 2>/dev/null
+	# also sweep any stray instance
+	for p in $(pgrep -f "$LIBEXEC/tgbot.sh" 2>/dev/null); do kill "$p" 2>/dev/null; done
+	rm -f "$TGBOT_PIDFILE"
+}
+
+# ---- preferred-node soft pin with switch-back ----
+# If preferred_node is set (and the user hasn't manually pinned a node and
+# auto_switch is on): stick to the preferred node while it's reachable; when it
+# dies, hand control to urltest "auto"; when it recovers, switch back. A small
+# bad-streak counter avoids flapping.
+PREF_BAD=0
+preferred_check() {
+	local pref sel asw p delay nowsel
+	pref=$(uci -q get vpnpool.main.preferred_node)
+	[ -n "$pref" ] || return 0
+	sel=$(uci -q get vpnpool.main.selected_node); [ -n "$sel" ] && return 0  # manual pin wins
+	asw=$(uci -q get vpnpool.main.auto_switch); [ "$asw" = "0" ] && return 0
+	p=$(curl -s -m3 "http://$CLASH_API/proxies" 2>/dev/null)
+	echo "$p" | jq -e --arg t "$pref" '.proxies[$t]' >/dev/null 2>&1 || return 0  # gone
+	delay=$(echo "$p" | jq -r --arg t "$pref" '(.proxies[$t].history // []) | last | .delay // 0' 2>/dev/null)
+	nowsel=$(echo "$p" | jq -r '.proxies.proxy.now // ""' 2>/dev/null)
+	if [ -n "$delay" ] && [ "$delay" -gt 0 ] 2>/dev/null; then
+		PREF_BAD=0
+		if [ "$nowsel" != "$pref" ]; then
+			curl -s -m5 -X PUT "http://$CLASH_API/proxies/proxy" --data "{\"name\":\"$pref\"}" >/dev/null 2>&1
+			log "preferred node healthy -> switch back to $pref"
+		fi
+	else
+		PREF_BAD=$((PREF_BAD + 1))
+		if [ "$PREF_BAD" -ge 2 ] && [ "$nowsel" = "$pref" ]; then
+			curl -s -m5 -X PUT "http://$CLASH_API/proxies/proxy" --data '{"name":"auto"}' >/dev/null 2>&1
+			log "preferred node $pref down -> hand over to auto"
+		fi
+	fi
+}
+
 cleanup() {
 	log "stopping: removing routing and sing-box"
 	tg_notify "🔴 vpnpool: stopped"
+	kill_tgbot
 	"$LIBEXEC/route.sh" down
 	kill_singbox
 	log "stopped cleanly"
@@ -139,11 +198,16 @@ start_singbox
 sleep 3
 "$LIBEXEC/route.sh" up
 log "routing is UP"
+start_tgbot
 tg_notify "🟢 vpnpool: routing is up"
 
 REFRESH=$(interval_seconds)
 LAST=$(date +%s)
 LAST_NODE=""
+SNAP_LAST=0
+SNAP_EVERY=1800   # auto-snapshot reachable nodes at most every 30 min (self-guards on the toggle)
+ADAPT_LAST=0
+ADAPT_EVERY=600   # adaptive-routing scan at most every 10 min (self-guards on the toggle)
 
 # main supervise/refresh loop. sleep in bg + wait so TERM is handled promptly.
 while : ; do
@@ -154,6 +218,31 @@ while : ; do
 		log "sing-box not running, restarting"
 		start_singbox
 		sleep 2
+	fi
+
+	# keep the Telegram control bot alive (if enabled)
+	if tgbot_enabled && ! tgbot_alive; then
+		log "tgbot not running, restarting"
+		start_tgbot
+	elif ! tgbot_enabled && tgbot_alive; then
+		kill_tgbot   # disabled via UI -> stop it
+	fi
+
+	# preferred-node soft pin + switch-back
+	preferred_check
+
+	# auto-snapshot reachable nodes into the persistent saved store (opt-in)
+	NOWS=$(date +%s)
+	if [ "$(uci -q get vpnpool.main.auto_snapshot)" = "1" ] && [ $(( NOWS - SNAP_LAST )) -ge "$SNAP_EVERY" ]; then
+		SNAP_LAST=$NOWS
+		"$LIBEXEC/snapshot.sh" 2>/dev/null
+	fi
+
+	# adaptive routing scan (opt-in): runs in the background so a slow probe never
+	# stalls supervision; it self-guards on the toggle and signals USR1 if it changed.
+	if [ "$(uci -q get vpnpool.main.adaptive_routing)" = "1" ] && [ $(( NOWS - ADAPT_LAST )) -ge "$ADAPT_EVERY" ]; then
+		ADAPT_LAST=$NOWS
+		setsid sh -c "$LIBEXEC/adaptive.sh" >/dev/null 2>&1 &
 	fi
 
 	# detect node change (failover / manual switch) and notify
@@ -179,6 +268,18 @@ while : ; do
 		if [ -n "$EXP" ]; then
 			DAYS=$(( (EXP - $(date +%s)) / 86400 ))
 			[ "$DAYS" -ge 0 ] && [ "$DAYS" -le 3 ] && tg_notify "⚠️ vpnpool: subscription expires in ${DAYS}d"
+		fi
+		# subscription quota warning: alert once per refresh when <10% remains
+		USAGE=$(cat "$CONF_DIR/sub.usage" 2>/dev/null)
+		if [ -n "$USAGE" ]; then
+			QTOT=$(echo "$USAGE" | awk '{print $3+0}')
+			QUSED=$(echo "$USAGE" | awk '{print $1+$2}')
+			if [ "${QTOT:-0}" -gt 0 ] 2>/dev/null; then
+				QLEFT=$(( QTOT - QUSED ))
+				QPCT=$(( QLEFT * 100 / QTOT ))
+				QGB=$(awk -v b="$QLEFT" 'BEGIN{printf "%.1f", b/1073741824}')
+				[ "$QPCT" -ge 0 ] && [ "$QPCT" -le 10 ] && tg_notify "⚠️ vpnpool: subscription quota low — ${QGB} GB (${QPCT}%) left"
+			fi
 		fi
 	fi
 done

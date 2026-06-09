@@ -21,6 +21,7 @@ write_links() {   # $1=uci option  $2=outfile
 }
 write_links manual_node   "$SB_DATA/manual.links"
 write_links imported_node "$SB_DATA/imported.links"
+write_links saved_node    "$SB_DATA/saved.links"
 
 # gather input files: every source file + manual + imported links (parser
 # auto-detects format per file and merges with global dedup + unique tags)
@@ -30,6 +31,7 @@ for f in "$SRCDIR"/*.raw; do
 done
 [ -s "$SB_DATA/manual.links" ]   && FILES="$FILES $SB_DATA/manual.links"
 [ -s "$SB_DATA/imported.links" ] && FILES="$FILES $SB_DATA/imported.links"
+[ -s "$SB_DATA/saved.links" ]    && FILES="$FILES $SB_DATA/saved.links"
 
 # shellcheck disable=SC2086
 ucode /usr/libexec/vpnpool/parser.uc $FILES > "$NODES" 2>"$SB_DATA/build.err"
@@ -38,6 +40,16 @@ if [ "${CNT:-0}" -lt 1 ]; then
 	log "build: 0 nodes parsed (see $SB_DATA/build.err)"
 	exit 1
 fi
+
+# Persistent tag->link map for the "Save node" feature: re-parse the SAME inputs
+# with --keep-link so every displayed node's original vless:// link is recorded.
+# Kept in /etc/vpnpool (survives reboot) so a node can be saved even right before
+# the subscription expires. nodes.json itself stays link-free (links must never
+# leak into the sing-box outbounds).
+# shellcheck disable=SC2086
+ucode /usr/libexec/vpnpool/parser.uc --keep-link $FILES 2>/dev/null \
+	| jq -c 'map({tag, link:._link}) | map(select(.link != null and .link != ""))' \
+	> /etc/vpnpool/links.json 2>/dev/null || echo '[]' > /etc/vpnpool/links.json
 
 ucode /usr/libexec/vpnpool/generator.uc "$NODES" > "$SB_CONF.new" 2>>"$SB_DATA/build.err"
 
