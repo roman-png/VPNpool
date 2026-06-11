@@ -59,12 +59,16 @@ _do_start_singbox() {
 # Serialise restarts with a lock: the USR1/USR2 signal handlers and the main
 # supervise loop can both call start_singbox; without a lock two of them raced and
 # spawned overlapping sing-box instances that fought over :1603 -> crash loop.
+# timestamp of the last sing-box (re)start — the watchdog uses it for its warm-up
+# grace window so it never restarts a tunnel that is merely still picking a node.
+SB_STARTED=0
 start_singbox() {
 	if command -v flock >/dev/null 2>&1; then
 		( flock 9; _do_start_singbox; ) 9>/var/run/vpnpool-sb.lock
 	else
 		_do_start_singbox
 	fi
+	SB_STARTED=$(date +%s)
 	log "sing-box started pid=$(cat "$SB_PIDFILE" 2>/dev/null)"
 }
 
@@ -144,33 +148,55 @@ preferred_check() {
 }
 
 # ---- tunnel self-heal watchdog ----
-# Root cause of the 2026-06-11 outage: sing-box stayed ALIVE by pid, but its urltest
-# got stuck — every probe timed out for hours while WAN was fine; only a process
-# restart recovered it. The supervisor only checked the pid, so it never noticed.
-# Fix the cause: every loop, probe END-TO-END through the test-mixed inbound (the
-# same proxy->auto path real traffic takes). If the tunnel fails WD_LIMIT consecutive
-# checks while a DIRECT probe succeeds (WAN is up, so the failure is OURS), restart
-# sing-box and wipe the urltest cache. Skipped while the user has a manual node pin
-# (a dead pinned node is the user's explicit choice, not a stuck process).
+# Catches the rare state where sing-box is ALIVE by pid but its urltest is stuck —
+# every probe timing out for a long time while WAN is fine, recoverable only by a
+# process restart. The supervisor's pid check alone never notices that.
+#
+# CRITICAL TUNING LESSON (2026-06-11): the first cut fired far too eagerly and created
+# a restart LOOP — after every (re)start urltest needs ~60s to pick a working node, so
+# the e2e probe fails during warm-up; counting those failures tripped a restart, which
+# reset the warm-up, which failed again... Each restart also wipes the urltest delay
+# history, so the dashboard showed "0 pings" and traffic blipped every few minutes on a
+# tunnel that was actually FINE. The cure is: (1) a GRACE period after each start during
+# which the watchdog never counts a strike; (2) treat the tunnel as alive if ANY of
+# several probe attempts/URLs succeeds (intermittent flap != dead); (3) require a long
+# run of confirmed-dead checks and a long cooldown so we only ever act on a genuine,
+# sustained outage — never on warm-up or a flaky-but-working pool.
 WD_BAD=0
-WD_LIMIT=8        # 8 checks x ~15s loop = ~2 min of confirmed tunnel-down
-WD_COOLDOWN=600   # never self-heal more often than every 10 min (no flapping)
+WD_LIMIT=8        # confirmed-dead checks (each does 3 attempts) before acting
+WD_COOLDOWN=1800  # >= 30 min between self-heals — the real bug was hours-long, not flaps
+WD_GRACE=180      # after a (re)start, give urltest this long to warm up before judging
 WD_LAST=0
-WD_URL="http://cp.cloudflare.com/generate_204"
-watchdog_check() {
-	local tp pcode dcode now
-	[ -n "$(uci -q get vpnpool.main.selected_node)" ] && { WD_BAD=0; return 0; }
+WD_URLS="http://cp.cloudflare.com/generate_204 http://www.gstatic.com/generate_204 http://detectportal.firefox.com/success.txt"
+
+# one tunnel probe through the test-mixed inbound; alive if ANY probe URL returns 2xx
+probe_tunnel_once() {
+	local tp u code
 	tp=$(uci -q get vpnpool.main.test_port); [ -n "$tp" ] || tp=1605
-	pcode=$(curl -s -o /dev/null -m6 --proxy "http://127.0.0.1:$tp" -w '%{http_code}' "$WD_URL" 2>/dev/null)
-	if [ "$pcode" = "204" ]; then WD_BAD=0; return 0; fi
-	# tunnel probe failed — if WAN itself is down it's not ours, hold position
-	dcode=$(curl -s -o /dev/null -m6 -w '%{http_code}' "$WD_URL" 2>/dev/null)
-	[ "$dcode" = "204" ] || { WD_BAD=0; return 0; }
-	WD_BAD=$((WD_BAD + 1))
+	for u in $WD_URLS; do
+		code=$(curl -s -o /dev/null -m6 --proxy "http://127.0.0.1:$tp" -w '%{http_code}' "$u" 2>/dev/null)
+		case "$code" in 2??) return 0 ;; esac
+	done
+	return 1
+}
+
+watchdog_check() {
+	local now
+	[ -n "$(uci -q get vpnpool.main.selected_node)" ] && { WD_BAD=0; return 0; }
 	now=$(date +%s)
+	# grace window after a (re)start: never judge a tunnel that is still warming up
+	[ $(( now - SB_STARTED )) -lt "$WD_GRACE" ] && { WD_BAD=0; return 0; }
+	# 3 attempts spread over ~6s — a single flap must not count as down
+	if probe_tunnel_once || { sleep 3; probe_tunnel_once; } || { sleep 3; probe_tunnel_once; }; then
+		WD_BAD=0; return 0
+	fi
+	# probe failed all attempts — only OUR problem if WAN itself is up
+	probe_wan() { curl -s -o /dev/null -m6 -w '%{http_code}' http://cp.cloudflare.com/generate_204 2>/dev/null; }
+	[ "$(probe_wan)" = "204" ] || { WD_BAD=0; return 0; }
+	WD_BAD=$((WD_BAD + 1))
 	if [ "$WD_BAD" -ge "$WD_LIMIT" ] && [ $(( now - WD_LAST )) -ge "$WD_COOLDOWN" ]; then
 		WD_BAD=0; WD_LAST=$now
-		log "watchdog: tunnel dead ${WD_LIMIT}x while WAN is up — self-healing (sing-box restart)"
+		log "watchdog: tunnel dead ${WD_LIMIT}x (every probe) while WAN is up — self-healing (sing-box restart)"
 		tg_notify "🩺 vpnpool: tunnel stuck, self-healing (sing-box restart)"
 		kill_singbox
 		rm -f "$SB_DATA/cache.db"   # a stale urltest/selector cache must not re-pin the dead state

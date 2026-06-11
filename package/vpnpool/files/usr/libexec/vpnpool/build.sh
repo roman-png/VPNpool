@@ -54,6 +54,57 @@ ucode /usr/libexec/vpnpool/parser.uc --keep-link $FILES 2>/dev/null \
 	| jq -c 'map({tag, link:._link}) | map(select(.link != null and .link != ""))' \
 	> /etc/vpnpool/links.json 2>/dev/null || echo '[]' > /etc/vpnpool/links.json
 
+# ---- auto-pool health prefilter ----
+# The urltest "auto" group probes EVERY member each interval. A node whose server is
+# TCP-dead leaves a hung SYN_SENT socket on every cycle; with ~10 dead nodes (a common
+# state for a churning public subscription — several "country" tags share one dead IP)
+# 100+ stuck sockets pile up within minutes until the urltest probe machinery is so
+# backed up that even LIVE nodes stop pinging ("0 pings" on the dashboard) and real
+# traffic through 'auto' stalls (context deadline exceeded) — recoverable only by a
+# restart, then it degrades again. Root-caused on 2026-06-11.
+#
+# So TCP-probe each node's server:port here (in parallel) and record the REACHABLE
+# tags; the generator keeps ONLY those in the auto/urltest pool. Dead nodes stay in
+# the selector for manual choice. If NOTHING is reachable (e.g. a WAN blip during the
+# build) we remove the file so the generator falls back to ALL nodes — urltest is
+# never left empty. Reality CDN-front nodes answer TLS (time_connect>0) so they pass;
+# a dead/blocked server never connects (time_connect==0) so it is excluded.
+ALIVE="$SB_DATA/.alive_tags.json"
+health_prefilter() {
+	local tmpd TAB ct idx srv port
+	TAB=$(printf '\t')
+	tmpd="$SB_DATA/.hp"; rm -rf "$tmpd"; mkdir -p "$tmpd"
+	jq -r 'to_entries[] | "\(.key)\t\(.value.server)\t\(.value.server_port)"' "$NODES" 2>/dev/null > "$tmpd/list"
+	# one backgrounded TCP probe per node (current shell, so `wait` reaps them)
+	while IFS="$TAB" read -r idx srv port; do
+		[ -n "$srv" ] && [ -n "$port" ] || continue
+		(
+			ct=$(curl -s -o /dev/null --connect-timeout 3 -m 4 -w '%{time_connect}' "https://$srv:$port/" 2>/dev/null)
+			[ "$(awk -v t="$ct" 'BEGIN{print (t+0>0)?1:0}')" = 1 ] && : > "$tmpd/a_$idx"
+		) &
+	done < "$tmpd/list"
+	wait
+	# collect reachable indexes -> their tags
+	local idxs
+	idxs=$(cd "$tmpd" 2>/dev/null && ls a_* 2>/dev/null | sed 's/^a_//')
+	if [ -z "$idxs" ]; then
+		rm -f "$ALIVE"; rm -rf "$tmpd"
+		log "build: health prefilter found 0 reachable nodes (WAN issue?) — auto-pool unfiltered"
+		return 0
+	fi
+	local idxjson
+	idxjson=$(printf '%s\n' $idxs | jq -R 'tonumber' 2>/dev/null | jq -cs . 2>/dev/null)
+	[ -n "$idxjson" ] || idxjson='[]'
+	jq -c --argjson ai "$idxjson" 'to_entries | map(select(.key as $k | ($ai | index($k)) != null)) | map(.value.tag)' \
+		"$NODES" > "$ALIVE" 2>/dev/null
+	rm -rf "$tmpd"
+	local alive_n total_n
+	alive_n=$(jq 'length' "$ALIVE" 2>/dev/null || echo 0)
+	total_n=$(jq 'length' "$NODES" 2>/dev/null || echo 0)
+	log "build: health prefilter — $alive_n/$total_n nodes reachable, auto-pool limited to them"
+}
+health_prefilter
+
 ucode /usr/libexec/vpnpool/generator.uc "$NODES" > "$SB_CONF.new" 2>>"$SB_DATA/build.err"
 
 # Resilient validation. A SINGLE malformed node (unsupported flow, reality without
