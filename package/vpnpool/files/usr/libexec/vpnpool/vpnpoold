@@ -143,6 +143,41 @@ preferred_check() {
 	fi
 }
 
+# ---- tunnel self-heal watchdog ----
+# Root cause of the 2026-06-11 outage: sing-box stayed ALIVE by pid, but its urltest
+# got stuck — every probe timed out for hours while WAN was fine; only a process
+# restart recovered it. The supervisor only checked the pid, so it never noticed.
+# Fix the cause: every loop, probe END-TO-END through the test-mixed inbound (the
+# same proxy->auto path real traffic takes). If the tunnel fails WD_LIMIT consecutive
+# checks while a DIRECT probe succeeds (WAN is up, so the failure is OURS), restart
+# sing-box and wipe the urltest cache. Skipped while the user has a manual node pin
+# (a dead pinned node is the user's explicit choice, not a stuck process).
+WD_BAD=0
+WD_LIMIT=8        # 8 checks x ~15s loop = ~2 min of confirmed tunnel-down
+WD_COOLDOWN=600   # never self-heal more often than every 10 min (no flapping)
+WD_LAST=0
+WD_URL="http://cp.cloudflare.com/generate_204"
+watchdog_check() {
+	local tp pcode dcode now
+	[ -n "$(uci -q get vpnpool.main.selected_node)" ] && { WD_BAD=0; return 0; }
+	tp=$(uci -q get vpnpool.main.test_port); [ -n "$tp" ] || tp=1605
+	pcode=$(curl -s -o /dev/null -m6 --proxy "http://127.0.0.1:$tp" -w '%{http_code}' "$WD_URL" 2>/dev/null)
+	if [ "$pcode" = "204" ]; then WD_BAD=0; return 0; fi
+	# tunnel probe failed — if WAN itself is down it's not ours, hold position
+	dcode=$(curl -s -o /dev/null -m6 -w '%{http_code}' "$WD_URL" 2>/dev/null)
+	[ "$dcode" = "204" ] || { WD_BAD=0; return 0; }
+	WD_BAD=$((WD_BAD + 1))
+	now=$(date +%s)
+	if [ "$WD_BAD" -ge "$WD_LIMIT" ] && [ $(( now - WD_LAST )) -ge "$WD_COOLDOWN" ]; then
+		WD_BAD=0; WD_LAST=$now
+		log "watchdog: tunnel dead ${WD_LIMIT}x while WAN is up — self-healing (sing-box restart)"
+		tg_notify "🩺 vpnpool: tunnel stuck, self-healing (sing-box restart)"
+		kill_singbox
+		rm -f "$SB_DATA/cache.db"   # a stale urltest/selector cache must not re-pin the dead state
+		start_singbox
+	fi
+}
+
 cleanup() {
 	log "stopping: removing routing and sing-box"
 	tg_notify "🔴 vpnpool: stopped"
@@ -230,6 +265,9 @@ while : ; do
 
 	# preferred-node soft pin + switch-back
 	preferred_check
+
+	# end-to-end tunnel health: restart sing-box if it's alive-but-stuck
+	watchdog_check
 
 	# auto-snapshot reachable nodes into the persistent saved store (opt-in)
 	NOWS=$(date +%s)
