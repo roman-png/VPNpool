@@ -32,6 +32,14 @@ let health_url  = opt('main', 'health_url', 'http://cp.cloudflare.com/generate_2
 let fo_interval = opt('main', 'failover_interval', '60');
 let fo_tol      = int(opt('main', 'failover_tolerance', 50));
 let log_level   = opt('main', 'log_level', 'warn');
+// DNS resolution strategy for sing-box's OWN lookups (urltest/clash health probes
+// and any in-tunnel domain). On a router whose system DNS returns AAAA first but has
+// NO working IPv6 transit through the VLESS nodes, the default picks an IPv6 address
+// for the probe URL and every health-check times out -> the dashboard shows "0 pings"
+// for nodes that actually work (real traffic survives because it resolves at the exit
+// node). 'prefer_ipv4' makes dual-stack probe hosts resolve to IPv4 while still
+// allowing IPv6-only hosts. Override to 'ipv4_only' to disable IPv6 entirely.
+let dns_strategy = opt('main', 'dns_strategy', 'prefer_ipv4');
 
 // explicit domain suffixes
 let domains = uci.get('vpnpool', 'routing', 'domain') ?? [];
@@ -94,6 +102,28 @@ if (length(auto_member)) {
 }
 if (!length(auto_tags))
 	auto_tags = node_tags;                               // default / fallback: all nodes
+
+// Health prefilter (build.sh writes .alive_tags.json): keep ONLY TCP-reachable nodes
+// in the urltest pool. A dead node leaves a hung probe socket every interval; ~10 of
+// them pile up until urltest stalls and even live nodes stop pinging (root cause of the
+// 2026-06-11 "0 pings / tunnel flaps" outage). Dead nodes stay in node_tags so they
+// remain MANUALLY selectable via the 'proxy' selector — they're only dropped from auto.
+// Absent/empty file (WAN blip at build) => no filtering; if the filter would empty the
+// pool, keep it unfiltered — urltest must never be empty.
+let alive_raw = readfile('/tmp/vpnpool/.alive_tags.json');
+if (alive_raw) {
+	let alive = json(alive_raw);
+	if (type(alive) == 'array' && length(alive)) {
+		let alive_set = {};
+		for (let t in alive)
+			alive_set[t] = 1;
+		let filtered = [];
+		for (let t in auto_tags)
+			if (alive_set[t]) push(filtered, t);
+		if (length(filtered))
+			auto_tags = filtered;
+	}
+}
 
 // ---- outbounds ----
 let outbounds = [];
@@ -216,10 +246,21 @@ let inbounds = [
 	}
 ];
 
+// ---- dns ----
+// New (1.12+) DNS server format: a single "local" server that defers to the system
+// resolver (dnsmasq on OpenWrt), with a global resolution strategy. This fixes the
+// IPv6-first health-probe stall described at dns_strategy above. 'off' omits the
+// section entirely (legacy behaviour) for anyone who needs it.
+let dns;
+if (dns_strategy != 'off')
+	dns = {
+		servers: [ { type: 'local', tag: 'local' } ],
+		strategy: dns_strategy
+	};
+
 // ---- assemble ----
 let config = {
 	log: { level: log_level, timestamp: true },
-	inbounds: inbounds,
 	outbounds: outbounds,
 	route: route,
 	experimental: {
@@ -227,5 +268,8 @@ let config = {
 		cache_file: { enabled: true, path: '/tmp/vpnpool/cache.db' }
 	}
 };
+if (dns)
+	config.dns = dns;
+config.inbounds = inbounds;
 
 printf("%.J\n", config);
