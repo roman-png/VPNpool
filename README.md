@@ -34,8 +34,16 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
   **switches to a working VLESS server automatically** when the active one stops
   responding. Manual override and manual "ping all" too.
 - 🩺 **Tunnel self‑heal watchdog** — the supervisor probes the tunnel end‑to‑end
-  (not just the sing‑box pid); if the tunnel is dead while WAN is up for ~2 min,
-  it restarts sing‑box and wipes the stale urltest cache automatically.
+  (not just the sing‑box pid); if the tunnel stays dead while WAN is up (after a
+  warm‑up grace, confirmed over several probes), it restarts sing‑box and wipes the
+  stale urltest cache automatically.
+- 🧹 **Dead‑node prefilter** — unreachable nodes are TCP‑probed at build time and
+  kept out of the auto‑ping (urltest) pool, so a churning subscription full of dead
+  servers can't pile up hung probe sockets and stall pinging of the live nodes
+  (they stay available for manual selection).
+- 🌐 **IPv4‑first DNS strategy** — sing‑box's own health probes resolve IPv4 first
+  (`dns_strategy`, default `prefer_ipv4`), so a router that gets AAAA records but has
+  no IPv6 transit through the nodes doesn't show false "0 ping" for working nodes.
 - ⭐ **Preferred node with switch‑back** — pin a favourite node: it's used while it's
   reachable, control is handed to auto if it dies, and it **switches back** when it
   recovers (anti‑flap hysteresis on top of urltest tolerance).
