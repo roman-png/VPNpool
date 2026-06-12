@@ -85,7 +85,13 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
   it as detected, with the self‑learned domain count. The proxy stays for
   geo‑blocked sites that desync can’t fix. A one‑click **Install zapret** button
   fetches the upstream package for your router’s architecture and installs it
-  (NFQUEUE kmods included).
+  (NFQUEUE kmods included). **Auto‑tune** finds a working desync strategy for *your*
+  ISP via `blockcheck` and writes it into zapret (kicked off automatically right
+  after install). A **3‑way classifier** decides per‑domain *desync‑direct* vs
+  *proxy* (a geo‑block escalates to the proxy; a DPI‑block stays direct). Optional
+  **anti‑throttle** auto‑engages the direct bypass when the proxy is throttled to a
+  crawl. And a **Lite mode** runs zapret‑only with **no sing‑box** for tiny 16 MB
+  routers (nfqws is ~1.5 MB and persists in flash).
 - 🎬 **Per‑node unlock test** — check what each node opens (YouTube / ChatGPT /
   Netflix / Instagram / Telegram / Google) and see badges right in the dashboard.
 - 🛡️ **Anti‑DPI** — one toggle to fragment the TLS ClientHello (sing‑box
