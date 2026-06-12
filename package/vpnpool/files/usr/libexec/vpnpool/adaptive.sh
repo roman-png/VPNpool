@@ -43,8 +43,9 @@ probe_desync() {
 	UH=/opt/zapret/ipset/zapret-hosts-user.txt
 	[ -f "$UH" ] || : > "$UH"
 	echo "$1" >> "$UH"
-	for p in $(pgrep -f /opt/zapret/nfq/nfqws 2>/dev/null); do kill -HUP "$p" 2>/dev/null; done
-	sleep 3
+	# nfqws auto-reloads its hostlists on file mtime change (no signal — it has no
+	# SIGHUP handler, so kill -HUP would KILL it). Give it a few seconds to pick up.
+	sleep 5
 	c=$(curl -s -o /dev/null -m6 -A 'Mozilla/5.0' -w '%{http_code}' "https://$1/" 2>/dev/null)
 	grep -vxF "$1" "$UH" > "$UH.t" 2>/dev/null && mv "$UH.t" "$UH"
 	case "$c" in 2*|3*) return 0 ;; *) return 1 ;; esac

@@ -19,6 +19,8 @@ var callDelAutoDom = rpc.declare({ object: 'vpnpool', method: 'del_auto_domain',
 var callRunAdaptive = rpc.declare({ object: 'vpnpool', method: 'run_adaptive' });
 var callInstallZapret = rpc.declare({ object: 'vpnpool', method: 'install_zapret' });
 var callInstallZapretRes = rpc.declare({ object: 'vpnpool', method: 'install_zapret_result' });
+var callTuneZapret = rpc.declare({ object: 'vpnpool', method: 'tune_zapret' });
+var callTuneZapretRes = rpc.declare({ object: 'vpnpool', method: 'tune_zapret_result' });
 
 return view.extend({
 	notify: function(msg) { ui.addNotification(null, E('p', msg), 'info'); },
@@ -33,6 +35,25 @@ return view.extend({
 	handleToggleAdaptive: function(cb) { return this.save('adaptive_routing', cb.checked ? '1' : '0'); },
 	handleToggleSmart: function(cb) { return this.save('smart_bypass', cb.checked ? '1' : '0'); },
 	handleToggleThrottle: function(cb) { return this.save('anti_throttle', cb.checked ? '1' : '0'); },
+	// Auto-pick a working desync strategy for this ISP via blockcheck, then write it to
+	// zapret's NFQWS_OPT. This is what makes the direct bypass actually beat the DPI.
+	handleTuneZapret: function() {
+		var poller = function() {
+			return callTuneZapretRes().then(function(r) {
+				if (r && r.running) { window.setTimeout(poller, 4000); return; }
+				if (r && r.ok) {
+					var v = r.verified ? _('verified working') : _('applied (not confirmed)');
+					ui.addNotification(null, E('p', _('Desync strategy tuned — %s: %s').format(v, r.strategy || '')), 'info');
+				} else {
+					ui.addNotification(null, E('p', _('Strategy tuning failed: %s').format((r && r.error) || '?')), 'warning');
+				}
+			});
+		};
+		return callTuneZapret().then(function() {
+			ui.addNotification(null, E('p', _('Tuning desync strategy via blockcheck… this can take a few minutes.')), 'info');
+			window.setTimeout(poller, 4000);
+		});
+	},
 	// One-click zapret install (opkg update + kmods + arch ipk). Long-running, so it
 	// runs in the background and we poll install_zapret_result, then reload the view.
 	handleInstallZapret: function() {
@@ -43,8 +64,11 @@ return view.extend({
 				if (r && r.ok && r.already) {
 					self.notify(_('zapret is already installed.'));
 				} else if (r && r.ok) {
-					ui.addNotification(null, E('p', _('zapret installed (%s). Reloading…').format(r.version || 'ok')), 'info');
-					window.setTimeout(function() { location.reload(); }, 1500);
+					// auto-tune the desync strategy right after a fresh install, so the
+					// direct bypass actually defeats the DPI without a manual step.
+					ui.addNotification(null, E('p', _('zapret installed (%s). Auto-tuning desync strategy in the background…').format(r.version || 'ok')), 'info');
+					callTuneZapret();
+					window.setTimeout(function() { location.reload(); }, 2500);
 				} else {
 					var step = (r && r.step) ? r.step : '?';
 					var err = (r && r.error) ? r.error : _('unknown error');
@@ -213,7 +237,11 @@ return view.extend({
 				E('div', { 'style': 'margin:6px 0' }, [ E('label', {}, [ throttleCb, E('span', { 'style': 'margin-left:6px' }, _('Anti-throttle: if the proxy gets throttled to a crawl, auto-engage direct bypass')) ]),
 					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'disabled': zap.present ? null : 'disabled', 'click': ui.createHandlerFn(this, 'handleToggleThrottle', throttleCb) }, _('Save')) ]),
 				zap.present
-					? E('p', { 'style': 'color:#888' }, _('zapret detected (mode: %s). Self-learned domains so far: %s. Needs a separate zapret install; vpnpool only switches it to self-learning mode.').format(zap.mode || '—', String(zap.auto_count || 0)))
+					? E('div', {}, [
+						E('p', { 'style': 'color:#888;margin:4px 0' }, _('zapret detected (mode: %s). Self-learned domains so far: %s. Needs a separate zapret install; vpnpool only switches it to self-learning mode.').format(zap.mode || '—', String(zap.auto_count || 0))),
+						E('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, 'handleTuneZapret') }, '🎯 ' + _('Tune desync strategy')),
+						E('span', { 'style': 'color:#888;margin-left:8px' }, _('finds a working DPI-bypass strategy for your ISP (blockcheck) — run once after install'))
+					])
 					: E('div', {}, [
 						E('p', { 'style': 'color:#c0392b;margin:4px 0' }, _('zapret is not installed. vpnpool only orchestrates it (never bundles nfqws).')),
 						E('button', { 'class': 'btn cbi-button cbi-button-add', 'click': ui.createHandlerFn(this, 'handleInstallZapret') }, '⬇ ' + _('Install zapret')),
