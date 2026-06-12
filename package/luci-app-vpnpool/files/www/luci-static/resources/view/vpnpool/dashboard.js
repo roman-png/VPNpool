@@ -356,6 +356,7 @@ return view.extend({
 			var dcount = (st.desync_domains || []).length;
 			kids.push(E('div', { 'style': 'margin:4px 0' }, [
 				E('b', {}, _('Smart bypass') + ': '),
+				setn.lite_mode ? badge(_('LITE'), '#6a1b9a') : '',
 				badge(sbOn ? _('on (direct DPI bypass)') : _('off'), sbOn ? '#2e7d32' : '#888'),
 				E('span', { 'style': 'color:#888;margin-left:6px' }, 'zapret · ' + (zap.mode || '—') +
 					' · ' + _('self-learned: %s').format(String(zap.auto_count || 0)) +

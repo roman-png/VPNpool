@@ -61,6 +61,11 @@ config vpnpool 'main'
 	# sites go DIRECT via zapret instead of the dying proxy. Opt-in; acts on sustained
 	# throttle only, with a long cooldown. Needs zapret for the fallback.
 	option anti_throttle '0'
+	# Lite mode: run ONLY zapret direct DPI-bypass — no sing-box, no proxy, no
+	# subscription. For tiny (16 MB) routers where a 44 MB sing-box barely fits in RAM;
+	# nfqws (~1.5 MB, persistent in flash) self-learns and defeats DPI directly. Needs
+	# zapret installed. Opt-in; changing it restarts the service.
+	option lite_mode '0'
 	# Minimum available RAM (kB) required to run a speed test — guards tiny (16 MB)
 	# routers from OOM-killing sing-box during the test.
 	option speedtest_min_mem_kb '8192'
