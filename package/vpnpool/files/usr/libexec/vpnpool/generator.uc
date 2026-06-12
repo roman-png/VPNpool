@@ -217,6 +217,21 @@ for (let d in auto_domains)
 if (adaptive == '1' && length(auto_dom_clean))
 	push(rules, { domain_suffix: auto_dom_clean, outbound: 'proxy' });
 
+// Smart bypass: domains the classifier proved are fixed by a DIRECT zapret desync
+// go DIRECT explicitly (an installed zapret/nfqws defeats the DPI on the wire), in
+// BOTH selective and exclude modes — so the proxy never grabs them and they survive
+// proxy throttling. Hardcoded 'direct' (not the mode's listed outbound) keeps them
+// direct even in exclude mode, where the catch-all final is 'proxy'.
+let smart_bypass = opt('main', 'smart_bypass', '0');
+let desync_domains = uci.get('vpnpool', 'routing', 'desync_domain') ?? [];
+if (type(desync_domains) != 'array')
+	desync_domains = [desync_domains];
+let desync_clean = [];
+for (let d in desync_domains)
+	if (length(d)) push(desync_clean, d);
+if (smart_bypass == '1' && length(desync_clean))
+	push(rules, { domain_suffix: desync_clean, outbound: 'direct' });
+
 let route = {
 	rules: rules,
 	final: final_ob,

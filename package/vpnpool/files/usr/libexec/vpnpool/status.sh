@@ -160,6 +160,8 @@ EXTRASUBS=$(uci -q get vpnpool.main.extra_sub | tr ' ' '\n' | jq -R . | jq -s 'm
 [ -n "$EXTRASUBS" ] || EXTRASUBS='[]'
 AUTODOM=$(uci -q get vpnpool.routing.auto_domain | tr ' ' '\n' | jq -R . | jq -s 'map(select(length>0))' 2>/dev/null)
 [ -n "$AUTODOM" ] || AUTODOM='[]'
+DESYNCDOM=$(uci -q get vpnpool.routing.desync_domain | tr ' ' '\n' | jq -R . | jq -s 'map(select(length>0))' 2>/dev/null)
+[ -n "$DESYNCDOM" ] || DESYNCDOM='[]'
 COMMUNITIES=$(uci -q get vpnpool.routing.community | tr ' ' '\n' | jq -R . | jq -s 'map(select(length>0))' 2>/dev/null)
 [ -n "$COMMUNITIES" ] || COMMUNITIES='[]'
 FI=$(uci -q get vpnpool.main.failover_interval); [ -n "$FI" ] || FI=60
@@ -216,6 +218,7 @@ jq -n \
 	--argjson sources "$SOURCES" \
 	--argjson extrasubs "$EXTRASUBS" \
 	--argjson autodom "$AUTODOM" \
+	--argjson desyncdom "$DESYNCDOM" \
 	--argjson antidpi "${ANTIDPI:-0}" \
 	--argjson adapt "${ADAPT:-0}" \
 	--argjson smartb "${SMARTB:-0}" \
@@ -270,6 +273,7 @@ jq -n \
 		sources: $sources,
 		extra_subs: $extrasubs,
 		auto_domains: $autodom,
+		desync_domains: $desyncdom,
 		communities: $communities,
 		settings: {
 			failover_interval: ($fi|tonumber? // 60),
