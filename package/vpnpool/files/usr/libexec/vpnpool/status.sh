@@ -174,10 +174,17 @@ TGVP=$(uci -q get vpnpool.main.telegram_via_proxy); [ -n "$TGVP" ] || TGVP=1
 KSW=$(uci -q get vpnpool.main.killswitch); [ -n "$KSW" ] || KSW=0
 DNSP=$(uci -q get vpnpool.main.dns_protect); [ -n "$DNSP" ] || DNSP=0
 PREF=$(uci -q get vpnpool.main.preferred_node)
+# Hard manual pick (set by "Use"). Empty = auto/urltest mode — a preferred soft-pin
+# leaves this empty, so the dashboard can tell "auto biased to a node" from a real
+# manual selection and keep the AUTO indicator lit.
+SEL=$(uci -q get vpnpool.main.selected_node)
 IPV6=$(uci -q get vpnpool.main.ipv6); [ -n "$IPV6" ] || IPV6=block
 CLM=$(uci -q get vpnpool.main.client_mode); [ -n "$CLM" ] || CLM=all
 CLIENTS=$(uci -q get vpnpool.main.client | tr ' ' '\n' | jq -R . | jq -s 'map(select(length>0))' 2>/dev/null)
 [ -n "$CLIENTS" ] || CLIENTS='[]'
+# Saved device MACs (picked by DHCP name). MACs have no spaces -> safe to split.
+CLDEV=$(uci -q get vpnpool.main.client_dev | tr ' ' '\n' | jq -R . | jq -s 'map(select(length>0))' 2>/dev/null)
+[ -n "$CLDEV" ] || CLDEV='[]'
 ANTIDPI=$(uci -q get vpnpool.main.antidpi); [ -n "$ANTIDPI" ] || ANTIDPI=0
 ADAPT=$(uci -q get vpnpool.main.adaptive_routing); [ -n "$ADAPT" ] || ADAPT=0
 ASNAP=$(uci -q get vpnpool.main.auto_snapshot); [ -n "$ASNAP" ] || ASNAP=0
@@ -220,12 +227,14 @@ jq -n \
 	--argjson ksw "${KSW:-0}" \
 	--argjson dnsp "${DNSP:-0}" \
 	--arg pref "$PREF" \
+	--arg sel "$SEL" \
 	--argjson sup "${SUP:-0}" \
 	--argjson sdn "${SDN:-0}" \
 	--argjson stot "${STOT:-0}" \
 	--arg ipv6 "$IPV6" \
 	--arg clm "$CLM" \
 	--argjson clients "$CLIENTS" \
+	--argjson cldev "$CLDEV" \
 	--argjson automem "$AUTOMEM" \
 	--argjson tup "${TUP:-0}" \
 	--argjson tdown "${TDOWN:-0}" \
@@ -265,6 +274,7 @@ jq -n \
 			killswitch: ($ksw==1),
 			dns_protect: ($dnsp==1),
 			preferred_node: $pref,
+			selected_node: $sel,
 			telegram_enabled: ($tge==1),
 			telegram_token: $tgt,
 			telegram_chat: $tgc,
@@ -280,5 +290,6 @@ jq -n \
 			sched_off: $schoff,
 			sched_refresh: $schref
 		},
-		clients: $clients
+		clients: $clients,
+		client_devices: $cldev
 	}'

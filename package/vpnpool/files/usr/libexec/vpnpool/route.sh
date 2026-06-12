@@ -26,24 +26,56 @@ up)
 		done
 	fi
 
-	# Per-client policy: build a client set + a rule that bypasses (exclude) or
-	# restricts to (include) the listed client IPs.
+	# Per-client policy: build client sets + a rule that bypasses (exclude) or
+	# restricts to (include) the listed clients. Two match keys:
+	#   client     (IPv4)  -> @clients      (typed manually)
+	#   client_dev (MAC)   -> @clients_mac  (picked by DHCP name; stable across renew)
+	# A host is "listed" if its IP OR its MAC matches. MAC matching needs the L2 header,
+	# present in prerouting on the (bridged) LAN.
 	CL=$(uci -q get vpnpool.main.client 2>/dev/null | tr ' ' ',')
+	CLD=$(uci -q get vpnpool.main.client_dev 2>/dev/null | tr ' ' ',')
 	CLIENT_SET=""
 	CLIENT_RULE=""
 	if [ -n "$CL" ]; then
-		CLIENT_SET="	set clients {
+		CLIENT_SET="${CLIENT_SET}	set clients {
 		type ipv4_addr
 		flags interval
 		auto-merge
 		elements = { $CL }
 	}
 "
+	fi
+	if [ -n "$CLD" ]; then
+		CLIENT_SET="${CLIENT_SET}	set clients_mac {
+		type ether_addr
+		elements = { $CLD }
+	}
+"
+	fi
+	if [ -n "$CL" ] || [ -n "$CLD" ]; then
 		case "$CLIENT_MODE" in
-			exclude) CLIENT_RULE="		ip saddr @clients return
-" ;;
-			include) CLIENT_RULE="		ip saddr != @clients return
-" ;;
+			exclude)
+				# bypass VPN for any listed client — return on either match.
+				[ -n "$CL" ]  && CLIENT_RULE="${CLIENT_RULE}		ip saddr @clients return
+"
+				[ -n "$CLD" ] && CLIENT_RULE="${CLIENT_RULE}		ether saddr @clients_mac return
+"
+				;;
+			include)
+				# only listed clients use VPN — return (bypass) everyone NOT listed.
+				# With both keys, a single rule ANDs the negations so we return only
+				# when neither the IP nor the MAC is in its set.
+				if [ -n "$CL" ] && [ -n "$CLD" ]; then
+					CLIENT_RULE="		ip saddr != @clients ether saddr != @clients_mac return
+"
+				elif [ -n "$CL" ]; then
+					CLIENT_RULE="		ip saddr != @clients return
+"
+				else
+					CLIENT_RULE="		ether saddr != @clients_mac return
+"
+				fi
+				;;
 		esac
 	fi
 

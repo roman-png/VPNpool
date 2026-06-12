@@ -17,7 +17,7 @@ signal_refetch() {
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
+{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
 L
 	;;
 call)
@@ -50,6 +50,17 @@ call)
 		IP=$(echo "$J" | jq -r '.ip // ""' 2>/dev/null)
 		CO=$(echo "$J" | jq -r '.country_iso // .country // ""' 2>/dev/null)
 		jq -n --arg ip "$IP" --arg co "$CO" '{ ok: ($ip != ""), ip: $ip, country: $co }'
+		;;
+	leases)
+		# Current DHCP leases for the device picker in per-client routing.
+		# /tmp/dhcp.leases columns: <expiry> <mac> <ip> <hostname> <clientid>.
+		# Read-only. MUST emit a JSON OBJECT — rpcd's exec plugin rejects a top-level
+		# array with INVALID_ARGUMENT — so wrap the list as { leases: [{mac,ip,host}] }.
+		# hostname "*" -> "" so the UI falls back to showing the IP.
+		awk '{print $2" "$3" "$4}' /tmp/dhcp.leases 2>/dev/null \
+			| jq -R -s '{ leases: (split("\n")|map(select(length>0)|split(" ")
+				|{mac:(.[0]//""), ip:(.[1]//""), host:((.[2]//"") | if .=="*" then "" else . end)})
+				|map(select(.mac!="" and .ip!=""))) }' 2>/dev/null || echo '{"leases":[]}'
 		;;
 	set_enabled)
 		en=$(echo "$input" | jq -r '.enabled')
@@ -218,11 +229,19 @@ call)
 		echo '{"ok":true}'
 		;;
 	set_clients)
+		# Per-client routing. clients[] = raw IPv4 (typed manually); devices[] = MAC
+		# addresses (picked by DHCP name). MACs are stable across DHCP renewals, so a
+		# device stays matched even when its IP changes — route.sh builds an @clients
+		# (ip) set and an @clients_mac (ether) set, a host matches if EITHER hits.
 		m=$(echo "$input" | jq -r '.mode // "all"')
 		uci set vpnpool.main.client_mode="$m"
 		uci -q delete vpnpool.main.client
 		echo "$input" | jq -r '.clients[]? // empty' | while read -r c; do
 			[ -n "$c" ] && uci add_list vpnpool.main.client="$c"
+		done
+		uci -q delete vpnpool.main.client_dev
+		echo "$input" | jq -r '.devices[]? // empty' | while read -r d; do
+			[ -n "$d" ] && uci add_list vpnpool.main.client_dev="$d"
 		done
 		uci commit vpnpool
 		signal_reload

@@ -48,7 +48,9 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
 - 📌 **Preferred node with switch‑back** — pin a favourite node **right on the
   Dashboard** (the 📌 button on any node row): it's used while it's reachable, control
   is handed to auto if it dies, and it **switches back** when it recovers (anti‑flap
-  hysteresis on top of urltest tolerance). Applied live — no tunnel bounce.
+  hysteresis on top of urltest tolerance). Applied live — no tunnel bounce. The
+  Dashboard keeps the **AUTO** mode lit while pinned — a soft pin biases auto, it is
+  not a hard manual selection.
 - 📊 **Subscription data quota** — parses the panel's `subscription‑userinfo` header
   and shows **used / total GB** with a progress bar (plus a Telegram alert when
   <10% remains), alongside the expiry date.
@@ -88,7 +90,9 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
   **sing‑box SRS rule‑sets** (Telegram, Russia‑inside, YouTube, Meta, Twitter/X,
   Discord, …) plus your own domains.
 - 👥 **Per‑client routing** — route the whole LAN, **exclude** specific devices
-  (they bypass the VPN), or allow **only** specific devices.
+  (they bypass the VPN), or allow **only** specific devices. Pick devices **by name
+  from the DHCP lease list** (matched by **MAC**, so a profile survives DHCP IP
+  changes); static/unknown hosts can still be added as raw IPv4.
 - 🧩 **Protocols** — VLESS (Reality + `xtls‑rprx‑vision`), VMess, Trojan, Shadowsocks,
   plus sing‑box JSON configs.
 - 🛡️ **Leak protection** — **IPv6 leak guard** (fail‑closed), opt‑in **kill‑switch**
