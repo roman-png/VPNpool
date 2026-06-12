@@ -126,6 +126,7 @@ var DICT = {
 		'Smart bypass (direct DPI defeat via zapret)': 'Умный обход (прямой обход DPI через zapret)',
 		'Self-learn DPI-blocked sites and defeat them DIRECTLY (no proxy, survives throttling)': 'Самообучение на заблокированных DPI сайтах и их обход НАПРЯМУЮ (без прокси, переживает троттлинг)',
 		'Install zapret': 'Установить zapret',
+		'Anti-throttle: if the proxy gets throttled to a crawl, auto-engage direct bypass': 'Антитроттлинг: если прокси задушили до черепашьей скорости, автоматически включить прямой обход',
 		'zapret is not installed. vpnpool only orchestrates it (never bundles nfqws).': 'zapret не установлен. vpnpool только управляет им (не встраивает nfqws).',
 		'downloads the upstream package for your router and installs it': 'скачает официальный пакет под ваш роутер и установит его',
 		'Installing zapret (downloading + opkg)… this can take a minute.': 'Устанавливаю zapret (загрузка + opkg)… это может занять минуту.',

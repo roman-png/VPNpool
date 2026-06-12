@@ -56,6 +56,11 @@ config vpnpool 'main'
 	# survives proxy throttling). vpnpool only orchestrates the installed zapret; the
 	# proxy stays for geo-blocked sites that desync can't fix. Opt-in. Needs zapret.
 	option smart_bypass '0'
+	# Anti-throttle: when the upstream throttles the PROXY to death (small requests
+	# pass but real downloads crawl), automatically engage smart_bypass so DPI-blocked
+	# sites go DIRECT via zapret instead of the dying proxy. Opt-in; acts on sustained
+	# throttle only, with a long cooldown. Needs zapret for the fallback.
+	option anti_throttle '0'
 	# Minimum available RAM (kB) required to run a speed test — guards tiny (16 MB)
 	# routers from OOM-killing sing-box during the test.
 	option speedtest_min_mem_kb '8192'
