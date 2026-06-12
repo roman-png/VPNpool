@@ -251,11 +251,11 @@ call)
 		k=$(echo "$input" | jq -r '.name // ""')
 		v=$(echo "$input" | jq -r '.value // ""')
 		case "$k" in
-		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|subscription_ua|telegram_enabled|telegram_token|telegram_chat|telegram_control|telegram_via_proxy|ipv6|killswitch|dns_protect|preferred_node|auto_snapshot|auto_snapshot_max|antidpi|adaptive_routing|adaptive_max_per_run|smart_bypass)
+		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|subscription_ua|telegram_enabled|telegram_token|telegram_chat|telegram_control|telegram_via_proxy|ipv6|killswitch|dns_protect|preferred_node|auto_snapshot|auto_snapshot_max|antidpi|adaptive_routing|adaptive_max_per_run|smart_bypass|anti_throttle)
 			uci set vpnpool.main."$k"="$v"; uci commit vpnpool
 			case "$k" in
 				smart_bypass) /usr/libexec/vpnpool/smartbypass.sh apply >/dev/null 2>&1 ;;   # orchestrates zapret, not our tunnel
-				subscription_interval|telegram_*|preferred_node|auto_snapshot|auto_snapshot_max|adaptive_max_per_run) : ;;   # read live by the daemon, no reload
+				subscription_interval|telegram_*|preferred_node|auto_snapshot|auto_snapshot_max|adaptive_max_per_run|anti_throttle) : ;;   # read live by the daemon, no reload
 				*) signal_reload ;;
 			esac
 			echo '{"ok":true}'

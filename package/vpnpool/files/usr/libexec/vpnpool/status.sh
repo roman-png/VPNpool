@@ -190,6 +190,7 @@ CLDEV=$(uci -q get vpnpool.main.client_dev | tr ' ' '\n' | jq -R . | jq -s 'map(
 ANTIDPI=$(uci -q get vpnpool.main.antidpi); [ -n "$ANTIDPI" ] || ANTIDPI=0
 ADAPT=$(uci -q get vpnpool.main.adaptive_routing); [ -n "$ADAPT" ] || ADAPT=0
 SMARTB=$(uci -q get vpnpool.main.smart_bypass); [ -n "$SMARTB" ] || SMARTB=0
+ATHR=$(uci -q get vpnpool.main.anti_throttle); [ -n "$ATHR" ] || ATHR=0
 # zapret orchestration status (present / mode / self-learned count). Read-only.
 SMART=$(/usr/libexec/vpnpool/smartbypass.sh status 2>/dev/null)
 case "$SMART" in (\{*) : ;; (*) SMART='{"present":false,"enabled":false,"mode":"","auto_count":0}' ;; esac
@@ -222,6 +223,7 @@ jq -n \
 	--argjson antidpi "${ANTIDPI:-0}" \
 	--argjson adapt "${ADAPT:-0}" \
 	--argjson smartb "${SMARTB:-0}" \
+	--argjson athr "${ATHR:-0}" \
 	--argjson smart "$SMART" \
 	--argjson communities "$COMMUNITIES" \
 	--arg fi "$FI" \
@@ -296,6 +298,7 @@ jq -n \
 			antidpi: ($antidpi==1),
 			adaptive_routing: ($adapt==1),
 			smart_bypass: ($smartb==1),
+			anti_throttle: ($athr==1),
 			sched_enabled: ($schen==1),
 			sched_on: $schon,
 			sched_off: $schoff,

@@ -32,6 +32,7 @@ return view.extend({
 	handleToggleAntidpi: function(cb) { return this.save('antidpi', cb.checked ? '1' : '0'); },
 	handleToggleAdaptive: function(cb) { return this.save('adaptive_routing', cb.checked ? '1' : '0'); },
 	handleToggleSmart: function(cb) { return this.save('smart_bypass', cb.checked ? '1' : '0'); },
+	handleToggleThrottle: function(cb) { return this.save('anti_throttle', cb.checked ? '1' : '0'); },
 	// One-click zapret install (opkg update + kmods + arch ipk). Long-running, so it
 	// runs in the background and we poll install_zapret_result, then reload the view.
 	handleInstallZapret: function() {
@@ -136,6 +137,7 @@ return view.extend({
 		var adaptiveCb = E('input', { 'type': 'checkbox', 'checked': s.adaptive_routing ? 'checked' : null });
 		var zap = st.zapret || {};
 		var smartCb = E('input', { 'type': 'checkbox', 'checked': s.smart_bypass ? 'checked' : null, 'disabled': zap.present ? null : 'disabled' });
+		var throttleCb = E('input', { 'type': 'checkbox', 'checked': s.anti_throttle ? 'checked' : null, 'disabled': zap.present ? null : 'disabled' });
 		var autoDomInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:260px', 'placeholder': 'example.com' });
 
 		var snapEnable = E('input', { 'type': 'checkbox', 'checked': s.auto_snapshot ? 'checked' : null });
@@ -208,6 +210,8 @@ return view.extend({
 				E('h4', { 'style': 'margin-top:14px' }, _('Smart bypass (direct DPI defeat via zapret)')),
 				E('div', { 'style': 'margin:6px 0' }, [ E('label', {}, [ smartCb, E('span', { 'style': 'margin-left:6px' }, _('Self-learn DPI-blocked sites and defeat them DIRECTLY (no proxy, survives throttling)')) ]),
 					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'disabled': zap.present ? null : 'disabled', 'click': ui.createHandlerFn(this, 'handleToggleSmart', smartCb) }, _('Save')) ]),
+				E('div', { 'style': 'margin:6px 0' }, [ E('label', {}, [ throttleCb, E('span', { 'style': 'margin-left:6px' }, _('Anti-throttle: if the proxy gets throttled to a crawl, auto-engage direct bypass')) ]),
+					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'disabled': zap.present ? null : 'disabled', 'click': ui.createHandlerFn(this, 'handleToggleThrottle', throttleCb) }, _('Save')) ]),
 				zap.present
 					? E('p', { 'style': 'color:#888' }, _('zapret detected (mode: %s). Self-learned domains so far: %s. Needs a separate zapret install; vpnpool only switches it to self-learning mode.').format(zap.mode || '—', String(zap.auto_count || 0)))
 					: E('div', {}, [

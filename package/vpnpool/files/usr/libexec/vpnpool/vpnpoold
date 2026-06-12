@@ -270,6 +270,55 @@ SNAP_EVERY=1800   # auto-snapshot reachable nodes at most every 30 min (self-gua
 ADAPT_LAST=0
 ADAPT_EVERY=600   # adaptive-routing scan at most every 10 min (self-guards on the toggle)
 
+# ---- anti-throttle (opt-in) ------------------------------------------------------
+# Detect the upstream throttling the PROXY to death (small requests pass, but real
+# downloads crawl at ~0 across the active node) and, when zapret is present, engage
+# direct DPI bypass so blocked sites stop depending on the throttled proxy. Opt-in,
+# acts only on SUSTAINED throttle, once, with a long cooldown — never flaps.
+AT_LAST=0; AT_BAD=0; AT_ENGAGED=0; AT_LASTACT=0
+AT_EVERY=300       # throughput probe at most every 5 min
+AT_STRIKES=2       # consecutive bad probes (~10 min) before acting
+AT_MIN_BPS=51200   # < 50 KB/s through a LIVE proxy == throttled
+AT_COOLDOWN=1800   # 30 min between actions
+anti_throttle_check() {
+	[ "$(uci -q get vpnpool.main.anti_throttle)" = "1" ] || return 0
+	singbox_alive || return 0
+	local now tp hu code url bps
+	now=$(date +%s)
+	[ $(( now - AT_LAST )) -ge "$AT_EVERY" ] || return 0
+	AT_LAST=$now
+	tp=$(uci -q get vpnpool.main.test_port); [ -n "$tp" ] || tp=1605
+	hu=$(uci -q get vpnpool.main.health_url); [ -n "$hu" ] || hu=http://cp.cloudflare.com/generate_204
+	# Is the proxy even alive? If a small request fails, that's the watchdog's job
+	# (dead tunnel), not throttling — don't act here.
+	code=$(curl -s -o /dev/null -m 6 --proxy "socks5h://127.0.0.1:$tp" -w '%{http_code}' "$hu" 2>/dev/null)
+	case "$code" in 2*|3*) : ;; *) AT_BAD=0; return 0 ;; esac
+	# Throughput: try to pull ~2 MB; a throttled path downloads ~nothing in 8s.
+	url="https://speed.cloudflare.com/__down?bytes=2000000"
+	bps=$(curl -s -o /dev/null -m 8 --proxy "socks5h://127.0.0.1:$tp" -w '%{speed_download}' "$url" 2>/dev/null)
+	bps=${bps%.*}; case "$bps" in (''|*[!0-9]*) bps=0 ;; esac
+	if [ "$bps" -ge "$AT_MIN_BPS" ]; then
+		[ "$AT_BAD" -gt 0 ] && log "anti-throttle: proxy throughput recovered (${bps} B/s)"
+		AT_BAD=0; AT_ENGAGED=0
+		return 0
+	fi
+	AT_BAD=$(( AT_BAD + 1 ))
+	log "anti-throttle: low proxy throughput ${bps} B/s (strike $AT_BAD/$AT_STRIKES)"
+	[ "$AT_BAD" -ge "$AT_STRIKES" ] && [ "$AT_ENGAGED" = "0" ] && [ $(( now - AT_LASTACT )) -ge "$AT_COOLDOWN" ] || return 0
+	if [ -x /etc/init.d/zapret ] && uci -q get zapret.config >/dev/null 2>&1; then
+		if [ "$(uci -q get vpnpool.main.smart_bypass)" != "1" ]; then
+			uci set vpnpool.main.smart_bypass='1'; uci commit vpnpool
+			"$LIBEXEC/smartbypass.sh" apply >/dev/null 2>&1
+			log "anti-throttle: engaged smart_bypass (zapret autohostlist) — proxy throttled"
+			tg_notify "🐢 vpnpool: прокси, похоже, душат — включил прямой обход DPI (zapret)"
+		fi
+		AT_ENGAGED=1
+	else
+		tg_notify "🐢 vpnpool: прокси, похоже, душат, а zapret не установлен для отката"
+	fi
+	AT_LASTACT=$now
+}
+
 # main supervise/refresh loop. sleep in bg + wait so TERM is handled promptly.
 while : ; do
 	sleep 15 & wait $!
@@ -308,6 +357,9 @@ while : ; do
 		ADAPT_LAST=$NOWS
 		setsid sh -c "$LIBEXEC/adaptive.sh" >/dev/null 2>&1 &
 	fi
+
+	# anti-throttle: detect a throttled-to-death proxy and engage direct bypass (opt-in)
+	anti_throttle_check
 
 	# detect node change (failover / manual switch) and notify
 	NODE=$(current_node)
