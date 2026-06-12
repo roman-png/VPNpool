@@ -93,7 +93,8 @@ synclist)
 	if [ -n "$doms" ]; then
 		{ echo "$B"; printf '%s\n' "$doms"; echo "$E"; } >> "$UH"
 	fi
-	for p in $(pgrep -f /opt/zapret/nfq/nfqws 2>/dev/null); do kill -HUP "$p" 2>/dev/null; done
+	# nfqws auto-reloads its hostlists when the FILE changes (mtime) — do NOT send it a
+	# signal: nfqws has no SIGHUP handler, so `kill -HUP` would TERMINATE the daemon.
 	n=$(printf '%s\n' "$doms" | grep -c . 2>/dev/null); echo "{\"ok\":true,\"count\":${n:-0}}"
 	;;
 *)

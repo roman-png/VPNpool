@@ -17,7 +17,7 @@ signal_refetch() {
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "install_zapret": {}, "install_zapret_result": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
+{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "install_zapret": {}, "install_zapret_result": {}, "tune_zapret": {}, "tune_zapret_result": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
 L
 	;;
 call)
@@ -461,6 +461,25 @@ call)
 			echo '{"running":true}'
 		elif [ -f /tmp/vpnpool/.zapret-install.json ]; then
 			jq '. + {running:false}' /tmp/vpnpool/.zapret-install.json 2>/dev/null || echo '{"running":false,"ok":false}'
+		else
+			echo '{"running":false}'
+		fi
+		;;
+	tune_zapret)
+		# auto-pick a working zapret desync strategy for this ISP via blockcheck.
+		# Long-running (blockcheck = minutes); background, poll tune_zapret_result.
+		mkdir -p /tmp/vpnpool
+		if [ -f /tmp/vpnpool/.zapret-tune-running ]; then echo '{"running":true,"already":true}'; exit 0; fi
+		: > /tmp/vpnpool/.zapret-tune-running
+		rm -f /tmp/vpnpool/.zapret-tune.json
+		setsid sh -c '/usr/libexec/vpnpool/zapret-tune.sh; rm -f /tmp/vpnpool/.zapret-tune-running' >/dev/null 2>&1 &
+		echo '{"running":true,"started":true}'
+		;;
+	tune_zapret_result)
+		if [ -f /tmp/vpnpool/.zapret-tune-running ]; then
+			echo '{"running":true}'
+		elif [ -f /tmp/vpnpool/.zapret-tune.json ]; then
+			jq '. + {running:false}' /tmp/vpnpool/.zapret-tune.json 2>/dev/null || echo '{"running":false,"ok":false}'
 		else
 			echo '{"running":false}'
 		fi

@@ -8,7 +8,7 @@
 		},
 		"write": {
 			"ubus": {
-				"vpnpool": [ "set_enabled", "select", "refresh", "ping", "set_url", "del_subscription", "add_source", "del_source", "probe_source", "probe_result", "import_select", "add_node", "del_node", "save_node", "unsave_node", "activate_saved", "deactivate_saved", "add_sub", "del_sub", "unlock", "add_auto_domain", "del_auto_domain", "run_adaptive", "install_zapret", "install_zapret_result", "set_domains", "set_communities", "set_option", "set_clients", "set_auto_members", "set_preferred", "set_schedule", "speedtest", "speedtest_result", "tg_test", "import" ]
+				"vpnpool": [ "set_enabled", "select", "refresh", "ping", "set_url", "del_subscription", "add_source", "del_source", "probe_source", "probe_result", "import_select", "add_node", "del_node", "save_node", "unsave_node", "activate_saved", "deactivate_saved", "add_sub", "del_sub", "unlock", "add_auto_domain", "del_auto_domain", "run_adaptive", "install_zapret", "install_zapret_result", "tune_zapret", "tune_zapret_result", "set_domains", "set_communities", "set_option", "set_clients", "set_auto_members", "set_preferred", "set_schedule", "speedtest", "speedtest_result", "tg_test", "import" ]
 			}
 		}
 	}
