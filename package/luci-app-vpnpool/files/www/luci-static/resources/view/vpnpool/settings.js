@@ -29,6 +29,7 @@ return view.extend({
 	handleToggleDns: function(cb) { return this.save('dns_protect', cb.checked ? '1' : '0'); },
 	handleToggleAntidpi: function(cb) { return this.save('antidpi', cb.checked ? '1' : '0'); },
 	handleToggleAdaptive: function(cb) { return this.save('adaptive_routing', cb.checked ? '1' : '0'); },
+	handleToggleSmart: function(cb) { return this.save('smart_bypass', cb.checked ? '1' : '0'); },
 	renderAutoDomains: function(st) {
 		var self = this;
 		var items = (st.auto_domains || []).map(function(d) {
@@ -107,6 +108,8 @@ return view.extend({
 
 		var antidpiCb = E('input', { 'type': 'checkbox', 'checked': s.antidpi ? 'checked' : null });
 		var adaptiveCb = E('input', { 'type': 'checkbox', 'checked': s.adaptive_routing ? 'checked' : null });
+		var zap = st.zapret || {};
+		var smartCb = E('input', { 'type': 'checkbox', 'checked': s.smart_bypass ? 'checked' : null, 'disabled': zap.present ? null : 'disabled' });
 		var autoDomInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:260px', 'placeholder': 'example.com' });
 
 		var snapEnable = E('input', { 'type': 'checkbox', 'checked': s.auto_snapshot ? 'checked' : null });
@@ -174,7 +177,14 @@ return view.extend({
 					E('button', { 'class': 'btn cbi-button cbi-button-add', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleAddAutoDom', autoDomInput) }, _('Route via VPN'))
 				]),
 				E('h4', { 'style': 'margin-top:10px' }, _('Auto-routed domains')),
-				E('div', { 'id': 'vp-autodom' }, this.renderAutoDomains(st))
+				E('div', { 'id': 'vp-autodom' }, this.renderAutoDomains(st)),
+
+				E('h4', { 'style': 'margin-top:14px' }, _('Smart bypass (direct DPI defeat via zapret)')),
+				E('div', { 'style': 'margin:6px 0' }, [ E('label', {}, [ smartCb, E('span', { 'style': 'margin-left:6px' }, _('Self-learn DPI-blocked sites and defeat them DIRECTLY (no proxy, survives throttling)')) ]),
+					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'disabled': zap.present ? null : 'disabled', 'click': ui.createHandlerFn(this, 'handleToggleSmart', smartCb) }, _('Save')) ]),
+				zap.present
+					? E('p', { 'style': 'color:#888' }, _('zapret detected (mode: %s). Self-learned domains so far: %s. Needs a separate zapret install; vpnpool only switches it to self-learning mode.').format(zap.mode || '—', String(zap.auto_count || 0)))
+					: E('p', { 'style': 'color:#c0392b' }, _('zapret is not installed. Install the zapret package to enable smart bypass; vpnpool only orchestrates it (never bundles nfqws).'))
 			]),
 
 			E('div', { 'class': 'cbi-section' }, [

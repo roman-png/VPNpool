@@ -3,7 +3,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-vpnpool
-PKG_VERSION:=1.1.7
+PKG_VERSION:=1.1.8
 PKG_RELEASE:=1
 PKG_MAINTAINER:=roman-png
 PKG_LICENSE:=GPL-3.0-only
