@@ -83,7 +83,9 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
   survives proxy throttling). vpnpool only orchestrates the installed zapret
   (separate nft table + fwmark `0x40000000`, coexists with the tunnel) and shows
   it as detected, with the self‑learned domain count. The proxy stays for
-  geo‑blocked sites that desync can’t fix.
+  geo‑blocked sites that desync can’t fix. A one‑click **Install zapret** button
+  fetches the upstream package for your router’s architecture and installs it
+  (NFQUEUE kmods included).
 - 🎬 **Per‑node unlock test** — check what each node opens (YouTube / ChatGPT /
   Netflix / Instagram / Telegram / Google) and see badges right in the dashboard.
 - 🛡️ **Anti‑DPI** — one toggle to fragment the TLS ClientHello (sing‑box

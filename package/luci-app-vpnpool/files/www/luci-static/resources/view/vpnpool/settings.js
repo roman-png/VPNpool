@@ -17,6 +17,8 @@ var callSetSchedule = rpc.declare({ object: 'vpnpool', method: 'set_schedule', p
 var callAddAutoDom = rpc.declare({ object: 'vpnpool', method: 'add_auto_domain', params: [ 'domain' ] });
 var callDelAutoDom = rpc.declare({ object: 'vpnpool', method: 'del_auto_domain', params: [ 'domain' ] });
 var callRunAdaptive = rpc.declare({ object: 'vpnpool', method: 'run_adaptive' });
+var callInstallZapret = rpc.declare({ object: 'vpnpool', method: 'install_zapret' });
+var callInstallZapretRes = rpc.declare({ object: 'vpnpool', method: 'install_zapret_result' });
 
 return view.extend({
 	notify: function(msg) { ui.addNotification(null, E('p', msg), 'info'); },
@@ -30,6 +32,30 @@ return view.extend({
 	handleToggleAntidpi: function(cb) { return this.save('antidpi', cb.checked ? '1' : '0'); },
 	handleToggleAdaptive: function(cb) { return this.save('adaptive_routing', cb.checked ? '1' : '0'); },
 	handleToggleSmart: function(cb) { return this.save('smart_bypass', cb.checked ? '1' : '0'); },
+	// One-click zapret install (opkg update + kmods + arch ipk). Long-running, so it
+	// runs in the background and we poll install_zapret_result, then reload the view.
+	handleInstallZapret: function() {
+		var self = this;
+		var poller = function() {
+			return callInstallZapretRes().then(function(r) {
+				if (r && r.running) { window.setTimeout(poller, 3000); return; }
+				if (r && r.ok && r.already) {
+					self.notify(_('zapret is already installed.'));
+				} else if (r && r.ok) {
+					ui.addNotification(null, E('p', _('zapret installed (%s). Reloading…').format(r.version || 'ok')), 'info');
+					window.setTimeout(function() { location.reload(); }, 1500);
+				} else {
+					var step = (r && r.step) ? r.step : '?';
+					var err = (r && r.error) ? r.error : _('unknown error');
+					ui.addNotification(null, E('p', _('zapret install failed at "%s": %s').format(step, err)), 'error');
+				}
+			});
+		};
+		return callInstallZapret().then(function() {
+			ui.addNotification(null, E('p', _('Installing zapret (downloading + opkg)… this can take a minute.')), 'info');
+			window.setTimeout(poller, 3000);
+		});
+	},
 	renderAutoDomains: function(st) {
 		var self = this;
 		var items = (st.auto_domains || []).map(function(d) {
@@ -184,7 +210,11 @@ return view.extend({
 					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'disabled': zap.present ? null : 'disabled', 'click': ui.createHandlerFn(this, 'handleToggleSmart', smartCb) }, _('Save')) ]),
 				zap.present
 					? E('p', { 'style': 'color:#888' }, _('zapret detected (mode: %s). Self-learned domains so far: %s. Needs a separate zapret install; vpnpool only switches it to self-learning mode.').format(zap.mode || '—', String(zap.auto_count || 0)))
-					: E('p', { 'style': 'color:#c0392b' }, _('zapret is not installed. Install the zapret package to enable smart bypass; vpnpool only orchestrates it (never bundles nfqws).'))
+					: E('div', {}, [
+						E('p', { 'style': 'color:#c0392b;margin:4px 0' }, _('zapret is not installed. vpnpool only orchestrates it (never bundles nfqws).')),
+						E('button', { 'class': 'btn cbi-button cbi-button-add', 'click': ui.createHandlerFn(this, 'handleInstallZapret') }, '⬇ ' + _('Install zapret')),
+						E('span', { 'style': 'color:#888;margin-left:8px' }, _('downloads the upstream package for your router and installs it'))
+					])
 			]),
 
 			E('div', { 'class': 'cbi-section' }, [
