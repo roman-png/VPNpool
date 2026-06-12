@@ -77,6 +77,13 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
 - 🧠 **Adaptive routing** — auto‑detects domains that are **blocked for a direct
   connection** (RST/timeout) and routes just those through the VPN, so the proxy
   list maintains itself for *your* ISP. Plus a one‑click “this site is blocked”.
+- ⚡ **Smart bypass (direct DPI defeat)** — if a separate **zapret** install is
+  present, one toggle switches it to **autohostlist** mode: nfqws **self‑learns**
+  DPI‑blocked sites and defeats them on a **direct** connection (no proxy, so it
+  survives proxy throttling). vpnpool only orchestrates the installed zapret
+  (separate nft table + fwmark `0x40000000`, coexists with the tunnel) and shows
+  it as detected, with the self‑learned domain count. The proxy stays for
+  geo‑blocked sites that desync can’t fix.
 - 🎬 **Per‑node unlock test** — check what each node opens (YouTube / ChatGPT /
   Netflix / Instagram / Telegram / Google) and see badges right in the dashboard.
 - 🛡️ **Anti‑DPI** — one toggle to fragment the TLS ClientHello (sing‑box

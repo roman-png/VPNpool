@@ -187,6 +187,10 @@ CLDEV=$(uci -q get vpnpool.main.client_dev | tr ' ' '\n' | jq -R . | jq -s 'map(
 [ -n "$CLDEV" ] || CLDEV='[]'
 ANTIDPI=$(uci -q get vpnpool.main.antidpi); [ -n "$ANTIDPI" ] || ANTIDPI=0
 ADAPT=$(uci -q get vpnpool.main.adaptive_routing); [ -n "$ADAPT" ] || ADAPT=0
+SMARTB=$(uci -q get vpnpool.main.smart_bypass); [ -n "$SMARTB" ] || SMARTB=0
+# zapret orchestration status (present / mode / self-learned count). Read-only.
+SMART=$(/usr/libexec/vpnpool/smartbypass.sh status 2>/dev/null)
+case "$SMART" in (\{*) : ;; (*) SMART='{"present":false,"enabled":false,"mode":"","auto_count":0}' ;; esac
 ASNAP=$(uci -q get vpnpool.main.auto_snapshot); [ -n "$ASNAP" ] || ASNAP=0
 ASNAPMAX=$(uci -q get vpnpool.main.auto_snapshot_max); case "$ASNAPMAX" in (*[!0-9]*|"") ASNAPMAX=20 ;; esac
 SCHED_EN=$(uci -q get vpnpool.main.sched_enabled); [ -n "$SCHED_EN" ] || SCHED_EN=0
@@ -214,6 +218,8 @@ jq -n \
 	--argjson autodom "$AUTODOM" \
 	--argjson antidpi "${ANTIDPI:-0}" \
 	--argjson adapt "${ADAPT:-0}" \
+	--argjson smartb "${SMARTB:-0}" \
+	--argjson smart "$SMART" \
 	--argjson communities "$COMMUNITIES" \
 	--arg fi "$FI" \
 	--arg si "$SI" \
@@ -285,11 +291,13 @@ jq -n \
 			auto_snapshot_max: $asnapmax,
 			antidpi: ($antidpi==1),
 			adaptive_routing: ($adapt==1),
+			smart_bypass: ($smartb==1),
 			sched_enabled: ($schen==1),
 			sched_on: $schon,
 			sched_off: $schoff,
 			sched_refresh: $schref
 		},
 		clients: $clients,
-		client_devices: $cldev
+		client_devices: $cldev,
+		zapret: $smart
 	}'
