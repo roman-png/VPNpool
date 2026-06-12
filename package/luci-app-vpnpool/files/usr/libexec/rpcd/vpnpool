@@ -17,7 +17,7 @@ signal_refetch() {
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "install_zapret": {}, "install_zapret_result": {}, "tune_zapret": {}, "tune_zapret_result": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
+{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
 L
 	;;
 call)
@@ -101,6 +101,12 @@ call)
 			curl -s -m 7 "http://$CLASH/proxies/$enc/delay?url=$ENCU&timeout=5000" >/dev/null 2>&1 &
 		done
 		wait
+		# Fold the dead-node e2e filter into the ping: kick off a SEQUENTIAL quality
+		# sweep in the background (self-guarded against concurrent runs). It updates
+		# .dead_tags.json and signals the daemon (USR1) to rebuild ONLY if the dead set
+		# changed — so no rebuild/bounce unless a node actually went dead/recovered.
+		[ "$(uci -q get vpnpool.main.dead_filter)" != "0" ] && \
+			setsid sh -c '/usr/libexec/vpnpool/nodecheck.sh' >/dev/null 2>&1 &
 		echo '{"ok":true}'
 		;;
 	set_url)
@@ -110,11 +116,31 @@ call)
 		echo '{"ok":true}'
 		;;
 	del_subscription)
+		# Promote EVERY saved (archived) node into the live pool BEFORE dropping the
+		# subscription — otherwise deleting the sub would empty the pool and kill the
+		# tunnel. saved_archive_json = manual ⭐ UNION auto-snapshot; add each link to
+		# active_saved (deduped). The subsequent refetch rebuilds with no primary sub but
+		# WITH these promoted nodes, so connectivity survives the deletion.
+		saved_archive_json 2>/dev/null | jq -r '.[].link // empty' 2>/dev/null | while IFS= read -r l; do
+			[ -n "$l" ] || continue
+			uci -q get vpnpool.main.active_saved | tr ' ' '\n' | grep -Fxq "$l" && continue
+			uci add_list vpnpool.main.active_saved="$l"
+		done
 		uci -q delete vpnpool.main.subscription_url
+		# Clear the manual node-exclude list too — it only held links from THIS
+		# subscription's nodes (hidden via the dashboard ✕); with the subscription gone
+		# they're meaningless, so a future subscription starts with a clean slate.
+		uci -q delete vpnpool.main.excluded_node
 		uci commit vpnpool
-		rm -f /etc/vpnpool/sub.expire
+		rm -f /etc/vpnpool/sub.expire /etc/vpnpool/sub.usage
+		# Drop the cached subscription nodes so they LEAVE the dashboard. Without this,
+		# fetch.sh's offline-cache fallback (no URL -> 0 fetched -> restore cache) would
+		# repopulate the OLD subscription nodes. Saved nodes survive (promoted to
+		# active_saved above); manual/imported are their own lists; extra_sub re-fetch.
+		rm -rf /etc/vpnpool/sources_cache /tmp/vpnpool/sources
 		signal_refetch
-		echo '{"ok":true}'
+		promoted=$(uci -q get vpnpool.main.active_saved 2>/dev/null | tr ' ' '\n' | grep -c '://')
+		jq -n --argjson p "${promoted:-0}" '{ok:true, promoted:$p}'
 		;;
 	add_source)
 		u=$(echo "$input" | jq -r '.url // ""')
@@ -251,12 +277,10 @@ call)
 		k=$(echo "$input" | jq -r '.name // ""')
 		v=$(echo "$input" | jq -r '.value // ""')
 		case "$k" in
-		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|subscription_ua|telegram_enabled|telegram_token|telegram_chat|telegram_control|telegram_via_proxy|ipv6|killswitch|dns_protect|preferred_node|auto_snapshot|auto_snapshot_max|antidpi|adaptive_routing|adaptive_max_per_run|smart_bypass|anti_throttle|lite_mode)
+		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|subscription_ua|telegram_enabled|telegram_token|telegram_chat|telegram_control|telegram_via_proxy|ipv6|killswitch|dns_protect|preferred_node|auto_snapshot|auto_snapshot_max|antidpi|adaptive_routing|adaptive_max_per_run|dead_filter|dead_filter_strikes|dead_filter_minpass)
 			uci set vpnpool.main."$k"="$v"; uci commit vpnpool
 			case "$k" in
-				smart_bypass) /usr/libexec/vpnpool/smartbypass.sh apply >/dev/null 2>&1 ;;   # orchestrates zapret, not our tunnel
-				lite_mode) (/etc/init.d/vpnpool restart >/dev/null 2>&1 &) ;;   # lite is a startup branch -> full daemon restart
-				subscription_interval|telegram_*|preferred_node|auto_snapshot|auto_snapshot_max|adaptive_max_per_run|anti_throttle) : ;;   # read live by the daemon, no reload
+				subscription_interval|telegram_*|preferred_node|auto_snapshot|auto_snapshot_max|adaptive_max_per_run|dead_filter|dead_filter_strikes|dead_filter_minpass) : ;;   # read live by the daemon, no reload
 				*) signal_reload ;;
 			esac
 			echo '{"ok":true}'
@@ -282,6 +306,76 @@ call)
 	del_node)
 		l=$(echo "$input" | jq -r '.link // ""')
 		[ -n "$l" ] && { uci del_list vpnpool.main.manual_node="$l"; uci commit vpnpool; signal_reload; }
+		echo '{"ok":true}'
+		;;
+	import_nodes)
+		# Bulk-import nodes by pasted text OR an uploaded file (the browser reads the
+		# file and sends its text here). Accepts a list of node links (one per line) OR
+		# a whole base64 subscription blob. We DON'T decode/parse in the shell — we hand
+		# the raw text to parser.uc (the SAME parser the build uses): it auto-detects a
+		# base64 subscription vs a plain link list, normalises each node, and with
+		# --keep-link returns the original vless:// (vmess/trojan/ss/…) link. This avoids
+		# any dependency on a `base64` applet (absent on tiny busybox builds) and the
+		# whitespace-split bug (links are one-per-line; tags may contain spaces). Every
+		# resulting link is added to the persistent manual_node list, deduped.
+		txt=$(echo "$input" | jq -r '.text // ""')
+		[ -n "$txt" ] || { echo '{"ok":false,"error":"empty"}'; exit 0; }
+		mkdir -p /tmp/vpnpool
+		RAW=/tmp/vpnpool/.import.raw
+		printf '%s\n' "$txt" > "$RAW"
+		TMP=/tmp/vpnpool/.import.links
+		ucode /usr/libexec/vpnpool/parser.uc --keep-link "$RAW" 2>/dev/null \
+			| jq -r '.[]?._link // empty' 2>/dev/null \
+			| awk 'NF && !seen[$0]++' > "$TMP"
+		rm -f "$RAW"
+		if [ ! -s "$TMP" ]; then rm -f "$TMP"; echo '{"ok":false,"error":"no node links found"}'; exit 0; fi
+		added=0
+		while IFS= read -r l; do
+			[ -n "$l" ] || continue
+			if uci -q get vpnpool.main.manual_node | tr ' ' '\n' | grep -Fxq "$l"; then :; else
+				uci add_list vpnpool.main.manual_node="$l" && added=$((added + 1))
+			fi
+		done < "$TMP"
+		rm -f "$TMP"
+		if [ "$added" -gt 0 ]; then uci commit vpnpool; signal_reload; fi
+		total=$(uci -q get vpnpool.main.manual_node 2>/dev/null | tr ' ' '\n' | grep -c '://')
+		jq -n --argjson a "$added" --argjson t "${total:-0}" '{ok:true, added:$a, total:$t}'
+		;;
+	delete_node)
+		# Manual node removal from the dashboard ✕. Resolve the node's link by tag, then
+		# remove it from whichever list owns it. A pure SUBSCRIPTION node has no own list,
+		# so we add its link to excluded_node — build.sh filters those out every build, so
+		# a refetch can't bring it back. (excluded_node is wiped on del_subscription.)
+		tag=$(echo "$input" | jq -r '.tag // ""')
+		[ -n "$tag" ] || { echo '{"ok":false,"error":"no tag"}'; exit 0; }
+		LINKS=/etc/vpnpool/links.json
+		link=""
+		[ -f "$LINKS" ] && link=$(jq -r --arg t "$tag" 'map(select(.tag==$t)) | .[0].link // ""' "$LINKS" 2>/dev/null)
+		[ -n "$link" ] || link=$(saved_link_for_tag "$tag")
+		[ -n "$link" ] || { echo '{"ok":false,"error":"no link for tag"}'; exit 0; }
+		removed=0
+		if uci -q get vpnpool.main.manual_node | tr ' ' '\n' | grep -Fxq "$link"; then
+			uci del_list vpnpool.main.manual_node="$link"; removed=1
+		fi
+		if uci -q get vpnpool.main.imported_node | tr ' ' '\n' | grep -Fxq "$link"; then
+			uci del_list vpnpool.main.imported_node="$link"; removed=1
+			MAP=/etc/vpnpool/imported.map.json
+			[ -f "$MAP" ] && { jq --arg l "$link" 'map_values(map(select(. != $l)))' "$MAP" > "$MAP.t" 2>/dev/null && mv "$MAP.t" "$MAP"; }
+		fi
+		if uci -q get vpnpool.main.active_saved | tr ' ' '\n' | grep -Fxq "$link"; then
+			uci del_list vpnpool.main.active_saved="$link"; removed=1
+		fi
+		# Drop from the saved archive maps (by tag) so it isn't kept as a saved entry.
+		[ -f "$SAVED_MAP" ] && { jq --arg t "$tag" 'del(.[$t])' "$SAVED_MAP" > "$SAVED_MAP.t" 2>/dev/null && mv "$SAVED_MAP.t" "$SAVED_MAP"; }
+		[ -f "$SNAP_MAP" ]  && { jq --arg t "$tag" 'del(.[$t])' "$SNAP_MAP"  > "$SNAP_MAP.t"  2>/dev/null && mv "$SNAP_MAP.t"  "$SNAP_MAP"; }
+		# Not owned by any manual list => it came from a subscription: exclude by link so
+		# the next build/refetch drops it (manual/imported re-adds are NOT excluded).
+		if [ "$removed" = 0 ]; then
+			uci -q get vpnpool.main.excluded_node | tr ' ' '\n' | grep -Fxq "$link" \
+				|| uci add_list vpnpool.main.excluded_node="$link"
+		fi
+		rebuild_saved_list      # commits vpnpool (incl. the del_lists above)
+		signal_reload
 		echo '{"ok":true}'
 		;;
 	save_node)
@@ -445,45 +539,6 @@ call)
 		# trigger one adaptive-routing scan now (background; it self-guards on the toggle)
 		setsid sh -c '/usr/libexec/vpnpool/adaptive.sh' >/dev/null 2>&1 &
 		echo '{"ok":true,"started":true}'
-		;;
-	install_zapret)
-		# one-click installer for a separate zapret (opkg update + kmods + arch ipk).
-		# Long-running (download + opkg), so run in the BACKGROUND and let the UI poll
-		# install_zapret_result.
-		mkdir -p /tmp/vpnpool
-		if [ -f /tmp/vpnpool/.zapret-install-running ]; then echo '{"running":true,"already":true}'; exit 0; fi
-		: > /tmp/vpnpool/.zapret-install-running
-		rm -f /tmp/vpnpool/.zapret-install.json
-		setsid sh -c '/usr/libexec/vpnpool/zapret-install.sh; rm -f /tmp/vpnpool/.zapret-install-running' >/dev/null 2>&1 &
-		echo '{"running":true,"started":true}'
-		;;
-	install_zapret_result)
-		if [ -f /tmp/vpnpool/.zapret-install-running ]; then
-			echo '{"running":true}'
-		elif [ -f /tmp/vpnpool/.zapret-install.json ]; then
-			jq '. + {running:false}' /tmp/vpnpool/.zapret-install.json 2>/dev/null || echo '{"running":false,"ok":false}'
-		else
-			echo '{"running":false}'
-		fi
-		;;
-	tune_zapret)
-		# auto-pick a working zapret desync strategy for this ISP via blockcheck.
-		# Long-running (blockcheck = minutes); background, poll tune_zapret_result.
-		mkdir -p /tmp/vpnpool
-		if [ -f /tmp/vpnpool/.zapret-tune-running ]; then echo '{"running":true,"already":true}'; exit 0; fi
-		: > /tmp/vpnpool/.zapret-tune-running
-		rm -f /tmp/vpnpool/.zapret-tune.json
-		setsid sh -c '/usr/libexec/vpnpool/zapret-tune.sh; rm -f /tmp/vpnpool/.zapret-tune-running' >/dev/null 2>&1 &
-		echo '{"running":true,"started":true}'
-		;;
-	tune_zapret_result)
-		if [ -f /tmp/vpnpool/.zapret-tune-running ]; then
-			echo '{"running":true}'
-		elif [ -f /tmp/vpnpool/.zapret-tune.json ]; then
-			jq '. + {running:false}' /tmp/vpnpool/.zapret-tune.json 2>/dev/null || echo '{"running":false,"ok":false}'
-		else
-			echo '{"running":false}'
-		fi
 		;;
 	speedtest)
 		# real throughput test for ONE node — runs in the background (it briefly

@@ -51,24 +51,21 @@ config vpnpool 'main'
 	# them through the proxy (stored in routing.auto_domain). Opt-in.
 	option adaptive_routing '0'
 	option adaptive_max_per_run '8'
-	# Smart bypass: if a separate zapret install is present, switch it to autohostlist
-	# mode so it self-learns DPI-blocked domains and defeats them DIRECTLY (no proxy,
-	# survives proxy throttling). vpnpool only orchestrates the installed zapret; the
-	# proxy stays for geo-blocked sites that desync can't fix. Opt-in. Needs zapret.
-	option smart_bypass '0'
-	# Anti-throttle: when the upstream throttles the PROXY to death (small requests
-	# pass but real downloads crawl), automatically engage smart_bypass so DPI-blocked
-	# sites go DIRECT via zapret instead of the dying proxy. Opt-in; acts on sustained
-	# throttle only, with a long cooldown. Needs zapret for the fallback.
-	option anti_throttle '0'
-	# Lite mode: run ONLY zapret direct DPI-bypass — no sing-box, no proxy, no
-	# subscription. For tiny (16 MB) routers where a 44 MB sing-box barely fits in RAM;
-	# nfqws (~1.5 MB, persistent in flash) self-learns and defeats DPI directly. Needs
-	# zapret installed. Opt-in; changing it restarts the service.
-	option lite_mode '0'
 	# Minimum available RAM (kB) required to run a speed test — guards tiny (16 MB)
 	# routers from OOM-killing sing-box during the test.
 	option speedtest_min_mem_kb '8192'
+	# Dead-node auto-filter: periodically e2e-probe every node through the clash delay
+	# API against a diverse set of generate_204 endpoints; nodes that reach NONE of them
+	# for dead_filter_strikes cycles in a row are dropped from the auto/urltest pool
+	# (still manually selectable). Catches "TCP-pings but carries no traffic" nodes
+	# (expired-sub placeholders, over-quota / blocked exits). On by default.
+	option dead_filter '1'
+	option dead_filter_strikes '3'
+	# A node is healthy if it reaches at least this many of the probe URLs (1 = lenient:
+	# one provider's block won't condemn a node that serves the others).
+	option dead_filter_minpass '1'
+	# Probe URLs (space-separated). Empty = built-in diverse default set.
+	# option dead_filter_urls ''
 	# Telegram alerts (failover / subscription / lifecycle)
 	option telegram_enabled '0'
 	option telegram_token ''

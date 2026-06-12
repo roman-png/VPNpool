@@ -23,6 +23,8 @@ var callSpeedtest  = rpc.declare({ object: 'vpnpool', method: 'speedtest',   par
 var callSpeedRes   = rpc.declare({ object: 'vpnpool', method: 'speedtest_result' });
 var callNodeLink   = rpc.declare({ object: 'vpnpool', method: 'node_link',    params: [ 'tag' ] });
 var callExportNodes = rpc.declare({ object: 'vpnpool', method: 'export_nodes', params: [ 'scope' ] });
+var callImportNodes = rpc.declare({ object: 'vpnpool', method: 'import_nodes', params: [ 'text' ] });
+var callDeleteNode  = rpc.declare({ object: 'vpnpool', method: 'delete_node',  params: [ 'tag' ] });
 var callUnlock     = rpc.declare({ object: 'vpnpool', method: 'unlock',        params: [ 'tag' ] });
 var callUnlockRes  = rpc.declare({ object: 'vpnpool', method: 'unlock_result' });
 
@@ -44,6 +46,7 @@ var nodeFilter = '';
 var nodeSort = 'ping';            // ping | name | down
 var nodeReachOnly = false;
 var speedResults = {};            // tag -> mbps (last speed test)
+var nodeSel = {};                 // tag -> true (checkbox selection for bulk actions)
 
 function pingColor(d) {
 	if (d == null) return '#888';
@@ -75,6 +78,7 @@ function fmtBytes(n) {
 var prevTraffic = null;
 
 return view.extend({
+	notify: function(msg) { ui.addNotification(null, E('p', msg), 'info'); },
 	handleToggle: function(cur) {
 		ui.showModal(_('Please wait'), [ E('p', { 'class': 'spinning' }, cur ? _('Stopping…') : _('Starting…')) ]);
 		return callSetEnabled(!cur).then(L.bind(function() {
@@ -256,6 +260,79 @@ return view.extend({
 			this.renderQR(qr, r.link);
 		}, this));
 	},
+	handleDeleteNode: function(tag) {
+		var self = this;
+		if (!confirm(_('Delete node "%s"? A subscription node is hidden until you delete the subscription; a manual/imported/saved node is removed permanently.').format(tag))) return;
+		return callDeleteNode(tag).then(function(r) {
+			if (r && r.ok) self.notify(_('Node deleted: %s').format(tag));
+			else ui.addNotification(null, E('p', _('Could not delete node: %s').format((r && r.error) || '?')), 'warning');
+		}).catch(function(e) {
+			ui.addNotification(null, E('p', _('Could not delete node: %s').format(e) + ' — ' + _('try re-logging into LuCI (permissions update on login).')), 'error');
+		});
+	},
+	handleSelClear: function() { nodeSel = {}; if (this.rerenderNodes) this.rerenderNodes(); },
+	handleBulkDelete: function() {
+		var self = this, tags = Object.keys(nodeSel);
+		if (!tags.length) { ui.addNotification(null, E('p', _('Select node(s) with the checkboxes first.')), 'warning'); return; }
+		if (!confirm(_('Delete %d selected node(s)? Subscription nodes are hidden until you delete the subscription; manual/imported/saved are removed permanently.').format(tags.length))) return;
+		var chain = Promise.resolve();
+		tags.forEach(function(t) { chain = chain.then(function() { return callDeleteNode(t); }); });
+		return chain.then(function() { nodeSel = {}; self.notify(_('Deleted %d node(s).').format(tags.length)); });
+	},
+	handleBulkDeactivate: function() {
+		var self = this, tags = Object.keys(nodeSel);
+		if (!tags.length) { ui.addNotification(null, E('p', _('Select node(s) first.')), 'warning'); return; }
+		var chain = Promise.resolve();
+		tags.forEach(function(t) { chain = chain.then(function() { return callDeactivateSaved(t); }); });
+		return chain.then(function() { nodeSel = {}; self.notify(_('Deactivated %d node(s).').format(tags.length)); });
+	},
+	handleSelSpeedtest: function() {
+		var tags = Object.keys(nodeSel);
+		if (tags.length !== 1) { ui.addNotification(null, E('p', _('Select exactly one node for the speed test.')), 'warning'); return; }
+		return this.handleSpeedtest(tags[0]);
+	},
+	handleSelUnlock: function() {
+		var tags = Object.keys(nodeSel);
+		if (tags.length !== 1) { ui.addNotification(null, E('p', _('Select exactly one node for the unblock test.')), 'warning'); return; }
+		return this.handleUnlock(tags[0]);
+	},
+	handleImport: function() {
+		var self = this;
+		var ta = E('textarea', { 'style': 'width:100%;min-height:120px;font-family:monospace;font-size:12px',
+			'placeholder': 'vless://…\nvless://…\n' + _('or a base64 subscription') });
+		var fileInput = E('input', { 'type': 'file', 'accept': '.txt,.text,text/plain', 'style': 'display:none' });
+		fileInput.addEventListener('change', function() {
+			var f = fileInput.files && fileInput.files[0]; if (!f) return;
+			var rd = new FileReader();
+			rd.onload = function() { ta.value = (ta.value ? ta.value.replace(/\s*$/, '') + '\n' : '') + String(rd.result || ''); fileInput.value = ''; };
+			rd.onerror = function() { ui.addNotification(null, E('p', _('Could not read the file.')), 'error'); };
+			rd.readAsText(f);
+		});
+		ui.showModal(_('Import nodes'), [
+			E('p', {}, _('Paste node links (one per line) or a whole base64 subscription, or load a .txt file. New links are added to your manual nodes.')),
+			ta,
+			E('div', { 'style': 'margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, [
+				E('button', { 'class': 'btn cbi-button', 'click': function() { fileInput.click(); } }, '📄 ' + _('Load file…')),
+				fileInput,
+				E('span', { 'style': 'flex:1' }, ''),
+				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
+				E('button', { 'class': 'btn cbi-button cbi-button-positive', 'click': function() { self.doImport(ta); } }, '⬆ ' + _('Import'))
+			])
+		]);
+	},
+	doImport: function(ta) {
+		var self = this;
+		var txt = (ta && ta.value || '').trim();
+		if (!txt) { ui.addNotification(null, E('p', _('Paste links or load a file first.')), 'warning'); return; }
+		return callImportNodes(txt).then(function(r) {
+			ui.hideModal();
+			if (r && r.ok) self.notify(_('Imported %d new node(s) (manual list: %d).').format((r.added != null ? r.added : 0), (r.total != null ? r.total : 0)));
+			else ui.addNotification(null, E('p', _('Import failed') + (r && r.error ? (': ' + r.error) : '.')), 'error');
+		}).catch(function(e) {
+			ui.hideModal();
+			ui.addNotification(null, E('p', _('Import failed') + ': ' + e + ' — ' + _('try re-logging into LuCI (permissions update on login).')), 'error');
+		});
+	},
 	handleExport: function() {
 		var self = this;
 		var mk = function(scope, label) {
@@ -348,23 +425,6 @@ return view.extend({
 				autoMode ? E('span', { 'style': 'color:#888' }, ' (' + _('auto / urltest') + (preferredTag ? ' · 📌 ' + (using||'') : '') + ')') : '' ])
 		];
 
-		// Smart bypass (zapret) status — shown when a zapret install is detected
-		var zap = st.zapret || {};
-		var setn = st.settings || {};
-		if (zap.present) {
-			var sbOn = !!setn.smart_bypass;
-			var dcount = (st.desync_domains || []).length;
-			kids.push(E('div', { 'style': 'margin:4px 0' }, [
-				E('b', {}, _('Smart bypass') + ': '),
-				setn.lite_mode ? badge(_('LITE'), '#6a1b9a') : '',
-				badge(sbOn ? _('on (direct DPI bypass)') : _('off'), sbOn ? '#2e7d32' : '#888'),
-				E('span', { 'style': 'color:#888;margin-left:6px' }, 'zapret · ' + (zap.mode || '—') +
-					' · ' + _('self-learned: %s').format(String(zap.auto_count || 0)) +
-					(dcount ? ' · ' + _('direct: %s').format(String(dcount)) : '')),
-				setn.anti_throttle ? badge(_('anti-throttle'), '#1565c0') : ''
-			]));
-		}
-
 		if (on)
 			kids.push(E('div', { 'style': 'margin:4px 0' }, [
 				E('b', {}, _('Traffic') + ': '),
@@ -409,11 +469,19 @@ return view.extend({
 		sort.addEventListener('change', function(ev) { nodeSort = ev.target.value; self.rerenderNodes(); });
 		var reach = E('input', { 'type': 'checkbox', 'checked': nodeReachOnly ? 'checked' : null });
 		reach.addEventListener('change', function(ev) { nodeReachOnly = ev.target.checked; self.rerenderNodes(); });
-		return E('div', { 'style': 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px' }, [
+		return E('div', { 'style': 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px' }, [
 			E('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, 'handlePing') }, '↻ ' + _('Ping all nodes')),
 			E('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, 'handleExport') }, '⬇ ' + _('Export')),
+			E('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, 'handleImport') }, '⬆ ' + _('Import')),
 			search, sort,
-			E('label', { 'style': 'cursor:pointer' }, [ reach, E('span', { 'style': 'margin-left:5px' }, _('reachable only')) ])
+			E('label', { 'style': 'cursor:pointer' }, [ reach, E('span', { 'style': 'margin-left:5px' }, _('reachable only')) ]),
+			// --- bulk actions on the checked nodes (☑ in each row) ---
+			E('span', { 'style': 'border-left:1px solid rgba(128,128,128,.35);padding-left:10px;color:#888' }, _('Selected') + ':'),
+			E('button', { 'class': 'btn cbi-button', 'title': _('Speed test the selected node'), 'click': ui.createHandlerFn(this, 'handleSelSpeedtest') }, '⚡'),
+			E('button', { 'class': 'btn cbi-button', 'title': _('Unblock-test the selected node'), 'click': ui.createHandlerFn(this, 'handleSelUnlock') }, '🔓'),
+			E('button', { 'class': 'btn cbi-button', 'title': _('Deactivate selected (remove from active pool, keep saved)'), 'click': ui.createHandlerFn(this, 'handleBulkDeactivate') }, '⏏'),
+			E('button', { 'class': 'btn cbi-button cbi-button-remove', 'title': _('Delete the selected nodes'), 'click': ui.createHandlerFn(this, 'handleBulkDelete') }, '✕ ' + _('Delete')),
+			E('button', { 'class': 'btn cbi-button', 'title': _('Clear selection'), 'click': ui.createHandlerFn(this, 'handleSelClear') }, _('Clear'))
 		]);
 	},
 	renderNodes: function(st) {
@@ -473,8 +541,10 @@ return view.extend({
 			var pooled = inPool(n.tag);
 			var sp = speedResults[n.tag];
 			var traf = ((n.down || 0) + (n.up || 0)) > 0 ? ('↓' + fmtBytes(n.down) + ' ↑' + fmtBytes(n.up)) : '—';
+			var cb = E('input', { 'type': 'checkbox', 'checked': nodeSel[n.tag] ? 'checked' : null, 'title': _('Select for bulk actions') });
+			cb.addEventListener('change', function() { if (cb.checked) nodeSel[n.tag] = true; else delete nodeSel[n.tag]; });
 			return E('tr', { 'class': 'tr', 'style': act ? 'background:rgba(46,125,50,.12)' : (pooled ? '' : 'opacity:.55') }, [
-				E('td', { 'class': 'td' }, act ? '★' : ''),
+				E('td', { 'class': 'td' }, cb),
 				E('td', { 'class': 'td' }, [
 					E('span', {}, n.tag),
 					pinned ? E('span', { 'style': 'margin-left:5px;font-size:12px;vertical-align:middle', 'title': _('Preferred node (soft pin with switch-back)') }, '📌') : '',
@@ -498,17 +568,8 @@ return view.extend({
 					E('button', { 'class': 'btn cbi-button', 'title': n.saved ? _('Remove from saved') : _('Save node (keep after subscription expires)'),
 						'click': ui.createHandlerFn(this, n.saved ? 'handleUnsaveNode' : 'handleSaveNode', n.tag) }, n.saved ? '💾' : '⭐'),
 					' ',
-					n.active_saved ? E('button', { 'class': 'btn cbi-button', 'title': _('Remove from the active pool (keeps it saved)'),
-						'click': ui.createHandlerFn(this, 'handleDeactivateSaved', n.tag) }, '⏏') : '',
-					n.active_saved ? ' ' : '',
-					E('button', { 'class': 'btn cbi-button', 'title': _('Real speed test'),
-						'click': ui.createHandlerFn(this, 'handleSpeedtest', n.tag) }, '⚡'),
-					' ',
 					E('button', { 'class': 'btn cbi-button', 'title': _('Share link / QR'),
-						'click': ui.createHandlerFn(this, 'handleShowLink', n.tag) }, '🔗'),
-					' ',
-					E('button', { 'class': 'btn cbi-button', 'title': _('Test what this node unblocks'),
-						'click': ui.createHandlerFn(this, 'handleUnlock', n.tag) }, '🔓')
+						'click': ui.createHandlerFn(this, 'handleShowLink', n.tag) }, '🔗')
 				])
 			]);
 		}, this);

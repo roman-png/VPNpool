@@ -17,6 +17,10 @@ var callProbeRes = rpc.declare({ object: 'vpnpool', method: 'probe_result' });
 var callImport   = rpc.declare({ object: 'vpnpool', method: 'import_select',    params: [ 'url', 'idx' ] });
 var callAddNode  = rpc.declare({ object: 'vpnpool', method: 'add_node',         params: [ 'link' ] });
 var callDelNode  = rpc.declare({ object: 'vpnpool', method: 'del_node',         params: [ 'link' ] });
+var callImportNodes = rpc.declare({ object: 'vpnpool', method: 'import_nodes',  params: [ 'text' ] });
+var callActivateSaved   = rpc.declare({ object: 'vpnpool', method: 'activate_saved',   params: [ 'tag' ] });
+var callDeactivateSaved = rpc.declare({ object: 'vpnpool', method: 'deactivate_saved', params: [ 'tag' ] });
+var callUnsaveNode      = rpc.declare({ object: 'vpnpool', method: 'unsave_node',       params: [ 'tag' ] });
 var callSetOpt   = rpc.declare({ object: 'vpnpool', method: 'set_option',       params: [ 'name', 'value' ] });
 var callAddExtraSub = rpc.declare({ object: 'vpnpool', method: 'add_sub',       params: [ 'url' ] });
 var callDelExtraSub = rpc.declare({ object: 'vpnpool', method: 'del_sub',       params: [ 'url' ] });
@@ -33,6 +37,7 @@ return view.extend({
 	reload: function() { return callStatus().then(L.bind(function(st) { this.st = st;
 		dom.content(document.getElementById('vp-srclist'), this.renderSources(st));
 		dom.content(document.getElementById('vp-manlist'), this.renderManual(st));
+		var sv = document.getElementById('vp-savedlist'); if (sv) dom.content(sv, this.renderSaved(st));
 		var es = document.getElementById('vp-extrasublist'); if (es) dom.content(es, this.renderExtraSubs(st)); }, this)); },
 
 	notify: function(msg) { ui.addNotification(null, E('p', msg), 'info'); },
@@ -69,6 +74,35 @@ return view.extend({
 	},
 	handleDelExtraSub: function(u) { return callDelExtraSub(u).then(L.bind(function() { this.notify(_('Extra subscription removed.')); this.reload(); }, this)); },
 
+	// Saved nodes = a persistent archive, separate from manual nodes. Each is either
+	// ACTIVE (promoted into the live pool) or IDLE (kept for later / after sub expiry).
+	renderSaved: function(st) {
+		var self = this;
+		var active = (st.nodes || []).filter(function(n) { return n.active_saved; })
+			.map(function(n) { return { tag: n.tag, server: n.server, port: n.port, active: true }; });
+		var idle = (st.saved_inactive || [])
+			.map(function(n) { return { tag: n.tag, server: n.server, port: n.port, active: false }; });
+		var all = active.concat(idle);
+		var items = all.map(function(n) {
+			return E('li', { 'style': 'display:flex;align-items:center;gap:8px;margin:4px 0;flex-wrap:wrap' }, [
+				E('span', { 'style': 'min-width:64px;font-weight:bold;font-size:12px;color:' + (n.active ? '#2e7d32' : '#999') },
+					n.active ? ('● ' + _('active')) : ('○ ' + _('idle'))),
+				E('span', { 'style': 'flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, n.tag),
+				E('span', { 'style': 'color:#888;font-family:monospace;font-size:11px' }, (n.server || '') + ':' + (n.port || '')),
+				n.active
+					? E('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(self, 'handleDeactivateSaved', n.tag) }, _('Deactivate'))
+					: E('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(self, 'handleActivateSaved', n.tag) }, _('Activate')),
+				E('button', { 'class': 'btn cbi-button cbi-button-remove', 'click': ui.createHandlerFn(self, 'handleUnsaveNode', n.tag) }, _('Remove'))
+			]);
+		});
+		return E('ul', { 'style': 'list-style:none;padding-left:0' },
+			items.length ? items : [ E('li', { 'style': 'color:#888' },
+				_('(no saved nodes yet — star nodes on the dashboard; they also land here automatically when you delete the subscription)')) ]);
+	},
+	handleActivateSaved: function(tag) { this.notify(_('Activating saved node…')); return callActivateSaved(tag).then(L.bind(function() { this.notify(_('Saved node activated.')); this.reload(); }, this)); },
+	handleDeactivateSaved: function(tag) { return callDeactivateSaved(tag).then(L.bind(function() { this.notify(_('Saved node deactivated.')); this.reload(); }, this)); },
+	handleUnsaveNode: function(tag) { if (!confirm(_('Remove this node from the saved archive?'))) return; return callUnsaveNode(tag).then(L.bind(function() { this.notify(_('Saved node removed.')); this.reload(); }, this)); },
+
 	renderManual: function(st) {
 		var self = this;
 		var items = (st.manual_nodes || []).map(function(l) {
@@ -82,10 +116,40 @@ return view.extend({
 	},
 
 	handleSaveUrl: function(inp) { return callSetUrl(inp.value || '').then(L.bind(function() { this.notify(_('Subscription URL saved.')); }, this)); },
-	handleDelSub: function() { if (!confirm(_('Delete the subscription URL?'))) return; return callDelSub().then(L.bind(function() { this.notify(_('Subscription deleted.')); this.reload(); }, this)); },
+	handleDelSub: function() { if (!confirm(_('Delete the subscription? All saved nodes will be auto-activated so you stay connected.'))) return; return callDelSub().then(L.bind(function(r) { this.notify(_('Subscription deleted — %d saved node(s) kept active.').replace('%d', (r && r.promoted != null) ? r.promoted : 0)); this.reload(); }, this)); },
 	handleDelSrc: function(u) { return callDelSrc(u).then(L.bind(this.reload, this)); },
 	handleAddNode: function(inp) { var v = (inp.value || '').trim(); if (!v) return; return callAddNode(v).then(L.bind(function() { inp.value = ''; this.notify(_('Node added.')); this.reload(); }, this)); },
 	handleDelNode: function(l) { return callDelNode(l).then(L.bind(this.reload, this)); },
+
+	// --- bulk import: paste many links / a base64 subscription, or load a file ------
+	handleImportNodes: function(ta) {
+		var txt = (ta && ta.value || '').trim();
+		if (!txt) { ui.addNotification(null, E('p', _('Paste node links (or load a file) first.')), 'warning'); return; }
+		this.notify(_('Importing nodes…'));
+		return callImportNodes(txt).then(L.bind(function(r) {
+			if (r && r.ok) {
+				ta.value = '';
+				this.notify(_('Imported %d new node(s) (manual list: %d).').replace('%d', (r.added != null ? r.added : 0)).replace('%d', (r.total != null ? r.total : 0)));
+				this.reload();
+			} else {
+				ui.addNotification(null, E('p', _('Import failed') + (r && r.error ? (': ' + r.error) : '.')), 'error');
+			}
+		}, this));
+	},
+	handleImportFile: function(ta, fileInput) {
+		var f = fileInput && fileInput.files && fileInput.files[0];
+		if (!f) return;
+		var self = this;
+		var rd = new FileReader();
+		rd.onload = function() {
+			var prev = (ta.value || '');
+			ta.value = (prev ? (prev.replace(/\s*$/, '') + '\n') : '') + String(rd.result || '');
+			fileInput.value = '';
+			self.notify(_('File loaded — review and press Import.'));
+		};
+		rd.onerror = function() { ui.addNotification(null, E('p', _('Could not read the file.')), 'error'); };
+		rd.readAsText(f);
+	},
 	handleSaveInterval: function(inp) { return callSetOpt('subscription_interval', inp.value || '6h').then(L.bind(function() { this.notify(_('Update interval saved.')); }, this)); },
 	handleUpdateNow: function() { this.notify(_('Updating from all sources…')); return callRefresh(); },
 
@@ -194,6 +258,10 @@ return view.extend({
 		var extraSubInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:100%',
 			'placeholder': 'https://…/sub' });
 		var manInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:100%', 'placeholder': 'vless://…' });
+		var importTA = E('textarea', { 'class': 'cbi-input-textarea', 'style': 'width:100%;min-height:90px;font-family:monospace;font-size:12px',
+			'placeholder': 'vless://…\nvless://…\n' + _('or a base64 subscription') });
+		var fileInput = E('input', { 'type': 'file', 'accept': '.txt,.text,text/plain', 'style': 'display:none' });
+		fileInput.addEventListener('change', L.bind(function() { this.handleImportFile(importTA, fileInput); }, this));
 		var intInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:120px',
 			'value': (st.settings && st.settings.subscription_interval) || '6h' });
 
@@ -238,7 +306,23 @@ return view.extend({
 				E('h3', {}, _('Manual VLESS nodes')),
 				manInput,
 				E('button', { 'class': 'btn cbi-button cbi-button-add', 'style': 'margin-top:6px', 'click': ui.createHandlerFn(this, 'handleAddNode', manInput) }, _('Add node')),
+
+				E('h4', { 'style': 'margin-top:14px' }, _('Bulk import')),
+				E('p', { 'style': 'color:#888' }, _('Paste many node links (one per line) or a whole base64 subscription, or load them from a file. New links are added to the manual list above.')),
+				importTA,
+				E('div', { 'style': 'margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;align-items:center' }, [
+					E('button', { 'class': 'btn cbi-button cbi-button-add', 'click': ui.createHandlerFn(this, 'handleImportNodes', importTA) }, '⤓ ' + _('Import')),
+					fileInput,
+					E('button', { 'class': 'btn cbi-button', 'click': function() { fileInput.click(); } }, '📄 ' + _('Load file…'))
+				]),
+
 				E('div', { 'id': 'vp-manlist', 'style': 'margin-top:8px' }, this.renderManual(st))
+			]),
+
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('Saved nodes')),
+				E('p', { 'style': 'color:#888' }, _('A persistent archive separate from manual nodes. Star nodes on the dashboard to save them; they survive subscription expiry. ACTIVE = in the live pool, IDLE = kept for later. Deleting the subscription auto-activates all of them so you stay connected.')),
+				E('div', { 'id': 'vp-savedlist', 'style': 'margin-top:4px' }, this.renderSaved(st))
 			])
 		]);
 	},

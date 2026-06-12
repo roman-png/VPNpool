@@ -54,6 +54,26 @@ ucode /usr/libexec/vpnpool/parser.uc --keep-link $FILES 2>/dev/null \
 	| jq -c 'map({tag, link:._link}) | map(select(.link != null and .link != ""))' \
 	> /etc/vpnpool/links.json 2>/dev/null || echo '[]' > /etc/vpnpool/links.json
 
+# User-excluded nodes (dashboard ✕ on a subscription node -> uci list excluded_node,
+# holding the node's link). Drop them from nodes.json by identity so they never reach
+# the config and can't return on a refetch. Matched via links.json (tag->link). Cleared
+# wholesale on del_subscription.
+EXCJSON=$(uci -q get vpnpool.main.excluded_node 2>/dev/null | tr ' ' '\n' | grep '://' | jq -R . | jq -cs . 2>/dev/null)
+if [ -n "$EXCJSON" ] && [ "$EXCJSON" != "[]" ]; then
+	jq -c --argjson exc "$EXCJSON" 'map(select(.link as $l | ($exc|index($l))!=null)) | map(.tag)' \
+		/etc/vpnpool/links.json > "$SB_DATA/.exctags.json" 2>/dev/null
+	if [ -s "$SB_DATA/.exctags.json" ] && [ "$(cat "$SB_DATA/.exctags.json")" != "[]" ]; then
+		jq --slurpfile et "$SB_DATA/.exctags.json" 'map(select(.tag as $t | ($et[0]|index($t))==null))' \
+			"$NODES" > "$NODES.x" 2>/dev/null && mv "$NODES.x" "$NODES"
+		log "build: excluded $(jq 'length' "$SB_DATA/.exctags.json") user-deleted node(s)"
+	fi
+	rm -f "$SB_DATA/.exctags.json"
+fi
+CNT=$(jq 'length' "$NODES" 2>/dev/null || echo 0)
+if [ "${CNT:-0}" -lt 1 ]; then
+	log "build: 0 nodes after exclude filter"; exit 1
+fi
+
 # ---- auto-pool health prefilter ----
 # The urltest "auto" group probes EVERY member each interval. A node whose server is
 # TCP-dead leaves a hung SYN_SENT socket on every cycle; with ~10 dead nodes (a common

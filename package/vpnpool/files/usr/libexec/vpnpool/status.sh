@@ -160,8 +160,6 @@ EXTRASUBS=$(uci -q get vpnpool.main.extra_sub | tr ' ' '\n' | jq -R . | jq -s 'm
 [ -n "$EXTRASUBS" ] || EXTRASUBS='[]'
 AUTODOM=$(uci -q get vpnpool.routing.auto_domain | tr ' ' '\n' | jq -R . | jq -s 'map(select(length>0))' 2>/dev/null)
 [ -n "$AUTODOM" ] || AUTODOM='[]'
-DESYNCDOM=$(uci -q get vpnpool.routing.desync_domain | tr ' ' '\n' | jq -R . | jq -s 'map(select(length>0))' 2>/dev/null)
-[ -n "$DESYNCDOM" ] || DESYNCDOM='[]'
 COMMUNITIES=$(uci -q get vpnpool.routing.community | tr ' ' '\n' | jq -R . | jq -s 'map(select(length>0))' 2>/dev/null)
 [ -n "$COMMUNITIES" ] || COMMUNITIES='[]'
 FI=$(uci -q get vpnpool.main.failover_interval); [ -n "$FI" ] || FI=60
@@ -189,12 +187,9 @@ CLDEV=$(uci -q get vpnpool.main.client_dev | tr ' ' '\n' | jq -R . | jq -s 'map(
 [ -n "$CLDEV" ] || CLDEV='[]'
 ANTIDPI=$(uci -q get vpnpool.main.antidpi); [ -n "$ANTIDPI" ] || ANTIDPI=0
 ADAPT=$(uci -q get vpnpool.main.adaptive_routing); [ -n "$ADAPT" ] || ADAPT=0
-SMARTB=$(uci -q get vpnpool.main.smart_bypass); [ -n "$SMARTB" ] || SMARTB=0
-ATHR=$(uci -q get vpnpool.main.anti_throttle); [ -n "$ATHR" ] || ATHR=0
-LITE=$(uci -q get vpnpool.main.lite_mode); [ -n "$LITE" ] || LITE=0
-# zapret orchestration status (present / mode / self-learned count). Read-only.
-SMART=$(/usr/libexec/vpnpool/smartbypass.sh status 2>/dev/null)
-case "$SMART" in (\{*) : ;; (*) SMART='{"present":false,"enabled":false,"mode":"","auto_count":0}' ;; esac
+DEADF=$(uci -q get vpnpool.main.dead_filter); [ -n "$DEADF" ] || DEADF=1
+# Tags the dead-node filter currently demoted from the auto pool (read-only display).
+DEADTAGS=$(cat /tmp/vpnpool/.dead_tags.json 2>/dev/null); case "$DEADTAGS" in (\[*) : ;; (*) DEADTAGS='[]' ;; esac
 ASNAP=$(uci -q get vpnpool.main.auto_snapshot); [ -n "$ASNAP" ] || ASNAP=0
 ASNAPMAX=$(uci -q get vpnpool.main.auto_snapshot_max); case "$ASNAPMAX" in (*[!0-9]*|"") ASNAPMAX=20 ;; esac
 SCHED_EN=$(uci -q get vpnpool.main.sched_enabled); [ -n "$SCHED_EN" ] || SCHED_EN=0
@@ -220,13 +215,10 @@ jq -n \
 	--argjson sources "$SOURCES" \
 	--argjson extrasubs "$EXTRASUBS" \
 	--argjson autodom "$AUTODOM" \
-	--argjson desyncdom "$DESYNCDOM" \
 	--argjson antidpi "${ANTIDPI:-0}" \
 	--argjson adapt "${ADAPT:-0}" \
-	--argjson smartb "${SMARTB:-0}" \
-	--argjson athr "${ATHR:-0}" \
-	--argjson lite "${LITE:-0}" \
-	--argjson smart "$SMART" \
+	--argjson deadf "${DEADF:-1}" \
+	--argjson deadtags "$DEADTAGS" \
 	--argjson communities "$COMMUNITIES" \
 	--arg fi "$FI" \
 	--arg si "$SI" \
@@ -269,6 +261,7 @@ jq -n \
 		subscription: { url: $url, expire: $expire, used: ($sup+$sdn), total: $stot },
 		nodes: ($nodes[0] // []),
 			saved_inactive: $savedinactive,
+			dead_nodes: $deadtags,
 		auto_members: $automem,
 		traffic: { up_total: $tup, down_total: $tdown, connections: $tconn },
 		client_traffic: ($ct[0] // []),
@@ -277,7 +270,6 @@ jq -n \
 		sources: $sources,
 		extra_subs: $extrasubs,
 		auto_domains: $autodom,
-		desync_domains: $desyncdom,
 		communities: $communities,
 		settings: {
 			failover_interval: ($fi|tonumber? // 60),
@@ -299,15 +291,12 @@ jq -n \
 			auto_snapshot_max: $asnapmax,
 			antidpi: ($antidpi==1),
 			adaptive_routing: ($adapt==1),
-			smart_bypass: ($smartb==1),
-			anti_throttle: ($athr==1),
-			lite_mode: ($lite==1),
+			dead_filter: ($deadf==1),
 			sched_enabled: ($schen==1),
 			sched_on: $schon,
 			sched_off: $schoff,
 			sched_refresh: $schref
 		},
 		clients: $clients,
-		client_devices: $cldev,
-		zapret: $smart
+		client_devices: $cldev
 	}'
