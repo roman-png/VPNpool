@@ -27,9 +27,10 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
 
 - 📡 **Auto‑updating subscription** — paste a subscription URL (base64 list **or**
   sing‑box JSON). Multiple sources supported (e.g. auto‑updating raw config files
-  from a repo). **Multi‑client User‑Agent probing**: tries several client UAs and
-  keeps the response with the most nodes, so it keeps working if the provider
-  changes format.
+  from a repo). **Multi‑client User‑Agent probing**: tries several client UAs but
+  **stops at the first one that returns usable nodes** (only falling through to the
+  next UA when a response is empty), so it keeps working if the provider serves a
+  particular client — without hammering the panel with every UA.
 - 🔀 **Automatic ping + failover** — sing‑box `urltest` health‑checks every node and
   **switches to a working VLESS server automatically** when the active one stops
   responding. Manual override and manual "ping all" too.
@@ -44,9 +45,10 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
 - 🌐 **IPv4‑first DNS strategy** — sing‑box's own health probes resolve IPv4 first
   (`dns_strategy`, default `prefer_ipv4`), so a router that gets AAAA records but has
   no IPv6 transit through the nodes doesn't show false "0 ping" for working nodes.
-- ⭐ **Preferred node with switch‑back** — pin a favourite node: it's used while it's
-  reachable, control is handed to auto if it dies, and it **switches back** when it
-  recovers (anti‑flap hysteresis on top of urltest tolerance).
+- 📌 **Preferred node with switch‑back** — pin a favourite node **right on the
+  Dashboard** (the 📌 button on any node row): it's used while it's reachable, control
+  is handed to auto if it dies, and it **switches back** when it recovers (anti‑flap
+  hysteresis on top of urltest tolerance). Applied live — no tunnel bounce.
 - 📊 **Subscription data quota** — parses the panel's `subscription‑userinfo` header
   and shows **used / total GB** with a progress bar (plus a Telegram alert when
   <10% remains), alongside the expiry date.

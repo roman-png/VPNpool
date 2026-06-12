@@ -83,6 +83,13 @@ var DICT = {
 		'Preferred node': 'Предпочитаемый узел', '— auto (urltest) —': '— авто (urltest) —',
 		'Preferred node: stick to it while it is reachable, hand over to auto if it dies, switch back when it recovers.':
 			'Предпочитаемый узел: держимся за него, пока он доступен; при падении передаём управление авто-режиму, а после восстановления возвращаемся обратно.',
+		'Preferred node is now set right on the Dashboard — click 📌 on any node to pin it (used while reachable, auto-failover if it dies, switch back on recovery).':
+			'Предпочитаемый узел теперь задаётся прямо на Дашборде — нажмите 📌 у любого узла (используется пока доступен, авто-переключение при падении, возврат при восстановлении).',
+		'Preferred node (soft pin with switch-back)': 'Предпочитаемый узел (мягкий пин с возвратом)',
+		'Make preferred (soft pin: used while reachable, auto-failover if it dies, switch back on recovery)':
+			'Сделать предпочитаемым (мягкий пин: используется пока доступен, авто-переключение при падении, возврат при восстановлении)',
+		'Preferred node — click to unpin (back to auto)': 'Предпочитаемый узел — нажмите, чтобы снять (обратно в авто)',
+		'Preferred node: %s': 'Предпочитаемый узел: %s', 'Preferred node cleared (auto)': 'Предпочитаемый узел снят (авто)',
 		'Security / leak protection': 'Безопасность / защита от утечек',
 		'Kill-switch (block all traffic if VPN is down)': 'Kill-switch (блокировать весь трафик, если VPN недоступен)',
 		'DNS-leak protection (route LAN DNS through the tunnel)': 'Защита от DNS-утечек (DNS из LAN через туннель)',

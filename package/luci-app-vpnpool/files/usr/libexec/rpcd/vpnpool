@@ -17,7 +17,7 @@ signal_refetch() {
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
+{ "status": {}, "diag": {}, "conntest": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
 L
 	;;
 call)
@@ -197,6 +197,24 @@ call)
 		done
 		uci commit vpnpool
 		signal_reload
+		echo '{"ok":true}'
+		;;
+	set_preferred)
+		# Preferred-node soft pin, set straight from the dashboard (📌). Toggle: pinning
+		# the already-preferred node (or an empty tag) clears it back to auto. Setting a
+		# new preferred node also releases any HARD manual pin (selected_node) so the soft
+		# pin can actually take over. No signal_reload: preferred_node is read live by the
+		# daemon's preferred_check, which switches the running selector via the clash API
+		# within one supervise tick — so the tunnel is never bounced just to pin a node.
+		t=$(echo "$input" | jq -r '.tag // ""')
+		cur=$(uci -q get vpnpool.main.preferred_node)
+		if [ -z "$t" ] || [ "$t" = "$cur" ]; then
+			uci -q delete vpnpool.main.preferred_node
+		else
+			uci set vpnpool.main.preferred_node="$t"
+			uci -q delete vpnpool.main.selected_node
+		fi
+		uci commit vpnpool
 		echo '{"ok":true}'
 		;;
 	set_clients)

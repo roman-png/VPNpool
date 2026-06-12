@@ -50,6 +50,11 @@ fetch_best() {   # $1=url $2=primary(0/1) $3=outfile
 				[ -n "$EXP" ] && echo "$EXP" > "$CONF_DIR/sub.expire"
 			fi
 		fi
+		# Stop at the FIRST User-Agent that yields usable nodes — no point hammering the
+		# panel with every remaining UA once we already have a working response (it just
+		# adds load on the provider and slows the fetch). The multi-UA sweep only matters
+		# when the earlier UAs returned nothing; we keep trying until one works, then break.
+		[ "$cnt" -ge 1 ] && break
 	done
 	if [ "$best" -ge 1 ]; then
 		log "fetch: $url -> $best nodes (best UA: $bestua)"
