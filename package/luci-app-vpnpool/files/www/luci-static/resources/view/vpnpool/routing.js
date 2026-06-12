@@ -10,7 +10,8 @@ var callStatus       = rpc.declare({ object: 'vpnpool', method: 'status' });
 var callSetOpt       = rpc.declare({ object: 'vpnpool', method: 'set_option',     params: [ 'name', 'value' ] });
 var callSetDomains   = rpc.declare({ object: 'vpnpool', method: 'set_domains',    params: [ 'domains' ] });
 var callSetCommunities = rpc.declare({ object: 'vpnpool', method: 'set_communities', params: [ 'communities' ] });
-var callSetClients = rpc.declare({ object: 'vpnpool', method: 'set_clients', params: [ 'mode', 'clients' ] });
+var callSetClients = rpc.declare({ object: 'vpnpool', method: 'set_clients', params: [ 'mode', 'clients', 'devices' ] });
+var callLeases     = rpc.declare({ object: 'vpnpool', method: 'leases' });
 
 // itdoginfo/allow-domains community lists (SRS release assets)
 var COMMUNITIES = [
@@ -41,13 +42,18 @@ return view.extend({
 		var list = (box.value || '').split(/\r?\n/).map(function(s) { return s.trim(); }).filter(function(s) { return s.length; });
 		return callSetDomains(list).then(L.bind(function() { this.notify(_('Domains saved and applied.')); }, this));
 	},
-	handleSaveClients: function(sel, box) {
-		var list = (box.value || '').split(/\r?\n/).map(function(s) { return s.trim(); }).filter(function(s) { return s.length; });
-		return callSetClients(sel.value, list).then(L.bind(function() { this.notify(_('Per-client routing saved and applied.')); }, this));
+	handleSaveClients: function(sel, devChecks, box) {
+		// MAC profiles from the device picker + any raw IPs typed manually.
+		var devices = (devChecks || []).filter(function(d) { return d.el.checked; }).map(function(d) { return d.mac; });
+		var ips = (box.value || '').split(/\r?\n/).map(function(s) { return s.trim(); }).filter(function(s) { return s.length; });
+		return callSetClients(sel.value, ips, devices).then(L.bind(function() { this.notify(_('Per-client routing saved and applied.')); }, this));
 	},
 
-	load: function() { return callStatus(); },
-	render: function(st) {
+	load: function() { return Promise.all([ callStatus(), callLeases().catch(function() { return {}; }) ]); },
+	render: function(data) {
+		var st = data[0] || {};
+		// `leases` rpc returns an OBJECT { leases: [...] } (rpcd rejects a bare array).
+		var leases = (data[1] && data[1].leases) || [];
 		var selectedComm = {};
 		(st.communities || []).forEach(function(c) { selectedComm[c] = true; });
 		var mode = (st.settings && st.mode) ? st.mode : (st.mode || 'selective');
@@ -73,7 +79,28 @@ return view.extend({
 			E('option', { 'value': 'exclude', 'selected': clMode === 'exclude' ? 'selected' : null }, _('All except the listed clients (listed bypass VPN)')),
 			E('option', { 'value': 'include', 'selected': clMode === 'include' ? 'selected' : null }, _('Only the listed clients use the VPN'))
 		]);
-		var clBox = E('textarea', { 'class': 'cbi-input-textarea', 'style': 'width:100%;height:90px', 'placeholder': '192.168.1.50' }, (st.clients || []).join('\n'));
+		// Device picker: current DHCP leases + any saved-but-offline MACs, so a profile
+		// is never lost just because the device is off. Matched by MAC (stable across
+		// DHCP renewals). Manual IPv4 entry stays for static/unknown hosts.
+		var savedMacs = (st.client_devices || []);
+		var savedSet = {}; savedMacs.forEach(function(m) { savedSet[String(m).toLowerCase()] = true; });
+		var leasedSet = {}; leases.forEach(function(l) { leasedSet[String(l.mac).toLowerCase()] = true; });
+		var offline = savedMacs.filter(function(m) { return !leasedSet[String(m).toLowerCase()]; })
+			.map(function(m) { return { mac: m, ip: '', host: '', offline: true }; });
+		var devList = leases.concat(offline);
+		var devChecks = [];
+		var devRows = devList.length ? devList.map(function(d) {
+			var cb = E('input', { 'type': 'checkbox', 'style': 'margin-right:8px',
+				'checked': savedSet[String(d.mac).toLowerCase()] ? 'checked' : null });
+			devChecks.push({ el: cb, mac: d.mac });
+			var name = d.host || d.ip || d.mac;
+			var meta = [ d.ip, d.mac ].filter(function(s) { return s; }).join(' · ') + (d.offline ? ' · ' + _('offline') : '');
+			return E('label', { 'style': 'display:flex;align-items:baseline;padding:3px 0' }, [
+				cb,
+				E('span', {}, [ E('b', {}, name), E('span', { 'style': 'color:#888;margin-left:8px;font-size:90%' }, meta) ])
+			]);
+		}) : [ E('p', { 'style': 'color:#888;margin:4px 0' }, _('No devices seen yet (DHCP leases are empty).')) ];
+		var clBox = E('textarea', { 'class': 'cbi-input-textarea', 'style': 'width:100%;height:70px', 'placeholder': '192.168.1.50' }, (st.clients || []).join('\n'));
 
 		return E('div', { 'class': 'cbi-map vpnpool-view' }, [
 			i18n.header(_('VPN Pool — Routing')),
@@ -102,10 +129,12 @@ return view.extend({
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Per-client routing')),
 				clSel,
-				E('p', { 'style': 'color:#888;margin:6px 0' }, _('Client IPv4 addresses, one per line:')),
+				E('p', { 'style': 'color:#888;margin:6px 0 2px' }, _('Devices on the network (matched by MAC — survives IP changes):')),
+				E('div', { 'style': 'max-height:240px;overflow:auto;padding:4px 6px;border:1px solid rgba(128,128,128,.3);border-radius:6px' }, devRows),
+				E('p', { 'style': 'color:#888;margin:8px 0 2px' }, _('Extra IPv4 addresses, one per line (for static / unknown hosts):')),
 				clBox,
 				E('div', { 'style': 'margin-top:6px' }, E('button', { 'class': 'btn cbi-button cbi-button-save',
-					'click': ui.createHandlerFn(this, 'handleSaveClients', clSel, clBox) }, _('Save per-client')))
+					'click': ui.createHandlerFn(this, 'handleSaveClients', clSel, devChecks, clBox) }, _('Save per-client')))
 			])
 		]);
 	},

@@ -316,6 +316,11 @@ return view.extend({
 		var on = st.enabled && st.running;
 		var using = (st.active === 'auto' || !st.active) ? (st.auto_now || '—') : st.active;
 
+		// Auto mode = no HARD manual pick (selected_node). A preferred soft-pin (📌)
+		// biases the live target but stays in auto, so the AUTO indicator must stay lit.
+		var hardPick = (st.settings || {}).selected_node || '';
+		var preferredTag = (st.settings || {}).preferred_node || '';
+		var autoMode = !hardPick;
 		// traffic speed = delta of totals between polls
 		var t = st.traffic || {};
 		var now = Date.now(), dn = 0, up = 0;
@@ -340,7 +345,7 @@ return view.extend({
 				badge(st.mode === 'exclude' ? _('all except lists') : _('only lists'), '#1565c0')
 			]),
 			E('div', { 'style': 'margin:4px 0' }, [ E('b', {}, _('Active node') + ': '), E('span', {}, using),
-				(st.active === 'auto' || !st.active) ? E('span', { 'style': 'color:#888' }, ' (' + _('auto / urltest') + ')') : '' ])
+				autoMode ? E('span', { 'style': 'color:#888' }, ' (' + _('auto / urltest') + (preferredTag ? ' · 📌 ' + (using||'') : '') + ')') : '' ])
 		];
 
 		if (on)
@@ -416,6 +421,10 @@ return view.extend({
 
 		var activeTag = (st.active === 'auto' || !st.active) ? st.auto_now : st.active;
 		var preferredTag = (st.settings || {}).preferred_node || '';
+		// AUTO row reflects the MODE (no hard manual pick), not the live target — a
+		// preferred soft-pin keeps us in auto even though it biases the current node.
+		var hardPick = (st.settings || {}).selected_node || '';
+		var autoMode = !hardPick;
 		var members = st.auto_members || [];
 		var poolAll = (members.length === 0);
 		var inPool = function(tag) { return poolAll || members.indexOf(tag) >= 0; };
@@ -428,8 +437,8 @@ return view.extend({
 			E('th', { 'class': 'th' }, _('Speed')), E('th', { 'class': 'th' }, _('Traffic')),
 			E('th', { 'class': 'th' }, _('Actions'))
 		]);
-		var autoRow = E('tr', { 'class': 'tr', 'style': (st.active === 'auto') ? 'background:rgba(21,101,192,.12)' : '' }, [
-			E('td', { 'class': 'td' }, (st.active === 'auto') ? '★' : ''),
+		var autoRow = E('tr', { 'class': 'tr', 'style': autoMode ? 'background:rgba(21,101,192,.12)' : '' }, [
+			E('td', { 'class': 'td' }, autoMode ? '★' : ''),
 			E('td', { 'class': 'td' }, E('b', {}, _('AUTO (urltest)'))),
 			E('td', { 'class': 'td', 'style': 'color:#666' }, _('auto-ping + failover') + ' · ' + _('pool') + ': ' + poolLabel),
 			E('td', { 'class': 'td' }, ''), E('td', { 'class': 'td' }, ''), E('td', { 'class': 'td' }, ''),
