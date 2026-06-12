@@ -217,6 +217,7 @@ cleanup() {
 # USR1 = rebuild config from cache + manual nodes and hot-reload sing-box.
 # Sent by the LuCI backend after manual node / domain edits so they apply live.
 reload_config() {
+	[ "$(uci -q get vpnpool.main.lite_mode)" = "1" ] && { log "reload ignored (LITE mode: no sing-box)"; return 0; }
 	log "reload (USR1): rebuilding config + routing"
 	if "$LIBEXEC/build.sh"; then
 		start_singbox   # stops the old instance and waits for the port/lock to free
@@ -231,6 +232,7 @@ reload_config() {
 
 # USR2 = re-fetch all sources, then rebuild + hot-reload (source/subscription edits).
 refetch_config() {
+	[ "$(uci -q get vpnpool.main.lite_mode)" = "1" ] && { log "refetch ignored (LITE mode: no subscription)"; return 0; }
 	log "refetch (USR2): fetching sources"
 	"$LIBEXEC/fetch.sh"
 	reload_config
@@ -243,6 +245,29 @@ trap refetch_config USR2
 mkdir -p "$SB_DATA"
 log "vpnpoold starting (whole-LAN selective, coexist with podkop)"
 kill_singbox   # clear any orphaned sing-box left by a previously crashed daemon
+
+# ---- LITE mode -------------------------------------------------------------------
+# zapret direct DPI-bypass ONLY, no sing-box / no proxy / no subscription. Built for
+# tiny (16 MB) routers where a 44 MB sing-box barely fits in RAM: nfqws (~1.5 MB,
+# persistent in flash) self-learns and defeats DPI on a DIRECT connection. We just
+# make sure zapret is in self-learning mode and idle-supervise; USR1/USR2 are no-ops.
+if [ "$(uci -q get vpnpool.main.lite_mode)" = "1" ]; then
+	log "LITE mode: zapret direct bypass only (no sing-box / proxy)"
+	if [ -x /etc/init.d/zapret ] && uci -q get zapret.config >/dev/null 2>&1; then
+		[ "$(uci -q get vpnpool.main.smart_bypass)" = "1" ] || { uci set vpnpool.main.smart_bypass='1'; uci commit vpnpool; }
+		"$LIBEXEC/smartbypass.sh" apply >/dev/null 2>&1
+		"$LIBEXEC/smartbypass.sh" synclist >/dev/null 2>&1
+		tg_notify "🟢 vpnpool: LITE mode up (zapret direct DPI-bypass)"
+	else
+		log "LITE mode but zapret is not installed — nothing to bypass with"
+	fi
+	start_tgbot
+	while : ; do
+		sleep 30 & wait $!
+		if tgbot_enabled && ! tgbot_alive; then start_tgbot
+		elif ! tgbot_enabled && tgbot_alive; then kill_tgbot; fi
+	done
+fi
 
 # initial subscription + config, with soft retry (e.g. WAN not ready at boot) —
 # never give up, so the service self-heals once connectivity appears.

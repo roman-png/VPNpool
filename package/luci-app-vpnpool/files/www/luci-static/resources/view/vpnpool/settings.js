@@ -35,6 +35,10 @@ return view.extend({
 	handleToggleAdaptive: function(cb) { return this.save('adaptive_routing', cb.checked ? '1' : '0'); },
 	handleToggleSmart: function(cb) { return this.save('smart_bypass', cb.checked ? '1' : '0'); },
 	handleToggleThrottle: function(cb) { return this.save('anti_throttle', cb.checked ? '1' : '0'); },
+	handleToggleLite: function(cb) {
+		if (cb.checked && !confirm(_('Lite mode turns OFF the proxy/sing-box and runs only zapret direct bypass. Continue?'))) { cb.checked = false; return; }
+		return this.save('lite_mode', cb.checked ? '1' : '0');
+	},
 	// Auto-pick a working desync strategy for this ISP via blockcheck, then write it to
 	// zapret's NFQWS_OPT. This is what makes the direct bypass actually beat the DPI.
 	handleTuneZapret: function() {
@@ -162,6 +166,7 @@ return view.extend({
 		var zap = st.zapret || {};
 		var smartCb = E('input', { 'type': 'checkbox', 'checked': s.smart_bypass ? 'checked' : null, 'disabled': zap.present ? null : 'disabled' });
 		var throttleCb = E('input', { 'type': 'checkbox', 'checked': s.anti_throttle ? 'checked' : null, 'disabled': zap.present ? null : 'disabled' });
+		var liteCb = E('input', { 'type': 'checkbox', 'checked': s.lite_mode ? 'checked' : null, 'disabled': zap.present ? null : 'disabled' });
 		var autoDomInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:260px', 'placeholder': 'example.com' });
 
 		var snapEnable = E('input', { 'type': 'checkbox', 'checked': s.auto_snapshot ? 'checked' : null });
@@ -236,6 +241,8 @@ return view.extend({
 					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'disabled': zap.present ? null : 'disabled', 'click': ui.createHandlerFn(this, 'handleToggleSmart', smartCb) }, _('Save')) ]),
 				E('div', { 'style': 'margin:6px 0' }, [ E('label', {}, [ throttleCb, E('span', { 'style': 'margin-left:6px' }, _('Anti-throttle: if the proxy gets throttled to a crawl, auto-engage direct bypass')) ]),
 					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'disabled': zap.present ? null : 'disabled', 'click': ui.createHandlerFn(this, 'handleToggleThrottle', throttleCb) }, _('Save')) ]),
+				E('div', { 'style': 'margin:6px 0' }, [ E('label', {}, [ liteCb, E('span', { 'style': 'margin-left:6px' }, _('Lite mode: zapret direct bypass ONLY — no proxy/sing-box (for tiny 16 MB routers)')) ]),
+					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'disabled': zap.present ? null : 'disabled', 'click': ui.createHandlerFn(this, 'handleToggleLite', liteCb) }, _('Save')) ]),
 				zap.present
 					? E('div', {}, [
 						E('p', { 'style': 'color:#888;margin:4px 0' }, _('zapret detected (mode: %s). Self-learned domains so far: %s. Needs a separate zapret install; vpnpool only switches it to self-learning mode.').format(zap.mode || '—', String(zap.auto_count || 0))),
