@@ -79,6 +79,23 @@ status)
 		echo '{"present":false,"enabled":false,"mode":"","auto_count":0}'
 	fi
 	;;
+synclist)
+	# Render vpnpool's classifier-chosen desync domains into a MARKED block in
+	# zapret's user hostlist, preserving the user's own entries outside the markers,
+	# then reload nfqws's hostlists via SIGHUP (cheap — no nft rebuild / service bounce).
+	zapret_present || { echo '{"ok":false,"reason":"zapret not present"}'; exit 0; }
+	UH=/opt/zapret/ipset/zapret-hosts-user.txt
+	[ -f "$UH" ] || : > "$UH"
+	B="# >>> vpnpool (auto) >>>"; E="# <<< vpnpool (auto) <<<"
+	# drop any previous vpnpool block
+	sed "\|$B|,\|$E|d" "$UH" > "$UH.tmp" 2>/dev/null && mv "$UH.tmp" "$UH"
+	doms=$(uci -q get vpnpool.routing.desync_domain 2>/dev/null | tr ' ' '\n' | grep -v '^$')
+	if [ -n "$doms" ]; then
+		{ echo "$B"; printf '%s\n' "$doms"; echo "$E"; } >> "$UH"
+	fi
+	for p in $(pgrep -f /opt/zapret/nfq/nfqws 2>/dev/null); do kill -HUP "$p" 2>/dev/null; done
+	n=$(printf '%s\n' "$doms" | grep -c . 2>/dev/null); echo "{\"ok\":true,\"count\":${n:-0}}"
+	;;
 *)
-	echo "usage: $0 detect|apply|status" >&2; exit 1 ;;
+	echo "usage: $0 detect|apply|status|synclist" >&2; exit 1 ;;
 esac
