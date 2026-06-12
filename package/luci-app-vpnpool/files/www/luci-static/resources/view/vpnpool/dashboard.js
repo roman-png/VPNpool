@@ -14,6 +14,7 @@ var callSelect     = rpc.declare({ object: 'vpnpool', method: 'select',      par
 var callRefresh    = rpc.declare({ object: 'vpnpool', method: 'refresh' });
 var callPing       = rpc.declare({ object: 'vpnpool', method: 'ping' });
 var callSetAutoMembers = rpc.declare({ object: 'vpnpool', method: 'set_auto_members', params: [ 'members' ] });
+var callSetPreferred = rpc.declare({ object: 'vpnpool', method: 'set_preferred', params: [ 'tag' ] });
 var callSaveNode   = rpc.declare({ object: 'vpnpool', method: 'save_node',   params: [ 'tag' ] });
 var callUnsaveNode = rpc.declare({ object: 'vpnpool', method: 'unsave_node', params: [ 'tag' ] });
 var callActivateSaved   = rpc.declare({ object: 'vpnpool', method: 'activate_saved',   params: [ 'tag' ] });
@@ -84,6 +85,15 @@ return view.extend({
 		return callSelect(tag).then(L.bind(function() {
 			ui.addNotification(null, E('p', _('Switched to %s').format(tag)), 'info');
 			this.refresh();
+		}, this));
+	},
+	// Preferred-node soft pin straight from the dashboard (📌): stick to it while it's
+	// reachable, hand over to auto if it dies, switch back when it recovers. Toggling the
+	// already-pinned node clears it. The backend applies it live (no tunnel bounce).
+	handleSetPreferred: function(tag, isPinned) {
+		return callSetPreferred(tag).then(L.bind(function() {
+			ui.addNotification(null, E('p', isPinned ? _('Preferred node cleared (auto)') : _('Preferred node: %s').format(tag)), 'info');
+			window.setTimeout(L.bind(this.refresh, this), 1500);
 		}, this));
 	},
 	handleRefresh: function() {
@@ -405,6 +415,7 @@ return view.extend({
 		});
 
 		var activeTag = (st.active === 'auto' || !st.active) ? st.auto_now : st.active;
+		var preferredTag = (st.settings || {}).preferred_node || '';
 		var members = st.auto_members || [];
 		var poolAll = (members.length === 0);
 		var inPool = function(tag) { return poolAll || members.indexOf(tag) >= 0; };
@@ -432,6 +443,7 @@ return view.extend({
 		]);
 		var makeRow = L.bind(function(n) {
 			var act = (n.tag === activeTag);
+			var pinned = (n.tag === preferredTag);
 			var pooled = inPool(n.tag);
 			var sp = speedResults[n.tag];
 			var traf = ((n.down || 0) + (n.up || 0)) > 0 ? ('↓' + fmtBytes(n.down) + ' ↑' + fmtBytes(n.up)) : '—';
@@ -439,6 +451,7 @@ return view.extend({
 				E('td', { 'class': 'td' }, act ? '★' : ''),
 				E('td', { 'class': 'td' }, [
 					E('span', {}, n.tag),
+					pinned ? E('span', { 'style': 'margin-left:5px;font-size:12px;vertical-align:middle', 'title': _('Preferred node (soft pin with switch-back)') }, '📌') : '',
 					n.active_saved ? E('span', { 'style': 'margin-left:5px;font-size:12px;color:#1565c0;vertical-align:middle', 'title': _('A saved node you promoted into the active pool') }, '➕') : '',
 					pooled ? '' : E('span', { 'style': 'margin-left:6px;font-size:10px;color:#888;border:1px solid #888;border-radius:8px;padding:0 5px',
 						'title': _('Excluded from auto-switching (manual only)') }, _('manual')),
@@ -451,6 +464,10 @@ return view.extend({
 				E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, [
 					E('button', { 'class': 'btn cbi-button cbi-button-action',
 						'click': ui.createHandlerFn(this, 'handleSelect', n.tag) }, _('Use')),
+					' ',
+					E('button', { 'class': 'btn cbi-button' + (pinned ? ' cbi-button-positive' : ''),
+						'title': pinned ? _('Preferred node — click to unpin (back to auto)') : _('Make preferred (soft pin: used while reachable, auto-failover if it dies, switch back on recovery)'),
+						'click': ui.createHandlerFn(this, 'handleSetPreferred', n.tag, pinned) }, '📌'),
 					' ',
 					E('button', { 'class': 'btn cbi-button', 'title': n.saved ? _('Remove from saved') : _('Save node (keep after subscription expires)'),
 						'click': ui.createHandlerFn(this, n.saved ? 'handleUnsaveNode' : 'handleSaveNode', n.tag) }, n.saved ? '💾' : '⭐'),

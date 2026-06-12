@@ -25,7 +25,6 @@ return view.extend({
 	handleSaveInterval: function(inp) { return this.save('failover_interval', inp.value || '60'); },
 	handleSaveTolerance: function(inp) { return this.save('failover_tolerance', inp.value || '50'); },
 	handleToggleAuto: function(cb) { return this.save('auto_switch', cb.checked ? '1' : '0'); },
-	handleSavePreferred: function(sel) { return this.save('preferred_node', sel.value || ''); },
 	handleToggleKill: function(cb) { return this.save('killswitch', cb.checked ? '1' : '0'); },
 	handleToggleDns: function(cb) { return this.save('dns_protect', cb.checked ? '1' : '0'); },
 	handleToggleAntidpi: function(cb) { return this.save('antidpi', cb.checked ? '1' : '0'); },
@@ -103,14 +102,6 @@ return view.extend({
 		var tol = E('input', { 'type': 'number', 'min': '0', 'class': 'cbi-input-text', 'style': 'width:120px', 'value': s.failover_tolerance || 50 });
 		var auto = E('input', { 'type': 'checkbox', 'checked': (s.auto_switch !== false) ? 'checked' : null });
 
-		// preferred-node dropdown (soft pin with switch-back); "" = auto
-		var prefSel = E('select', { 'class': 'cbi-input-select', 'style': 'min-width:220px' },
-			[ E('option', { 'value': '' }, _('— auto (urltest) —')) ].concat(
-				(st.nodes || []).map(function(n) {
-					return E('option', { 'value': n.tag, 'selected': (s.preferred_node === n.tag) ? 'selected' : null }, n.tag);
-				})
-			));
-
 		var kill = E('input', { 'type': 'checkbox', 'checked': s.killswitch ? 'checked' : null });
 		var dns  = E('input', { 'type': 'checkbox', 'checked': s.dns_protect ? 'checked' : null });
 
@@ -154,11 +145,7 @@ return view.extend({
 					E('label', {}, [ auto, E('span', { 'style': 'margin-left:6px' }, _('Auto-switch to a working node (urltest)')) ]),
 					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleToggleAuto', auto) }, _('Save'))
 				]),
-				E('div', { 'style': 'margin:6px 0' }, [
-					E('b', { 'style': 'display:inline-block;width:220px' }, _('Preferred node')), prefSel,
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleSavePreferred', prefSel) }, _('Save'))
-				]),
-				E('p', { 'style': 'color:#888' }, _('Preferred node: stick to it while it is reachable, hand over to auto if it dies, switch back when it recovers.'))
+				E('p', { 'style': 'color:#888' }, _('Preferred node is now set right on the Dashboard — click 📌 on any node to pin it (used while reachable, auto-failover if it dies, switch back on recovery).'))
 			]),
 
 			E('div', { 'class': 'cbi-section' }, [
