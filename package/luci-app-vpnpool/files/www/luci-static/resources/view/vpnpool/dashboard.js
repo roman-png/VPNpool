@@ -348,6 +348,22 @@ return view.extend({
 				autoMode ? E('span', { 'style': 'color:#888' }, ' (' + _('auto / urltest') + (preferredTag ? ' · 📌 ' + (using||'') : '') + ')') : '' ])
 		];
 
+		// Smart bypass (zapret) status — shown when a zapret install is detected
+		var zap = st.zapret || {};
+		var setn = st.settings || {};
+		if (zap.present) {
+			var sbOn = !!setn.smart_bypass;
+			var dcount = (st.desync_domains || []).length;
+			kids.push(E('div', { 'style': 'margin:4px 0' }, [
+				E('b', {}, _('Smart bypass') + ': '),
+				badge(sbOn ? _('on (direct DPI bypass)') : _('off'), sbOn ? '#2e7d32' : '#888'),
+				E('span', { 'style': 'color:#888;margin-left:6px' }, 'zapret · ' + (zap.mode || '—') +
+					' · ' + _('self-learned: %s').format(String(zap.auto_count || 0)) +
+					(dcount ? ' · ' + _('direct: %s').format(String(dcount)) : '')),
+				setn.anti_throttle ? badge(_('anti-throttle'), '#1565c0') : ''
+			]));
+		}
+
 		if (on)
 			kids.push(E('div', { 'style': 'margin:4px 0' }, [
 				E('b', {}, _('Traffic') + ': '),
