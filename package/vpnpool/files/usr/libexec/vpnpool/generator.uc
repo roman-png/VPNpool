@@ -125,6 +125,26 @@ if (alive_raw) {
 	}
 }
 
+// Node-quality filter (nodecheck.sh writes .dead_tags.json): drop nodes that the
+// e2e probe found unable to reach ANY real endpoint for a sustained run — they TCP-
+// ping (and may even pass the single cp.cloudflare urltest probe) but carry no real
+// traffic (expired-sub placeholders, over-quota / service-blocked exits). They stay
+// in node_tags (manually selectable) but leave the auto/urltest pool. Never empty it.
+let dead_raw = (opt('main', 'dead_filter', '1') != '0') ? readfile('/tmp/vpnpool/.dead_tags.json') : null;
+if (dead_raw) {
+	let dead = json(dead_raw);
+	if (type(dead) == 'array' && length(dead)) {
+		let dead_set = {};
+		for (let t in dead)
+			dead_set[t] = 1;
+		let kept = [];
+		for (let t in auto_tags)
+			if (!dead_set[t]) push(kept, t);
+		if (length(kept))
+			auto_tags = kept;
+	}
+}
+
 // ---- outbounds ----
 let outbounds = [];
 
@@ -216,21 +236,6 @@ for (let d in auto_domains)
 	if (length(d)) push(auto_dom_clean, d);
 if (adaptive == '1' && length(auto_dom_clean))
 	push(rules, { domain_suffix: auto_dom_clean, outbound: 'proxy' });
-
-// Smart bypass: domains the classifier proved are fixed by a DIRECT zapret desync
-// go DIRECT explicitly (an installed zapret/nfqws defeats the DPI on the wire), in
-// BOTH selective and exclude modes — so the proxy never grabs them and they survive
-// proxy throttling. Hardcoded 'direct' (not the mode's listed outbound) keeps them
-// direct even in exclude mode, where the catch-all final is 'proxy'.
-let smart_bypass = opt('main', 'smart_bypass', '0');
-let desync_domains = uci.get('vpnpool', 'routing', 'desync_domain') ?? [];
-if (type(desync_domains) != 'array')
-	desync_domains = [desync_domains];
-let desync_clean = [];
-for (let d in desync_domains)
-	if (length(d)) push(desync_clean, d);
-if (smart_bypass == '1' && length(desync_clean))
-	push(rules, { domain_suffix: desync_clean, outbound: 'direct' });
 
 let route = {
 	rules: rules,

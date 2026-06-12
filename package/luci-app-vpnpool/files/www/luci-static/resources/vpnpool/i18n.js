@@ -183,6 +183,50 @@ var DICT = {
 		'No shareable link for this node.': 'Для этого узла нет ссылки для шеринга.',
 		'Scan the QR with your phone VPN app, or copy the link.': 'Отсканируйте QR в VPN-приложении на телефоне или скопируйте ссылку.',
 		'Copy link': 'Копировать ссылку', 'Close': 'Закрыть',
+		// --- node selection / bulk actions / import / delete (added this session) ---
+		'Select for bulk actions': 'Выбрать для массовых действий',
+		'Selected': 'Выбрано', 'Clear': 'Снять', 'Clear selection': 'Снять выделение',
+		'Delete': 'Удалить',
+		'Speed test the selected node': 'Тест скорости выбранного узла',
+		'Unblock-test the selected node': 'Тест разблокировки выбранного узла',
+		'Deactivate selected (remove from active pool, keep saved)': 'Деактивировать выбранные (убрать из активного пула, оставить сохранёнными)',
+		'Delete the selected nodes': 'Удалить выбранные узлы',
+		'Select node(s) with the checkboxes first.': 'Сначала отметьте узлы галочками.',
+		'Select node(s) first.': 'Сначала выберите узлы.',
+		'Select exactly one node for the speed test.': 'Выберите ровно один узел для теста скорости.',
+		'Select exactly one node for the unblock test.': 'Выберите ровно один узел для теста разблокировки.',
+		'Delete %d selected node(s)? Subscription nodes are hidden until you delete the subscription; manual/imported/saved are removed permanently.':
+			'Удалить выбранные узлы (%d)? Узлы подписки скрываются до удаления подписки; ручные/импортированные/сохранённые удаляются навсегда.',
+		'Deleted %d node(s).': 'Удалено узлов: %d', 'Deactivated %d node(s).': 'Деактивировано узлов: %d',
+		'Delete node "%s"? A subscription node is hidden until you delete the subscription; a manual/imported/saved node is removed permanently.':
+			'Удалить узел «%s»? Узел подписки скрывается до удаления подписки; ручной/импортированный/сохранённый удаляется навсегда.',
+		'Node deleted: %s': 'Узел удалён: %s', 'Could not delete node: %s': 'Не удалось удалить узел: %s',
+		'Import nodes': 'Импорт узлов',
+		'Paste node links (one per line) or a whole base64 subscription, or load a .txt file. New links are added to your manual nodes.':
+			'Вставьте ссылки на узлы (по одной в строке) или целую base64-подписку, либо загрузите файл .txt. Новые ссылки добавятся в ручные узлы.',
+		'or a base64 subscription': 'или base64-подписка', 'Load file…': 'Загрузить файл…',
+		'Could not read the file.': 'Не удалось прочитать файл.',
+		'Paste links or load a file first.': 'Сначала вставьте ссылки или загрузите файл.',
+		'Imported %d new node(s) (manual list: %d).': 'Импортировано новых узлов: %d (ручной список: %d).',
+		'Import failed': 'Импорт не удался',
+		// --- saved-nodes section + bulk import (Sources page) ---
+		'Saved nodes': 'Сохранённые узлы', 'Activate': 'Активировать', 'Deactivate': 'Деактивировать',
+		'active': 'активен', 'idle': 'простаивает',
+		'A persistent archive separate from manual nodes. Star nodes on the dashboard to save them; they survive subscription expiry. ACTIVE = in the live pool, IDLE = kept for later. Deleting the subscription auto-activates all of them so you stay connected.':
+			'Постоянный архив отдельно от ручных узлов. Отмечайте узлы ⭐ на дашборде, чтобы сохранить — они переживают окончание подписки. ACTIVE = в живом пуле, IDLE = про запас. Удаление подписки авто-активирует их все, чтобы связь не пропала.',
+		'(no saved nodes yet — star nodes on the dashboard; they also land here automatically when you delete the subscription)':
+			'(пока нет сохранённых — отмечайте ⭐ на дашборде; они также попадут сюда при удалении подписки)',
+		'Activating saved node…': 'Активирую сохранённый узел…', 'Saved node activated.': 'Сохранённый узел активирован.',
+		'Saved node deactivated.': 'Сохранённый узел деактивирован.', 'Saved node removed.': 'Сохранённый узел удалён.',
+		'Remove this node from the saved archive?': 'Удалить этот узел из архива сохранённых?',
+		'Bulk import': 'Массовый импорт',
+		'Paste many node links (one per line) or a whole base64 subscription, or load them from a file. New links are added to the manual list above.':
+			'Вставьте много ссылок (по одной в строке) или целую base64-подписку, либо загрузите из файла. Новые ссылки добавятся в ручной список выше.',
+		'File loaded — review and press Import.': 'Файл загружен — проверьте и нажмите Импорт.',
+		'Importing nodes…': 'Импортирую узлы…', 'Paste node links (or load a file) first.': 'Сначала вставьте ссылки (или загрузите файл).',
+		'Delete the subscription? All saved nodes will be auto-activated so you stay connected.':
+			'Удалить подписку? Все сохранённые узлы будут авто-активированы, чтобы связь не пропала.',
+		'Subscription deleted — %d saved node(s) kept active.': 'Подписка удалена — сохранённых узлов оставлено активными: %d.',
 		'Export': 'Экспорт', 'Export nodes as subscription': 'Экспорт узлов как подписки',
 		'Pick which nodes to export. You get the raw vless:// links and a base64 subscription you can import elsewhere.':
 			'Выберите узлы для экспорта. Получите готовые vless://-ссылки и base64-подписку для импорта в другом месте.',
