@@ -94,9 +94,10 @@ up)
 "
 	fi
 
-	ip route replace local 0.0.0.0/0 dev lo table "$RT_TABLE"
-	ip rule add fwmark "${FWMARK}/${FWMARK}" lookup "$RT_TABLE" priority "$RT_PRIO" 2>/dev/null
-	nft -f - <<NFT
+	# Clean slate so `up` is idempotent: a table left by a crashed daemon would otherwise
+	# make the re-declaration fail ("chain already exists") and leave routing half-applied.
+	nft delete table inet vpnpool 2>/dev/null
+	if ! nft -f - <<NFT
 table inet vpnpool {
 	set localv4 {
 		type ipv4_addr
@@ -115,6 +116,13 @@ ${EXTRA_MARK}		meta mark & $FWMARK == $FWMARK meta l4proto tcp tproxy ip to 127.
 	}
 }
 NFT
+	then
+		log "route.sh: nft failed to apply routing table — VPN routing is NOT active"
+		nft delete table inet vpnpool 2>/dev/null
+		exit 1
+	fi
+	ip route replace local 0.0.0.0/0 dev lo table "$RT_TABLE"
+	ip rule add fwmark "${FWMARK}/${FWMARK}" lookup "$RT_TABLE" priority "$RT_PRIO" 2>/dev/null
 
 	# IPv6 leak guard (fail-closed): drop LAN IPv6 to the internet so v6 traffic
 	# can't bypass the v4 VPN. Local/ULA/link-local v6 stays allowed.
@@ -133,6 +141,7 @@ table inet vpnpool {
 	}
 }
 NFT6
+		[ $? -eq 0 ] || log "route.sh: nft failed to apply IPv6 leak guard"
 	fi
 	;;
 down)

@@ -1,18 +1,20 @@
 #!/bin/sh
-# vpnpool node-quality e2e filter ("dead but pingable" auto-removal).
+# vpnpool node-quality e2e filter — THE single node-quality check ("dead but pingable"
+# auto-removal, now service-accurate).
 #
-# The TCP-connect prefilter (build.sh) and the single cp.cloudflare urltest probe
-# both pass on nodes that DON'T actually carry traffic: expired-subscription
-# placeholder nodes, over-quota exits, exits blocked from the services the user
-# needs. Empirically (2026-06-12) a node can also fail ONE provider (Cloudflare)
-# yet serve Google/YouTube perfectly — so a single-URL probe wrongly condemns a
-# good node. This filter probes every node through the clash delay API (per
-# outbound — it does NOT switch the active selector) against a DIVERSE set of
-# generate_204 endpoints and flags a node only when it reaches NONE of them for a
-# sustained run of checks. Flagged tags go to .dead_tags.json, which generator.uc
-# drops from the auto/urltest pool (they stay MANUALLY selectable). A node recovers
-# the moment it passes again. On a change of the dead set we signal the daemon
-# (USR1) to rebuild so the pool updates.
+# The TCP-connect prefilter (build.sh) only proves a node answers on its port; the old
+# generic generate_204 probes only proved it reaches some CDN. Neither proves the node
+# opens the service the USER actually wants — so over-quota / geo-blocked exits (TCP-alive,
+# Cloudflare-reachable, YouTube-dead) stayed in the pool and the tunnel kept settling on
+# them ("pings but the service is dead"). This filter is now the authoritative quality
+# gate: it probes every node through the clash delay API (per outbound — it does NOT switch
+# the active selector) against the user-configured services (check_probe_urls in lib.sh)
+# and keeps a node only if it reaches EVERY one of them. The SAME service set drives the
+# generator's urltest "url" (active pick + failover) and the watchdog, so the whole stack
+# agrees on what "working" means. Failing tags go to .dead_tags.json, which generator.uc
+# drops from the auto/urltest pool (they stay MANUALLY selectable). A node recovers the
+# moment it passes again. On a change of the dead set we signal the daemon (USR1) to
+# rebuild so the pool updates.
 #
 # Safety mirrors the watchdog's hard-won tuning: a node must fail STRIKES cycles in
 # a row (not one flap) before it is dropped, and the pool is never emptied.
@@ -30,22 +32,44 @@ mkdir -p /tmp/vpnpool
 # Single-flight guard: this sweep is triggered BOTH from the dashboard ping and from
 # the daemon's periodic hook — never run two concurrently (double clash-API load).
 LOCK=/tmp/vpnpool/.nodecheck-running
+clear_stale_lock "$LOCK" 600   # drop a lock left by a SIGKILLed run (else we'd never run again)
 [ -f "$LOCK" ] && exit 0
 : > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT INT TERM
 
-# Diverse probe set: one provider's block must not condemn a node (the USA node
-# fails Cloudflare but serves Google/YouTube). Configurable via uci.
-URLS=$(uci -q get vpnpool.main.dead_filter_urls)
-[ -n "$URLS" ] || URLS="http://cp.cloudflare.com/generate_204 http://www.google.com/generate_204 http://www.youtube.com/generate_204 http://connectivitycheck.gstatic.com/generate_204"
+# Service-accuracy probe set (the SINGLE node-quality criterion): the user-configured
+# services the VPN must actually open through a node — see check_probe_urls in lib.sh. A
+# node is healthy ONLY if it reaches EVERY one of them (strict). This is the whole fix for
+# "the node pings but the service is dead": a node that opens Cloudflare but NOT the wanted
+# service (over-quota / geo-blocked exit) used to survive the old MINPASS=1 (reach ANY one)
+# logic and stay active. Now it's demoted from the auto/urltest pool.
+URLS=$(check_probe_urls)
+NURLS=$(printf '%s\n' "$URLS" | grep -c .)
+[ "${NURLS:-0}" -ge 1 ] || exit 0
 STRIKES=$(uci -q get vpnpool.main.dead_filter_strikes); case "$STRIKES" in (''|*[!0-9]*) STRIKES=3 ;; esac
-MINPASS=$(uci -q get vpnpool.main.dead_filter_minpass); case "$MINPASS" in (''|*[!0-9]*) MINPASS=1 ;; esac
 
 TAB=$(printf '\t')
 [ -f "$STRK" ] || : > "$STRK"
 tmpd=/tmp/vpnpool/.nc; rm -rf "$tmpd"; mkdir -p "$tmpd"
 newstrk="$tmpd/strikes.new"; : > "$newstrk"
 deadlist="$tmpd/dead.txt"; : > "$deadlist"
+
+# Force-kept nodes (dashboard "Вернуть в авто" -> uci list keep_auto): the user's manual
+# override of this filter. Skip them entirely — never probe, strike or flag — so a node the
+# user pulled back can't re-enter the dead set. Tags can contain spaces, so read the list
+# with config_list_foreach (a uci-get + tr split would shred them).
+KEEP="$tmpd/keep"; : > "$KEEP"
+# Read keep_auto in a SUBSHELL. /lib/functions.sh defines N as a newline char, which
+# would clobber OUR $N (the nodes.json path) — sourcing it inline once broke the probe
+# loop entirely (`jq -r '.[].tag' "$N"` got a newline as its filename → 0 nodes → every
+# sweep was a no-op). The subshell isolates that (and any other) side effect; KEEP is a
+# file, so the writes survive the subshell.
+(
+	. /lib/functions.sh 2>/dev/null
+	__kp_add() { printf '%s\n' "$1" >> "$KEEP"; }
+	config_load vpnpool 2>/dev/null
+	config_list_foreach main keep_auto __kp_add 2>/dev/null
+)
 
 # Pre-encode the probe URLs ONCE into positional params (no jq per probe).
 set --
@@ -58,6 +82,7 @@ for u in $URLS; do set -- "$@" "$(jq -rn --arg s "$u" '$s|@uri')"; done
 # ({"delay":N}) instead of spawning jq per probe.
 jq -r '.[].tag' "$N" 2>/dev/null | while IFS= read -r t; do
 	[ -n "$t" ] || continue
+	grep -Fxq "$t" "$KEEP" 2>/dev/null && continue   # user force-kept -> exempt from filter
 	enc=$(jq -rn --arg s "$t" '$s|@uri')
 	pass=0
 	for eu in "$@"; do
@@ -65,7 +90,8 @@ jq -r '.[].tag' "$N" 2>/dev/null | while IFS= read -r t; do
 		case "$r" in *'"delay"'*) pass=$((pass + 1)) ;; esac
 	done
 	prev=$(awk -F"$TAB" -v k="$t" '$1==k{print $2; exit}' "$STRK" 2>/dev/null); case "$prev" in (''|*[!0-9]*) prev=0 ;; esac
-	if [ "$pass" -ge "$MINPASS" ]; then cur=0; else cur=$((prev + 1)); fi
+	# strict: a node must reach EVERY configured service to count as healthy this cycle
+	if [ "$pass" -ge "$NURLS" ]; then cur=0; else cur=$((prev + 1)); fi
 	printf '%s%s%s\n' "$t" "$TAB" "$cur" >> "$newstrk"
 	[ "$cur" -ge "$STRIKES" ] && printf '%s\n' "$t" >> "$deadlist"
 done
@@ -79,7 +105,7 @@ rm -rf "$tmpd"
 if [ "$old" != "$new" ]; then
 	log "nodecheck: dead set changed -> $new"
 	if [ "${NODECHECK_DRYRUN:-0}" != "1" ]; then
-		kill -USR1 "$(cat /var/run/vpnpool.pid 2>/dev/null)" 2>/dev/null
+		signal_daemon USR1
 	fi
 fi
 exit 0

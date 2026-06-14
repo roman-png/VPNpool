@@ -9,6 +9,27 @@ SB_DATA=/tmp/vpnpool
 
 log() { logger -t "$NAME" "$1"; }
 
+# Remove a single-flight lock file if it is older than MAXAGE seconds. Call BEFORE honoring
+# a lock so a run killed by SIGKILL (e.g. OOM on a 16 MB router) — whose EXIT trap never
+# fired — can't block every future run forever. No-op if the lock is fresh or absent.
+clear_stale_lock() {   # $1=lockfile  $2=maxage_seconds (default 600)
+	[ -f "$1" ] || return 0
+	local now lk
+	now=$(date +%s); lk=$(date -r "$1" +%s 2>/dev/null || echo 0)
+	[ $(( now - lk )) -ge "${2:-600}" ] && rm -f "$1"
+	return 0
+}
+
+# Send a signal to the vpnpool daemon, but ONLY if the PID in the pidfile is really our
+# daemon — a stale pidfile (daemon crashed/restarted) could otherwise point at an unrelated
+# process and we'd signal the wrong one.
+signal_daemon() {   # $1=signal name, e.g. USR1
+	local p
+	p=$(cat /var/run/vpnpool.pid 2>/dev/null); [ -n "$p" ] || return 1
+	pgrep -f /usr/libexec/vpnpool/vpnpoold 2>/dev/null | grep -qx "$p" || return 1
+	kill -"$1" "$p" 2>/dev/null
+}
+
 # Telegram API base + transport. In RU, api.telegram.org is blocked, so by default
 # we tunnel Telegram traffic through OUR sing-box mixed inbound on 127.0.0.1:<test_port>
 # (which egresses via the "proxy" outbound). Falls back to a DIRECT request if the
@@ -111,7 +132,9 @@ CLASH_API=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH_API" ] || CLASH_API
 COEXIST=$(uci -q get vpnpool.main.coexist); [ -n "$COEXIST" ] || COEXIST=auto
 # IPv6 policy: block (fail-closed: drop LAN v6 to internet so it can't bypass the
 # v4 VPN), off (don't touch v6), proxy (reserved for future v6 tproxy).
-IPV6=$(uci -q get vpnpool.main.ipv6); [ -n "$IPV6" ] || IPV6=block
+# Validate, don't just default: an unknown/typo value (e.g. ipv6=blok) must not silently
+# disable the leak guard — fall back to the safe 'block'.
+IPV6=$(uci -q get vpnpool.main.ipv6); case "$IPV6" in block|off|proxy) ;; *) IPV6=block ;; esac
 # Kill-switch (fail-closed for IPv4): when on, in full-tunnel ("exclude") mode mark
 # ALL LAN ports for tproxy so nothing can leak past the VPN if sing-box is down
 # (marked traffic routes to the lo blackhole table when no listener answers).
@@ -133,6 +156,31 @@ if [ -z "$LAN_IF" ]; then
 	[ -n "$LAN_IF" ] || LAN_IF=$(uci -q get network.lan.device 2>/dev/null)
 	[ -n "$LAN_IF" ] || LAN_IF=br-lan
 fi
+
+# ---- service-accuracy probe set ----
+# THE single source of truth for "is a node good": the user-configured services the VPN
+# must actually make work THROUGH a node (often the blocked ones). Emits one normalised
+# probe URL per line — a bare host becomes http://<host>/generate_204 (tiny response, just
+# measures whether the host is reachable through the node), a full URL is used verbatim.
+# Every node-quality check reads this: the nodecheck.sh dead-filter, the generator's
+# urltest "url" (active-node pick + failover) and the daemon's self-heal watchdog. Falls
+# back to health_url then YouTube so the list is never empty (existing routers without the
+# new option keep their old health_url behaviour until the user sets services in the UI).
+check_probe_urls() {
+	local svc s
+	svc=$(uci -q get vpnpool.main.check_services)
+	if [ -z "$svc" ]; then
+		svc=$(uci -q get vpnpool.main.health_url)
+		[ -n "$svc" ] || svc="www.youtube.com"
+	fi
+	for s in $svc; do
+		[ -n "$s" ] || continue
+		case "$s" in
+			*://*) printf '%s\n' "$s" ;;
+			*)     printf 'http://%s/generate_204\n' "$s" ;;
+		esac
+	done
+}
 
 # subscription_interval like "6h" / "30m" / "900s" -> seconds
 interval_seconds() {

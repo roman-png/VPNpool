@@ -188,8 +188,13 @@ CLDEV=$(uci -q get vpnpool.main.client_dev | tr ' ' '\n' | jq -R . | jq -s 'map(
 ANTIDPI=$(uci -q get vpnpool.main.antidpi); [ -n "$ANTIDPI" ] || ANTIDPI=0
 ADAPT=$(uci -q get vpnpool.main.adaptive_routing); [ -n "$ADAPT" ] || ADAPT=0
 DEADF=$(uci -q get vpnpool.main.dead_filter); [ -n "$DEADF" ] || DEADF=1
+DFSTR=$(uci -q get vpnpool.main.dead_filter_strikes); case "$DFSTR" in (*[!0-9]*|"") DFSTR=3 ;; esac
+# Service-accuracy check targets (raw uci string; the UI shows one per line).
+CHKSVC=$(uci -q get vpnpool.main.check_services)
 # Tags the dead-node filter currently demoted from the auto pool (read-only display).
 DEADTAGS=$(cat /tmp/vpnpool/.dead_tags.json 2>/dev/null); case "$DEADTAGS" in (\[*) : ;; (*) DEADTAGS='[]' ;; esac
+# Tags the user force-kept in auto (manual override of the dead-filter).
+KEPT=$(uci_list_json main keep_auto); [ -n "$KEPT" ] || KEPT='[]'
 ASNAP=$(uci -q get vpnpool.main.auto_snapshot); [ -n "$ASNAP" ] || ASNAP=0
 ASNAPMAX=$(uci -q get vpnpool.main.auto_snapshot_max); case "$ASNAPMAX" in (*[!0-9]*|"") ASNAPMAX=20 ;; esac
 SCHED_EN=$(uci -q get vpnpool.main.sched_enabled); [ -n "$SCHED_EN" ] || SCHED_EN=0
@@ -218,7 +223,10 @@ jq -n \
 	--argjson antidpi "${ANTIDPI:-0}" \
 	--argjson adapt "${ADAPT:-0}" \
 	--argjson deadf "${DEADF:-1}" \
+	--arg dfstr "$DFSTR" \
+	--arg chksvc "$CHKSVC" \
 	--argjson deadtags "$DEADTAGS" \
+	--argjson kepttags "$KEPT" \
 	--argjson communities "$COMMUNITIES" \
 	--arg fi "$FI" \
 	--arg si "$SI" \
@@ -262,6 +270,7 @@ jq -n \
 		nodes: ($nodes[0] // []),
 			saved_inactive: $savedinactive,
 			dead_nodes: $deadtags,
+			kept_nodes: $kepttags,
 		auto_members: $automem,
 		traffic: { up_total: $tup, down_total: $tdown, connections: $tconn },
 		client_traffic: ($ct[0] // []),
@@ -292,6 +301,8 @@ jq -n \
 			antidpi: ($antidpi==1),
 			adaptive_routing: ($adapt==1),
 			dead_filter: ($deadf==1),
+			dead_filter_strikes: ($dfstr|tonumber? // 3),
+			check_services: $chksvc,
 			sched_enabled: ($schen==1),
 			sched_on: $schon,
 			sched_off: $schoff,

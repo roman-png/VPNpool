@@ -23,11 +23,12 @@ var COMMUNITIES = [
 
 return view.extend({
 	notify: function(msg) { ui.addNotification(null, E('p', msg), 'info'); },
+	saveErr: function(e) { ui.addNotification(null, E('p', _('Save failed: %s').format(e)), 'error'); },
 
 	handleSaveMode: function(sel) {
 		return callSetOpt('mode', sel.value).then(L.bind(function() {
 			this.notify(_('Routing mode saved and applied.'));
-		}, this));
+		}, this)).catch(L.bind(this.saveErr, this));
 	},
 	handleSaveCommunities: function() {
 		var chosen = COMMUNITIES.filter(function(c) {
@@ -36,17 +37,17 @@ return view.extend({
 		});
 		return callSetCommunities(chosen).then(L.bind(function() {
 			this.notify(_('Community lists saved and applied.'));
-		}, this));
+		}, this)).catch(L.bind(this.saveErr, this));
 	},
 	handleSaveDomains: function(box) {
 		var list = (box.value || '').split(/\r?\n/).map(function(s) { return s.trim(); }).filter(function(s) { return s.length; });
-		return callSetDomains(list).then(L.bind(function() { this.notify(_('Domains saved and applied.')); }, this));
+		return callSetDomains(list).then(L.bind(function() { this.notify(_('Domains saved and applied.')); }, this)).catch(L.bind(this.saveErr, this));
 	},
 	handleSaveClients: function(sel, devChecks, box) {
 		// MAC profiles from the device picker + any raw IPs typed manually.
 		var devices = (devChecks || []).filter(function(d) { return d.el.checked; }).map(function(d) { return d.mac; });
 		var ips = (box.value || '').split(/\r?\n/).map(function(s) { return s.trim(); }).filter(function(s) { return s.length; });
-		return callSetClients(sel.value, ips, devices).then(L.bind(function() { this.notify(_('Per-client routing saved and applied.')); }, this));
+		return callSetClients(sel.value, ips, devices).then(L.bind(function() { this.notify(_('Per-client routing saved and applied.')); }, this)).catch(L.bind(this.saveErr, this));
 	},
 
 	load: function() { return Promise.all([ callStatus(), callLeases().catch(function() { return {}; }) ]); },

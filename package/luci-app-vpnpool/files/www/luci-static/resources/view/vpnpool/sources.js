@@ -70,7 +70,18 @@ return view.extend({
 	},
 	handleAddExtraSub: function(inp) {
 		var v = (inp.value || '').trim(); if (!v) { ui.addNotification(null, E('p', _('Enter a subscription URL first.')), 'warning'); return; }
-		return callAddExtraSub(v).then(L.bind(function() { inp.value = ''; this.notify(_('Extra subscription added — fetching…')); this.reload(); }, this));
+		var self = this;
+		return callAddExtraSub(v).then(function(r) {
+			inp.value = '';
+			var n = (r && r.fetched != null) ? r.fetched : 0;
+			if (n > 0)
+				ui.addNotification(null, E('p', _('Extra subscription added — %d node(s) fetched.').format(n)), 'info');
+			else
+				ui.addNotification(null, E('p', _('Extra subscription added, but NO nodes were fetched (HTTP %s). Is the URL reachable from the router? Check the port/firewall on the server.').format((r && r.http) || '000')), 'warning');
+			self.reload();
+		}).catch(function(e) {
+			ui.addNotification(null, E('p', _('Could not add subscription: %s').format(e)), 'error');
+		});
 	},
 	handleDelExtraSub: function(u) { return callDelExtraSub(u).then(L.bind(function() { this.notify(_('Extra subscription removed.')); this.reload(); }, this)); },
 

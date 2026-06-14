@@ -93,6 +93,16 @@ fi
 log "fetch: all sources failed, trying cache"
 if [ -d "$CACHEDIR" ]; then
 	rm -rf "$SRCDIR"; cp -a "$CACHEDIR" "$SRCDIR"
+	# Warn (log + Telegram) when serving a STALE cache: nodes may be long dead and the
+	# subscription likely expired, but we keep the tunnel up on the last-known set. Without
+	# this the user has no signal that they're running on a frozen, possibly-dead snapshot.
+	age_days=0
+	mt=$(date -r "$CACHEDIR" +%s 2>/dev/null); now=$(date +%s)
+	[ -n "$mt" ] && age_days=$(( (now - mt) / 86400 ))
+	if [ "$age_days" -ge 3 ]; then
+		log "fetch: serving CACHED sources (~${age_days}d old) — subscription unreachable, nodes may be dead"
+		tg_notify "⚠️ vpnpool: подписка недоступна, работаю на кэше (~${age_days} дн.) — узлы могут быть мертвы"
+	fi
 	exit 0
 fi
 exit 1

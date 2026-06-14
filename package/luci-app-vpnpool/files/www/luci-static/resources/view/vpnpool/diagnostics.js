@@ -29,6 +29,8 @@ return view.extend({
 				ui.addNotification(null, E('p', _('VPN exit: %s  (IP %s)').format(r.country || '?', r.ip || '?')), 'info');
 			else
 				ui.addNotification(null, E('p', _('VPN exit test failed — is the service running?')), 'warning');
+		}).catch(function() {
+			ui.addNotification(null, E('p', _('VPN exit test failed — is the service running?')), 'warning');
 		});
 	},
 

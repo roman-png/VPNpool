@@ -91,17 +91,25 @@ fi
 # a dead/blocked server never connects (time_connect==0) so it is excluded.
 ALIVE="$SB_DATA/.alive_tags.json"
 health_prefilter() {
-	local tmpd TAB ct idx srv port
+	local tmpd TAB ct idx srv port batch n
 	TAB=$(printf '\t')
 	tmpd="$SB_DATA/.hp"; rm -rf "$tmpd"; mkdir -p "$tmpd"
 	jq -r 'to_entries[] | "\(.key)\t\(.value.server)\t\(.value.server_port)"' "$NODES" 2>/dev/null > "$tmpd/list"
-	# one backgrounded TCP probe per node (current shell, so `wait` reaps them)
+	# BATCHED backgrounded TCP probes. Spawning one curl per node with NO cap meant a
+	# subscription of hundreds of nodes forked hundreds of curls at once — a process/socket/
+	# memory burst that can OOM-kill sing-box on a 16 MB router (same hazard that made
+	# nodecheck.sh sequential). Drain every $batch spawns so at most $batch run concurrently.
+	batch=$(uci -q get vpnpool.main.prefilter_concurrency); case "$batch" in (''|*[!0-9]*) batch=16 ;; esac
+	[ "$batch" -ge 1 ] || batch=16
+	n=0
 	while IFS="$TAB" read -r idx srv port; do
 		[ -n "$srv" ] && [ -n "$port" ] || continue
 		(
 			ct=$(curl -s -o /dev/null --connect-timeout 3 -m 4 -w '%{time_connect}' "https://$srv:$port/" 2>/dev/null)
 			[ "$(awk -v t="$ct" 'BEGIN{print (t+0>0)?1:0}')" = 1 ] && : > "$tmpd/a_$idx"
 		) &
+		n=$((n + 1))
+		[ $(( n % batch )) -eq 0 ] && wait
 	done < "$tmpd/list"
 	wait
 	# collect reachable indexes -> their tags
@@ -136,7 +144,7 @@ dropped=0; tries=0
 while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 	tries=$((tries + 1))
 	if [ "$tries" -gt 50 ]; then
-		log "build: >50 bad outbounds, giving up; keeping previous config"
+		log "build: >50 bad outbounds (dropped $dropped so far), giving up; keeping previous config — check subscription source quality"
 		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; rm -f "$SB_CONF.new"; exit 1
 	fi
 	idx=$(grep -oE 'outbound\[[0-9]+\]' "$SB_DATA/check.err" | head -1 | grep -oE '[0-9]+')

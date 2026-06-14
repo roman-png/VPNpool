@@ -29,6 +29,22 @@ function opt(section, name, def) {
 let tproxy_port = int(opt('main', 'tproxy_port', 1603));
 let clash_api   = opt('main', 'clash_api', '127.0.0.1:9091');
 let health_url  = opt('main', 'health_url', 'http://cp.cloudflare.com/generate_204');
+
+// urltest active-node pick + failover key on the SAME service the dead-filter / watchdog
+// verify (check_services in uci), so the tunnel never settles on a node that opens
+// Cloudflare but not the wanted service. We probe the host's /generate_204 (tiny response)
+// — urltest only measures whether the request completes (any HTTP response = reachable; a
+// blocked/over-quota exit can't connect and is excluded), and it never empties the pool
+// (falls back to the first outbound), so keying it on a real service is safe. A bare host
+// becomes http://<host>/generate_204; a full URL is used verbatim; empty => health_url.
+let check_services = opt('main', 'check_services', '');
+let probe_url = health_url;
+if (length(check_services)) {
+	let parts = split(trim(check_services), /[ \t\r\n]+/);
+	let first = length(parts) ? parts[0] : null;
+	if (first)
+		probe_url = (index(first, '://') >= 0) ? first : ('http://' + first + '/generate_204');
+}
 let fo_interval = opt('main', 'failover_interval', '60');
 let fo_tol      = int(opt('main', 'failover_tolerance', 50));
 let log_level   = opt('main', 'log_level', 'warn');
@@ -71,6 +87,9 @@ for (let c in communities) {
 		tag: tag,
 		format: 'binary',
 		url: SRS_BASE + '/' + c + '.srs',
+		// download_detour is DEPRECATED (replacement http_client, added in sing-box 1.14)
+		// and scheduled for REMOVAL in 1.16. Works on the targeted >=1.12. TODO: before
+		// moving to sing-box 1.16, switch to http_client (verify schema on that build).
 		download_detour: 'direct',
 		update_interval: '24h'
 	});
@@ -153,7 +172,7 @@ push(outbounds, {
 	type: 'urltest',
 	tag: 'auto',
 	outbounds: auto_tags,
-	url: health_url,
+	url: probe_url,
 	interval: fo_interval + 's',
 	tolerance: fo_tol,
 	interrupt_exist_connections: true
