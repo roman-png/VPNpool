@@ -5,19 +5,59 @@
 CLASH=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH" ] || CLASH=127.0.0.1:9091
 
 # Tell the running daemon to rebuild config + hot-reload sing-box (manual/domain edits).
+# signal_daemon (lib.sh) verifies the pidfile PID is really vpnpoold before signalling.
 signal_reload() {
-	kill -USR1 "$(cat /var/run/vpnpool.pid 2>/dev/null)" 2>/dev/null
+	signal_daemon USR1
 }
 
 # Tell the running daemon to re-fetch all sources, then rebuild (source/url edits).
 signal_refetch() {
-	kill -USR2 "$(cat /var/run/vpnpool.pid 2>/dev/null)" 2>/dev/null
+	signal_daemon USR2
+}
+
+# Remove ONE node by tag: resolve its link, drop it from whichever list owns it, prune the
+# saved/snapshot maps, and (for a pure subscription node) add its link to excluded_node so a
+# refetch can't bring it back. STAGES uci changes only — the caller must rebuild_saved_list
+# (which commits) and signal_reload. Lets delete_node (one) and delete_nodes (bulk) share the
+# logic so a bulk delete does ONE rebuild+reload instead of N sing-box restarts. Returns 1 if
+# the tag has no resolvable link.
+_delete_one_tag() {   # $1=tag
+	local tag="$1" link="" removed=0 LINKS=/etc/vpnpool/links.json MAP
+	[ -n "$tag" ] || return 1
+	[ -f "$LINKS" ] && link=$(jq -r --arg t "$tag" 'map(select(.tag==$t)) | .[0].link // ""' "$LINKS" 2>/dev/null)
+	[ -n "$link" ] || link=$(saved_link_for_tag "$tag")
+	[ -n "$link" ] || return 1
+	if uci -q get vpnpool.main.manual_node | tr ' ' '\n' | grep -Fxq "$link"; then
+		uci del_list vpnpool.main.manual_node="$link"; removed=1
+	fi
+	if uci -q get vpnpool.main.imported_node | tr ' ' '\n' | grep -Fxq "$link"; then
+		uci del_list vpnpool.main.imported_node="$link"; removed=1
+		MAP=/etc/vpnpool/imported.map.json
+		[ -f "$MAP" ] && { jq --arg l "$link" 'map_values(map(select(. != $l)))' "$MAP" > "$MAP.t" 2>/dev/null && mv "$MAP.t" "$MAP"; }
+	fi
+	if uci -q get vpnpool.main.active_saved | tr ' ' '\n' | grep -Fxq "$link"; then
+		uci del_list vpnpool.main.active_saved="$link"; removed=1
+	fi
+	# Deleting a node must NOT touch the ⭐ saved archive (saved.map / snapshot.map). The
+	# archive is a deliberate "keep forever" store with its own unsave (💾); pruning it here
+	# meant a bulk delete could wipe the WHOLE inactive-saved pool. Delete now only removes
+	# from the active pool (+ excludes subscription nodes); the archive stays re-activatable.
+	if [ "$removed" = 0 ]; then
+		uci -q get vpnpool.main.excluded_node | tr ' ' '\n' | grep -Fxq "$link" \
+			|| uci add_list vpnpool.main.excluded_node="$link"
+	fi
+	# Drop any "out of auto-pool" state for this tag so a deleted node leaves that list at
+	# once: the force-keep override (keep_auto), the dead set, and its strike counter.
+	uci del_list vpnpool.main.keep_auto="$tag" 2>/dev/null
+	[ -f /tmp/vpnpool/.dead_tags.json ] && { jq --arg t "$tag" 'map(select(. != $t))' /tmp/vpnpool/.dead_tags.json > /tmp/vpnpool/.dt.t 2>/dev/null && mv /tmp/vpnpool/.dt.t /tmp/vpnpool/.dead_tags.json; }
+	[ -f /tmp/vpnpool/.deadstrikes ] && { local TAB; TAB=$(printf '\t'); awk -F"$TAB" -v k="$tag" '$1!=k' /tmp/vpnpool/.deadstrikes > /tmp/vpnpool/.ds.t 2>/dev/null && mv /tmp/vpnpool/.ds.t /tmp/vpnpool/.deadstrikes; }
+	return 0
 }
 
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
+{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x" }, "delete_nodes": { "tags": [] }, "restore_node": { "tag": "x" }, "refilter_node": { "tag": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
 L
 	;;
 call)
@@ -45,10 +85,21 @@ call)
 		fi
 		;;
 	conntest)
+		# Exit-IP test through the tunnel. Try SEVERAL IP-echo endpoints, not just one — a
+		# single service (ifconfig.co) frequently blocks/ratelimits datacenter exit IPs, which
+		# made a perfectly working tunnel report "exit test failed / service not running".
+		# Succeeds on the first endpoint that returns an IP. Different JSON shapes are parsed
+		# generically (ip/ip_addr/query, country/country_iso/country_code).
 		TP=$(uci -q get vpnpool.main.test_port); [ -n "$TP" ] || TP=1605
-		J=$(curl -s -m 12 --proxy "socks5h://127.0.0.1:$TP" https://ifconfig.co/json 2>/dev/null)
-		IP=$(echo "$J" | jq -r '.ip // ""' 2>/dev/null)
-		CO=$(echo "$J" | jq -r '.country_iso // .country // ""' 2>/dev/null)
+		IP=""; CO=""
+		for url in "https://ifconfig.co/json" "https://ipinfo.io/json" "https://api.ip.sb/geoip" "https://api.ipify.org?format=json"; do
+			J=$(curl -s -m 7 --proxy "socks5h://127.0.0.1:$TP" "$url" 2>/dev/null)
+			[ -n "$J" ] || continue
+			IP=$(echo "$J" | jq -r '(.ip // .ip_addr // .query // "") | tostring' 2>/dev/null)
+			[ -n "$IP" ] && [ "$IP" != "null" ] || { IP=""; continue; }
+			CO=$(echo "$J" | jq -r '(.country_iso // .country_code // .country // "") | tostring' 2>/dev/null); [ "$CO" = "null" ] && CO=""
+			break
+		done
 		jq -n --arg ip "$IP" --arg co "$CO" '{ ok: ($ip != ""), ip: $ip, country: $co }'
 		;;
 	leases)
@@ -93,7 +144,9 @@ call)
 		echo '{"ok":true}'
 		;;
 	ping)
-		HU=$(uci -q get vpnpool.main.health_url); [ -n "$HU" ] || HU=http://cp.cloudflare.com/generate_204
+		# Dashboard ping reflects the PRIMARY check service, so the shown delay means
+		# "this node actually reaches the wanted service" — not just some CDN.
+		HU=$(check_probe_urls 2>/dev/null | head -n1); [ -n "$HU" ] || HU=http://cp.cloudflare.com/generate_204
 		ENCU=$(jq -rn --arg s "$HU" '$s|@uri')
 		jq -r '.[].tag' /tmp/vpnpool/nodes.json 2>/dev/null | while read -r tag; do
 			[ -n "$tag" ] || continue
@@ -144,7 +197,10 @@ call)
 		;;
 	add_source)
 		u=$(echo "$input" | jq -r '.url // ""')
-		[ -n "$u" ] && { uci add_list vpnpool.main.source="$u"; uci commit vpnpool; }
+		# dedup: a double-click / repeat must not add the same source twice (URLs have no spaces)
+		if [ -n "$u" ] && ! uci -q get vpnpool.main.source | tr ' ' '\n' | grep -Fxq "$u"; then
+			uci add_list vpnpool.main.source="$u"; uci commit vpnpool
+		fi
 		echo '{"ok":true}'
 		;;
 	probe_source)
@@ -154,6 +210,7 @@ call)
 		u=$(echo "$input" | jq -r '.url // ""')
 		[ -n "$u" ] || { echo '{"error":"no url"}'; exit 0; }
 		mkdir -p /tmp/vpnpool
+		clear_stale_lock /tmp/vpnpool/.probe-running 180   # don't let a killed probe block forever
 		if [ -f /tmp/vpnpool/.probe-running ]; then echo '{"running":true,"already":true}'; exit 0; fi
 		: > /tmp/vpnpool/.probe-running
 		rm -f /tmp/vpnpool/.probe-result.json
@@ -277,10 +334,21 @@ call)
 		k=$(echo "$input" | jq -r '.name // ""')
 		v=$(echo "$input" | jq -r '.value // ""')
 		case "$k" in
-		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|subscription_ua|telegram_enabled|telegram_token|telegram_chat|telegram_control|telegram_via_proxy|ipv6|killswitch|dns_protect|preferred_node|auto_snapshot|auto_snapshot_max|antidpi|adaptive_routing|adaptive_max_per_run|dead_filter|dead_filter_strikes|dead_filter_minpass)
-			uci set vpnpool.main."$k"="$v"; uci commit vpnpool
+		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|check_services|subscription_ua|telegram_enabled|telegram_token|telegram_chat|telegram_control|telegram_via_proxy|ipv6|killswitch|dns_protect|preferred_node|auto_snapshot|auto_snapshot_max|antidpi|adaptive_routing|adaptive_max_per_run|dead_filter|dead_filter_strikes)
+			# Server-side clamp for numeric options: never store a non-numeric/out-of-range
+			# value (the UI also surfaces this, but the backend must not trust the client).
 			case "$k" in
-				subscription_interval|telegram_*|preferred_node|auto_snapshot|auto_snapshot_max|adaptive_max_per_run|dead_filter|dead_filter_strikes|dead_filter_minpass) : ;;   # read live by the daemon, no reload
+			failover_interval)    case "$v" in (''|*[!0-9]*) v=60 ;; esac; [ "$v" -lt 10 ] && v=10 ;;
+			failover_tolerance)   case "$v" in (''|*[!0-9]*) v=50 ;; esac; [ "$v" -gt 5000 ] && v=5000 ;;
+			dead_filter_strikes)  case "$v" in (''|*[!0-9]*) v=3 ;; esac;  [ "$v" -lt 1 ] && v=1 ;;
+			auto_snapshot_max)    case "$v" in (''|*[!0-9]*) v=20 ;; esac; [ "$v" -lt 1 ] && v=1; [ "$v" -gt 1000 ] && v=1000 ;;
+			adaptive_max_per_run) case "$v" in (''|*[!0-9]*) v=8 ;; esac;  [ "$v" -lt 1 ] && v=1; [ "$v" -gt 50 ] && v=50 ;;
+			esac
+			uci set vpnpool.main."$k"="$v"; uci commit vpnpool
+			# check_services changes the urltest probe URL -> needs a rebuild (falls into
+			# the default signal_reload below). dead_filter* are read live by nodecheck.sh.
+			case "$k" in
+				subscription_interval|telegram_*|preferred_node|auto_snapshot|auto_snapshot_max|adaptive_max_per_run|dead_filter|dead_filter_strikes) : ;;   # read live by the daemon, no reload
 				*) signal_reload ;;
 			esac
 			echo '{"ok":true}'
@@ -300,7 +368,10 @@ call)
 		;;
 	add_node)
 		l=$(echo "$input" | jq -r '.link // ""')
-		[ -n "$l" ] && { uci add_list vpnpool.main.manual_node="$l"; uci commit vpnpool; signal_reload; }
+		# dedup: a double-click must not add the same node twice (links have no spaces)
+		if [ -n "$l" ] && ! uci -q get vpnpool.main.manual_node | tr ' ' '\n' | grep -Fxq "$l"; then
+			uci add_list vpnpool.main.manual_node="$l"; uci commit vpnpool; signal_reload
+		fi
 		echo '{"ok":true}'
 		;;
 	del_node)
@@ -348,33 +419,54 @@ call)
 		# a refetch can't bring it back. (excluded_node is wiped on del_subscription.)
 		tag=$(echo "$input" | jq -r '.tag // ""')
 		[ -n "$tag" ] || { echo '{"ok":false,"error":"no tag"}'; exit 0; }
-		LINKS=/etc/vpnpool/links.json
-		link=""
-		[ -f "$LINKS" ] && link=$(jq -r --arg t "$tag" 'map(select(.tag==$t)) | .[0].link // ""' "$LINKS" 2>/dev/null)
-		[ -n "$link" ] || link=$(saved_link_for_tag "$tag")
-		[ -n "$link" ] || { echo '{"ok":false,"error":"no link for tag"}'; exit 0; }
-		removed=0
-		if uci -q get vpnpool.main.manual_node | tr ' ' '\n' | grep -Fxq "$link"; then
-			uci del_list vpnpool.main.manual_node="$link"; removed=1
+		if _delete_one_tag "$tag"; then
+			rebuild_saved_list      # commits vpnpool (incl. the staged del_lists)
+			signal_reload
+			echo '{"ok":true}'
+		else
+			echo '{"ok":false,"error":"no link for tag"}'
 		fi
-		if uci -q get vpnpool.main.imported_node | tr ' ' '\n' | grep -Fxq "$link"; then
-			uci del_list vpnpool.main.imported_node="$link"; removed=1
-			MAP=/etc/vpnpool/imported.map.json
-			[ -f "$MAP" ] && { jq --arg l "$link" 'map_values(map(select(. != $l)))' "$MAP" > "$MAP.t" 2>/dev/null && mv "$MAP.t" "$MAP"; }
-		fi
-		if uci -q get vpnpool.main.active_saved | tr ' ' '\n' | grep -Fxq "$link"; then
-			uci del_list vpnpool.main.active_saved="$link"; removed=1
-		fi
-		# Drop from the saved archive maps (by tag) so it isn't kept as a saved entry.
-		[ -f "$SAVED_MAP" ] && { jq --arg t "$tag" 'del(.[$t])' "$SAVED_MAP" > "$SAVED_MAP.t" 2>/dev/null && mv "$SAVED_MAP.t" "$SAVED_MAP"; }
-		[ -f "$SNAP_MAP" ]  && { jq --arg t "$tag" 'del(.[$t])' "$SNAP_MAP"  > "$SNAP_MAP.t"  2>/dev/null && mv "$SNAP_MAP.t"  "$SNAP_MAP"; }
-		# Not owned by any manual list => it came from a subscription: exclude by link so
-		# the next build/refetch drops it (manual/imported re-adds are NOT excluded).
-		if [ "$removed" = 0 ]; then
-			uci -q get vpnpool.main.excluded_node | tr ' ' '\n' | grep -Fxq "$link" \
-				|| uci add_list vpnpool.main.excluded_node="$link"
-		fi
-		rebuild_saved_list      # commits vpnpool (incl. the del_lists above)
+		;;
+	delete_nodes)
+		# Bulk delete: stage every removal, then do ONE rebuild + ONE reload at the end.
+		# Deleting N nodes one-by-one fired N signal_reloads = N sing-box restarts in a row
+		# (tunnel flapping). Tags can contain spaces, so read one-per-line (never split).
+		echo "$input" | jq -r '.tags[]? // empty' | while IFS= read -r t; do
+			[ -n "$t" ] && _delete_one_tag "$t"
+		done
+		rebuild_saved_list      # commits all staged del_lists/excludes from the loop
+		signal_reload
+		echo '{"ok":true}'
+		;;
+	restore_node)
+		# Manual override of the service-accuracy dead-filter: force this node BACK into the
+		# auto pool and keep it there even if the service check keeps failing. Adds its tag
+		# to the keep_auto whitelist (which nodecheck.sh skips, so it never re-enters
+		# .dead_tags.json), prunes it from the current dead set + strike counter, and
+		# rebuilds so it rejoins auto immediately. The TCP prefilter still applies, so a
+		# truly TCP-dead node won't be forced into the pool (no hung-socket regression).
+		tag=$(echo "$input" | jq -r '.tag // ""')
+		[ -n "$tag" ] || { echo '{"ok":false,"error":"no tag"}'; exit 0; }
+		exists=0
+		. /lib/functions.sh 2>/dev/null
+		__ck() { [ "$1" = "$tag" ] && exists=1; }
+		config_load vpnpool 2>/dev/null
+		config_list_foreach main keep_auto __ck 2>/dev/null
+		[ "$exists" = 1 ] || { uci add_list vpnpool.main.keep_auto="$tag"; uci commit vpnpool; }
+		DEAD=/tmp/vpnpool/.dead_tags.json
+		[ -f "$DEAD" ] && { jq --arg t "$tag" 'map(select(. != $t))' "$DEAD" > "$DEAD.t" 2>/dev/null && mv "$DEAD.t" "$DEAD"; }
+		STRK=/tmp/vpnpool/.deadstrikes
+		[ -f "$STRK" ] && { TAB=$(printf '\t'); awk -F"$TAB" -v k="$tag" '$1!=k' "$STRK" > "$STRK.t" 2>/dev/null && mv "$STRK.t" "$STRK"; }
+		signal_reload
+		echo '{"ok":true}'
+		;;
+	refilter_node)
+		# Undo restore_node: drop the tag from keep_auto so the service-accuracy filter can
+		# demote it again. Rebuild so the pool reflects the current dead set.
+		tag=$(echo "$input" | jq -r '.tag // ""')
+		[ -n "$tag" ] || { echo '{"ok":false,"error":"no tag"}'; exit 0; }
+		uci del_list vpnpool.main.keep_auto="$tag" 2>/dev/null
+		uci commit vpnpool
 		signal_reload
 		echo '{"ok":true}'
 		;;
@@ -424,7 +516,10 @@ call)
 		tag=$(echo "$input" | jq -r '.tag // ""')
 		link=$(saved_link_for_tag "$tag")
 		if [ -n "$link" ]; then
-			if uci -q get vpnpool.main.active_saved | tr ' ' '\n' | grep -Fxq "$link"; then :; else
+			# If this node had been deleted (its link excluded), un-exclude it so activating
+			# the saved copy actually brings it back — otherwise build.sh would filter it out.
+			uci del_list vpnpool.main.excluded_node="$link" 2>/dev/null
+			if uci -q get vpnpool.main.active_saved | tr ' ' '\n' | grep -Fxq "$link"; then uci commit vpnpool; signal_reload; else
 				uci add_list vpnpool.main.active_saved="$link"; uci commit vpnpool; signal_reload
 			fi
 			echo '{"ok":true}'
@@ -477,12 +572,26 @@ call)
 		esac | jq -c '{ ok: ((.|length) > 0), links: . }'
 		;;
 	add_sub)
-		# extra FULL subscription (bulk-merged into the pool, unlike probe-only sources)
+		# extra FULL subscription (bulk-merged into the pool, unlike probe-only sources).
+		# Add (dedup) + trigger the daemon's full refetch, THEN do one quick validation fetch
+		# so the UI can report immediately whether the URL is reachable and how many nodes it
+		# yields — otherwise a typo / unreachable port (e.g. a panel port blocked from the
+		# router) silently adds nothing and looks like a bug. parser.uc auto-detects
+		# base64/JSON/link-list. Short timeout keeps us inside the rpcd call budget; the
+		# daemon's signal_refetch does the full multi-UA merge in the background.
 		u=$(echo "$input" | jq -r '.url // ""')
-		if [ -n "$u" ] && ! uci -q get vpnpool.main.extra_sub | tr ' ' '\n' | grep -Fxq "$u"; then
+		[ -n "$u" ] || { echo '{"ok":false,"error":"no url"}'; exit 0; }
+		if ! uci -q get vpnpool.main.extra_sub | tr ' ' '\n' | grep -Fxq "$u"; then
 			uci add_list vpnpool.main.extra_sub="$u"; uci commit vpnpool; signal_refetch
 		fi
-		echo '{"ok":true}'
+		mkdir -p /tmp/vpnpool
+		B=/tmp/vpnpool/.subcheck.raw
+		code=$(curl -sfL --connect-timeout 4 -m 9 -A 'v2rayNG/1.9.5' "$u" -o "$B" -w '%{http_code}' 2>/dev/null)
+		cnt=0
+		[ -s "$B" ] && cnt=$(ucode /usr/libexec/vpnpool/parser.uc "$B" 2>/dev/null | jq 'length' 2>/dev/null)
+		case "$cnt" in (''|*[!0-9]*) cnt=0 ;; esac
+		rm -f "$B"
+		jq -n --argjson n "$cnt" --arg http "${code:-000}" '{ok:true, fetched:$n, http:$http}'
 		;;
 	del_sub)
 		u=$(echo "$input" | jq -r '.url // ""')
@@ -555,6 +664,7 @@ call)
 			echo "{\"ok\":false,\"lowmem\":true,\"avail_kb\":${AVAIL:-0},\"need_kb\":$MINKB}"; exit 0
 		fi
 		mkdir -p /tmp/vpnpool
+		clear_stale_lock /tmp/vpnpool/.speedtest-running 180   # don't let a killed test block forever
 		if [ -f /tmp/vpnpool/.speedtest-running ]; then echo '{"running":true,"already":true}'; exit 0; fi
 		: > /tmp/vpnpool/.speedtest-running
 		rm -f /tmp/vpnpool/.speedtest-result.json

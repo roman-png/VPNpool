@@ -25,6 +25,9 @@ var callNodeLink   = rpc.declare({ object: 'vpnpool', method: 'node_link',    pa
 var callExportNodes = rpc.declare({ object: 'vpnpool', method: 'export_nodes', params: [ 'scope' ] });
 var callImportNodes = rpc.declare({ object: 'vpnpool', method: 'import_nodes', params: [ 'text' ] });
 var callDeleteNode  = rpc.declare({ object: 'vpnpool', method: 'delete_node',  params: [ 'tag' ] });
+var callDeleteNodes = rpc.declare({ object: 'vpnpool', method: 'delete_nodes', params: [ 'tags' ] });
+var callRestoreNode = rpc.declare({ object: 'vpnpool', method: 'restore_node', params: [ 'tag' ] });
+var callRefilterNode = rpc.declare({ object: 'vpnpool', method: 'refilter_node', params: [ 'tag' ] });
 var callUnlock     = rpc.declare({ object: 'vpnpool', method: 'unlock',        params: [ 'tag' ] });
 var callUnlockRes  = rpc.declare({ object: 'vpnpool', method: 'unlock_result' });
 
@@ -179,6 +182,28 @@ return view.extend({
 			window.setTimeout(L.bind(this.refresh, this), 1500);
 		}, this));
 	},
+	handleRestoreNode: function(tag) {
+		return callRestoreNode(tag).then(L.bind(function() {
+			ui.addNotification(null, E('p', _('Returned to the auto-pool: %s').format(tag)), 'info');
+			window.setTimeout(L.bind(this.refresh, this), 1500);
+		}, this));
+	},
+	handleRefilterNode: function(tag) {
+		return callRefilterNode(tag).then(L.bind(function() {
+			ui.addNotification(null, E('p', _('Node is back under the service filter: %s').format(tag)), 'info');
+			window.setTimeout(L.bind(this.refresh, this), 1500);
+		}, this));
+	},
+	handleAddAutoMember: function(tag) {
+		// add ONE node back to the manually-pinned auto pool (auto_member is a non-empty
+		// subset here, so we append rather than reset). set_auto_members replaces the list.
+		var cur = ((this._st && this._st.auto_members) || []).slice();
+		if (cur.indexOf(tag) < 0) cur.push(tag);
+		return callSetAutoMembers(cur).then(L.bind(function() {
+			ui.addNotification(null, E('p', _('Added to the auto-pool: %s').format(tag)), 'info');
+			window.setTimeout(L.bind(this.refresh, this), 1500);
+		}, this));
+	},
 	handleSpeedtest: function(tag) {
 		var self = this;
 		var poller = function() {
@@ -229,6 +254,13 @@ return view.extend({
 	rerenderNodes: function() {
 		if (this._st) { var b = document.getElementById('vp-nodes'); if (b) dom.content(b, this.renderNodes(this._st)); }
 	},
+	// Live count of checked nodes (selection is shared across the main list AND the out-of-
+	// pool list and persists across the 5s poll, so it MUST be visible — otherwise stale
+	// checks pile up and a bulk delete removes far more than intended).
+	updateSelCount: function() {
+		var el = document.getElementById('vp-selcount');
+		if (el) el.textContent = String(Object.keys(nodeSel).length);
+	},
 	// QR is rendered fully client-side (vendored qrcodejs) so node secrets never
 	// leave the router — loaded on demand to keep the page light.
 	renderQR: function(el, text) {
@@ -258,33 +290,38 @@ return view.extend({
 				])
 			]);
 			this.renderQR(qr, r.link);
-		}, this));
+		}, this)).catch(function(e) {
+			ui.addNotification(null, E('p', _('No shareable link for this node.') + ' (' + e + ')'), 'warning');
+		});
 	},
 	handleDeleteNode: function(tag) {
 		var self = this;
 		if (!confirm(_('Delete node "%s"? A subscription node is hidden until you delete the subscription; a manual/imported/saved node is removed permanently.').format(tag))) return;
 		return callDeleteNode(tag).then(function(r) {
-			if (r && r.ok) self.notify(_('Node deleted: %s').format(tag));
+			if (r && r.ok) { delete speedResults[tag]; self.notify(_('Node deleted: %s').format(tag)); window.setTimeout(function() { self.refresh(); }, 1200); }
 			else ui.addNotification(null, E('p', _('Could not delete node: %s').format((r && r.error) || '?')), 'warning');
 		}).catch(function(e) {
 			ui.addNotification(null, E('p', _('Could not delete node: %s').format(e) + ' — ' + _('try re-logging into LuCI (permissions update on login).')), 'error');
 		});
 	},
-	handleSelClear: function() { nodeSel = {}; if (this.rerenderNodes) this.rerenderNodes(); },
+	handleSelClear: function() { nodeSel = {}; this.updateSelCount(); if (this.rerenderNodes) this.rerenderNodes(); },
 	handleBulkDelete: function() {
 		var self = this, tags = Object.keys(nodeSel);
 		if (!tags.length) { ui.addNotification(null, E('p', _('Select node(s) with the checkboxes first.')), 'warning'); return; }
 		if (!confirm(_('Delete %d selected node(s)? Subscription nodes are hidden until you delete the subscription; manual/imported/saved are removed permanently.').format(tags.length))) return;
-		var chain = Promise.resolve();
-		tags.forEach(function(t) { chain = chain.then(function() { return callDeleteNode(t); }); });
-		return chain.then(function() { nodeSel = {}; self.notify(_('Deleted %d node(s).').format(tags.length)); });
+		// ONE backend call -> ONE rebuild/reload (was a per-node chain = N sing-box restarts).
+		return callDeleteNodes(tags).then(function() {
+			nodeSel = {}; self.updateSelCount(); self.notify(_('Deleted %d node(s).').format(tags.length));
+		}).catch(function(e) {
+			ui.addNotification(null, E('p', _('Could not delete node: %s').format(e)), 'error');
+		});
 	},
 	handleBulkDeactivate: function() {
 		var self = this, tags = Object.keys(nodeSel);
 		if (!tags.length) { ui.addNotification(null, E('p', _('Select node(s) first.')), 'warning'); return; }
 		var chain = Promise.resolve();
 		tags.forEach(function(t) { chain = chain.then(function() { return callDeactivateSaved(t); }); });
-		return chain.then(function() { nodeSel = {}; self.notify(_('Deactivated %d node(s).').format(tags.length)); });
+		return chain.then(function() { nodeSel = {}; self.updateSelCount(); self.notify(_('Deactivated %d node(s).').format(tags.length)); });
 	},
 	handleSelSpeedtest: function() {
 		var tags = Object.keys(nodeSel);
@@ -316,7 +353,7 @@ return view.extend({
 				fileInput,
 				E('span', { 'style': 'flex:1' }, ''),
 				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
-				E('button', { 'class': 'btn cbi-button cbi-button-positive', 'click': function() { self.doImport(ta); } }, '⬆ ' + _('Import'))
+				E('button', { 'class': 'btn cbi-button cbi-button-positive', 'click': ui.createHandlerFn(this, 'doImport', ta) }, '⬆ ' + _('Import'))
 			])
 		]);
 	},
@@ -375,6 +412,9 @@ return view.extend({
 				block(_('vless:// links'), text, 'vpnpool-nodes.txt'),
 				block(_('base64 subscription'), b64, 'vpnpool-subscription.txt')
 			]);
+		}).catch(function(e) {
+			var out = document.getElementById('vp-export-out');
+			if (out) dom.content(out, E('em', { 'style': 'color:#c00' }, _('Export failed') + ': ' + e));
 		});
 	},
 	refresh: function() {
@@ -382,10 +422,12 @@ return view.extend({
 			this._st = st;
 			var a = document.getElementById('vp-status'), b = document.getElementById('vp-nodes'), c = document.getElementById('vp-clients');
 			var d = document.getElementById('vp-saved-inactive');
+			var e = document.getElementById('vp-dead-nodes');
 			if (a) dom.content(a, this.renderStatus(st));
 			if (b) dom.content(b, this.renderNodes(st));
 			if (c) dom.content(c, this.renderClients(st));
 			if (d) dom.content(d, this.renderSavedInactive(st));
+			if (e) dom.content(e, this.renderDeadNodes(st));
 		}, this));
 	},
 
@@ -476,7 +518,9 @@ return view.extend({
 			search, sort,
 			E('label', { 'style': 'cursor:pointer' }, [ reach, E('span', { 'style': 'margin-left:5px' }, _('reachable only')) ]),
 			// --- bulk actions on the checked nodes (☑ in each row) ---
-			E('span', { 'style': 'border-left:1px solid rgba(128,128,128,.35);padding-left:10px;color:#888' }, _('Selected') + ':'),
+			E('span', { 'style': 'border-left:1px solid rgba(128,128,128,.35);padding-left:10px;color:#888' }, [
+				_('Selected') + ': ', E('b', { 'id': 'vp-selcount', 'style': 'color:#c00' }, String(Object.keys(nodeSel).length))
+			]),
 			E('button', { 'class': 'btn cbi-button', 'title': _('Speed test the selected node'), 'click': ui.createHandlerFn(this, 'handleSelSpeedtest') }, '⚡'),
 			E('button', { 'class': 'btn cbi-button', 'title': _('Unblock-test the selected node'), 'click': ui.createHandlerFn(this, 'handleSelUnlock') }, '🔓'),
 			E('button', { 'class': 'btn cbi-button', 'title': _('Deactivate selected (remove from active pool, keep saved)'), 'click': ui.createHandlerFn(this, 'handleBulkDeactivate') }, '⏏'),
@@ -489,9 +533,22 @@ return view.extend({
 		var allNodes = (st.nodes || []);
 		if (!allNodes.length) return E('em', {}, _('No nodes yet (waiting for subscription / pings)…'));
 
+		// Nodes OUTSIDE the auto-pool live ONLY in the dedicated section below (like
+		// inactive saved nodes), not mixed into the main list: service-dead nodes
+		// (dead_nodes) AND nodes the user manually excluded via "Configure auto-switch
+		// pool" (not in auto_members when a subset is pinned). inPool/members are defined
+		// here (used both for this filter and per-row below).
+		var members = st.auto_members || [];
+		var poolAll = (members.length === 0);
+		var inPool = function(tag) { return poolAll || members.indexOf(tag) >= 0; };
+		var deadSet = {};
+		(st.dead_nodes || []).forEach(function(t) { deadSet[t] = 1; });
+
 		// client-side filter + sort
 		var f = (nodeFilter || '').toLowerCase();
 		var nodes = allNodes.filter(function(n) {
+			if (deadSet[n.tag]) return false;       // service-dead -> "out of auto-pool" section
+			if (!inPool(n.tag)) return false;        // manually excluded -> same section
 			if (nodeReachOnly && !(n.delay > 0)) return false;
 			if (!f) return true;
 			return (n.tag || '').toLowerCase().indexOf(f) >= 0 || (n.server || '').toLowerCase().indexOf(f) >= 0;
@@ -510,9 +567,6 @@ return view.extend({
 		// preferred soft-pin keeps us in auto even though it biases the current node.
 		var hardPick = (st.settings || {}).selected_node || '';
 		var autoMode = !hardPick;
-		var members = st.auto_members || [];
-		var poolAll = (members.length === 0);
-		var inPool = function(tag) { return poolAll || members.indexOf(tag) >= 0; };
 		var poolLabel = poolAll ? _('all nodes') : (members.length + ' / ' + allNodes.length);
 		var NCOL = '7';
 
@@ -536,13 +590,14 @@ return view.extend({
 			])
 		]);
 		var makeRow = L.bind(function(n) {
+			var view = this;
 			var act = (n.tag === activeTag);
 			var pinned = (n.tag === preferredTag);
 			var pooled = inPool(n.tag);
 			var sp = speedResults[n.tag];
 			var traf = ((n.down || 0) + (n.up || 0)) > 0 ? ('↓' + fmtBytes(n.down) + ' ↑' + fmtBytes(n.up)) : '—';
 			var cb = E('input', { 'type': 'checkbox', 'checked': nodeSel[n.tag] ? 'checked' : null, 'title': _('Select for bulk actions') });
-			cb.addEventListener('change', function() { if (cb.checked) nodeSel[n.tag] = true; else delete nodeSel[n.tag]; });
+			cb.addEventListener('change', function() { if (cb.checked) nodeSel[n.tag] = true; else delete nodeSel[n.tag]; view.updateSelCount(); });
 			return E('tr', { 'class': 'tr', 'style': act ? 'background:rgba(46,125,50,.12)' : (pooled ? '' : 'opacity:.55') }, [
 				E('td', { 'class': 'td' }, cb),
 				E('td', { 'class': 'td' }, [
@@ -647,6 +702,79 @@ return view.extend({
 		return E('table', { 'class': 'table vp-table' }, [ header ].concat(rows));
 	},
 
+	// Everything OUTSIDE the auto-pool, in one place (like the inactive-saved list):
+	//   • service-dead (dead_nodes)            -> "↩ Return to auto" (force-keep / restore)
+	//   • manually excluded (not in auto_member)-> "➕ Add to auto-pool"
+	//   • force-kept overrides (kept_nodes)     -> "Re-enable filter"
+	// Each can be brought back with one button.
+	renderDeadNodes: function(st) {
+		var dead = st.dead_nodes || [], kept = st.kept_nodes || [];
+		var members = st.auto_members || [], poolAll = (members.length === 0);
+		var deadSet = {}; dead.forEach(function(t) { deadSet[t] = 1; });
+		var keptSet = {}; kept.forEach(function(t) { keptSet[t] = 1; });
+		// manually excluded = a pinned subset is configured AND this node isn't in it
+		// (and it isn't already covered by the dead/forced groups).
+		var excluded = poolAll ? [] : (st.nodes || []).map(function(n) { return n.tag; })
+			.filter(function(t) { return members.indexOf(t) < 0 && !deadSet[t] && !keptSet[t]; });
+		if (!dead.length && !excluded.length && !kept.length) return E('em', { 'style': 'color:#888' },
+			_('No nodes outside the auto-pool — every node is auto-managed.'));
+		var byTag = {};
+		(st.nodes || []).forEach(function(n) { byTag[n.tag] = n; });
+		var srv = function(tag) { var n = byTag[tag] || {}; return (n.server || '') + (n.port ? ':' + n.port : ''); };
+		var badge = function(text, color) { return E('span', { 'style': 'margin-left:6px;font-size:10px;color:' + color + ';border:1px solid ' + color + ';border-radius:8px;padding:0 5px' }, text); };
+		var shareBtn = L.bind(function(tag) { return E('button', { 'class': 'btn cbi-button', 'title': _('Share link / QR'), 'click': ui.createHandlerFn(this, 'handleShowLink', tag) }, '🔗'); }, this);
+		// No "Use" button here — an out-of-pool node (service-dead / excluded) must not be
+		// manually activated as the live exit.
+		var self = this;
+		// Checkbox wired to the SAME nodeSel as the main list, so the bulk-action toolbar
+		// above the Nodes table (✕ Delete, etc.) operates on out-of-pool nodes too.
+		var cbCell = function(tag) {
+			var cb = E('input', { 'type': 'checkbox', 'checked': nodeSel[tag] ? 'checked' : null, 'title': _('Select for bulk actions') });
+			cb.addEventListener('change', function() { if (cb.checked) nodeSel[tag] = true; else delete nodeSel[tag]; self.updateSelCount(); });
+			return E('td', { 'class': 'td' }, cb);
+		};
+		var header = E('tr', { 'class': 'tr table-titles' }, [
+			E('th', { 'class': 'th' }, ''), E('th', { 'class': 'th' }, _('Node')), E('th', { 'class': 'th' }, _('Server')), E('th', { 'class': 'th' }, _('Actions'))
+		]);
+		var rows = [];
+		dead.forEach(L.bind(function(tag) {
+			rows.push(E('tr', { 'class': 'tr', 'style': 'opacity:.85' }, [
+				cbCell(tag),
+				E('td', { 'class': 'td' }, [ E('span', {}, tag), badge(_('service down'), '#c62828') ]),
+				E('td', { 'class': 'td', 'style': 'font-family:monospace;color:#666' }, srv(tag)),
+				E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, [
+					E('button', { 'class': 'btn cbi-button cbi-button-action', 'title': _('Force this node back into auto-switching (keeps it even if the service check fails)'),
+						'click': ui.createHandlerFn(this, 'handleRestoreNode', tag) }, '↩ ' + _('Return to auto')),
+					' ', shareBtn(tag)
+				])
+			]));
+		}, this));
+		excluded.forEach(L.bind(function(tag) {
+			rows.push(E('tr', { 'class': 'tr', 'style': 'opacity:.85' }, [
+				cbCell(tag),
+				E('td', { 'class': 'td' }, [ E('span', {}, tag), badge(_('excluded manually'), '#888') ]),
+				E('td', { 'class': 'td', 'style': 'font-family:monospace;color:#666' }, srv(tag)),
+				E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, [
+					E('button', { 'class': 'btn cbi-button cbi-button-action', 'title': _('Add this node back to auto-switching'),
+						'click': ui.createHandlerFn(this, 'handleAddAutoMember', tag) }, '➕ ' + _('Add to auto-pool')),
+					' ', shareBtn(tag)
+				])
+			]));
+		}, this));
+		kept.forEach(L.bind(function(tag) {
+			rows.push(E('tr', { 'class': 'tr', 'style': 'background:rgba(46,125,50,.08)' }, [
+				cbCell(tag),
+				E('td', { 'class': 'td' }, [ E('span', {}, tag), badge('★ ' + _('forced'), '#2e7d32') ]),
+				E('td', { 'class': 'td', 'style': 'font-family:monospace;color:#666' }, srv(tag)),
+				E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, [
+					E('button', { 'class': 'btn cbi-button cbi-button-remove', 'title': _('Stop forcing — let the service filter manage this node again'),
+						'click': ui.createHandlerFn(this, 'handleRefilterNode', tag) }, _('Re-enable filter'))
+				])
+			]));
+		}, this));
+		return E('table', { 'class': 'table vp-table' }, [ header ].concat(rows));
+	},
+
 	load: function() { return callStatus(); },
 	render: function(st) {
 		this._st = st;
@@ -662,6 +790,11 @@ return view.extend({
 				E('h3', {}, _('Saved from subscription (inactive)')),
 				E('p', { 'style': 'color:#666;margin:2px 0 8px' }, _('Saved nodes are kept here even after the subscription drops them. They are NOT in the active pool until you add them.')),
 				E('div', { 'id': 'vp-saved-inactive' }, this.renderSavedInactive(st))
+			]),
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('Out of the auto-pool')),
+				E('p', { 'style': 'color:#666;margin:2px 0 8px' }, _('Nodes not used for auto-switching: ones that can’t open the configured services (service down), ones you excluded manually, and ones you force-kept. Each stays manually selectable and can be brought back with one button.')),
+				E('div', { 'id': 'vp-dead-nodes' }, this.renderDeadNodes(st))
 			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Per-client traffic')),

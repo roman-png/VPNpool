@@ -77,12 +77,20 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
 - 🧠 **Adaptive routing** — auto‑detects domains that are **blocked for a direct
   connection** (RST/timeout) and routes just those through the VPN, so the proxy
   list maintains itself for *your* ISP. Plus a one‑click “this site is blocked”.
-- 🩺 **Dead‑node auto‑filter** — nodes that TCP‑ping but carry **no real traffic**
-  (expired‑subscription placeholders, over‑quota / service‑blocked exits) are caught by
-  an **end‑to‑end probe** through several diverse `generate_204` endpoints (run alongside
-  the ping). A node is dropped from auto‑switching only after it reaches **none** of them
-  for several checks in a row — it stays selectable manually, and the pool is never
-  emptied. On by default.
+- 🎯 **Service‑accurate node check** — you tell vpnpool **which services must actually
+  work** (e.g. `www.youtube.com`, one per line in *Settings → Node check*) and **that is
+  the single criterion** for a node being usable. Every node is end‑to‑end probed through
+  the Clash delay API against *your* services; a node is kept in auto‑switching only if it
+  opens **every** one of them. This finally drops the “**pings but the service is dead**”
+  nodes (expired‑subscription placeholders, over‑quota / geo‑blocked exits) that TCP‑ping
+  and even reach a CDN but can’t carry the traffic you care about. The **same service set**
+  drives **active‑node selection (urltest), failover and the self‑heal watchdog**, so the
+  whole stack agrees on what “working” means. A node is dropped only after it fails for
+  several checks in a row (anti‑flap) — it stays selectable manually, and the pool is never
+  emptied. On by default; empty list falls back to a generic connectivity check. Demoted
+  nodes get their own **“Unreachable nodes”** list on the dashboard with a **↩ Return to
+  auto** button that force‑keeps a node in the pool (manual override of the service check;
+  a node that’s also TCP‑unreachable still won’t be forced in, to protect the tiny router).
 - 🗑️ **Node management from the dashboard** — **select nodes** (checkboxes) and **delete**
   them in bulk (or per‑row); **import** nodes by **pasting links / a base64 subscription**
   or loading a **`.txt` file** (button next to Export). Deleting a subscription node hides

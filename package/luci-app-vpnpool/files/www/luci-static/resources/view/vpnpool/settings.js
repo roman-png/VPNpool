@@ -22,9 +22,30 @@ return view.extend({
 	notify: function(msg) { ui.addNotification(null, E('p', msg), 'info'); },
 	save: function(name, val) { return callSetOpt(name, String(val)).then(L.bind(function() { this.notify(_('Saved: %s').format(name)); }, this)); },
 
-	handleSaveInterval: function(inp) { return this.save('failover_interval', inp.value || '60'); },
-	handleSaveTolerance: function(inp) { return this.save('failover_tolerance', inp.value || '50'); },
+	// Clamp a numeric field, write the corrected value back into the input (so the user
+	// SEES the constraint applied — never a silent drop), and return the clamped string.
+	clampInt: function(inp, min, max, def) {
+		var n = parseInt(inp.value, 10); if (isNaN(n)) n = def;
+		if (n < min) n = min; if (max != null && n > max) n = max;
+		if (String(n) !== String(inp.value)) {
+			inp.value = String(n);
+			this.notify(_('Adjusted to %s (allowed: %s–%s).').format(n, min, (max != null ? max : '∞')));
+		}
+		return String(n);
+	},
+	handleSaveInterval: function(inp) { return this.save('failover_interval', this.clampInt(inp, 10, null, 60)); },
+	handleSaveTolerance: function(inp) { return this.save('failover_tolerance', this.clampInt(inp, 0, 5000, 50)); },
 	handleToggleAuto: function(cb) { return this.save('auto_switch', cb.checked ? '1' : '0'); },
+	handleSaveCheck: function(ta, cb, strk) {
+		var self = this;
+		// store as a single space-separated string (hosts/URLs never contain spaces)
+		var svc = (ta.value || '').split(/\s+/).filter(Boolean).join(' ');
+		var n = this.clampInt(strk, 1, 20, 3);
+		return callSetOpt('check_services', svc)
+			.then(function() { return callSetOpt('dead_filter', cb.checked ? '1' : '0'); })
+			.then(function() { return callSetOpt('dead_filter_strikes', n); })
+			.then(function() { self.notify(_('Node-check settings saved — re-checking nodes.')); });
+	},
 	handleToggleKill: function(cb) { return this.save('killswitch', cb.checked ? '1' : '0'); },
 	handleToggleDns: function(cb) { return this.save('dns_protect', cb.checked ? '1' : '0'); },
 	handleToggleAntidpi: function(cb) { return this.save('antidpi', cb.checked ? '1' : '0'); },
@@ -55,7 +76,7 @@ return view.extend({
 	handleDelAutoDom: function(d) { var self = this; return callDelAutoDom(d).then(function() { self.reloadAutoDomains(); }); },
 	handleRunAdaptive: function() { this.notify(_('Adaptive scan started…')); return callRunAdaptive(); },
 	handleSaveSnapshot: function(cb, maxInp) {
-		var self = this, max = String(parseInt(maxInp.value, 10) || 20);
+		var self = this, max = this.clampInt(maxInp, 1, 1000, 20);
 		return callSetOpt('auto_snapshot_max', max).then(function() {
 			return callSetOpt('auto_snapshot', cb.checked ? '1' : '0');
 		}).then(function() { self.notify(_('Auto-snapshot settings saved.')); });
@@ -81,6 +102,8 @@ return view.extend({
 				ui.addNotification(null, E('p', _('Test sent — check Telegram.')), 'info');
 			else
 				ui.addNotification(null, E('p', _('Telegram send failed (HTTP %s) — check token/chat id.').format((r && r.http) || '?')), 'warning');
+		}).catch(function(e) {
+			ui.addNotification(null, E('p', _('Telegram send failed (HTTP %s) — check token/chat id.').format(e)), 'warning');
 		});
 	},
 	handleExport: function(box) {
@@ -101,6 +124,12 @@ return view.extend({
 		var fi = E('input', { 'type': 'number', 'min': '10', 'class': 'cbi-input-text', 'style': 'width:120px', 'value': s.failover_interval || 60 });
 		var tol = E('input', { 'type': 'number', 'min': '0', 'class': 'cbi-input-text', 'style': 'width:120px', 'value': s.failover_tolerance || 50 });
 		var auto = E('input', { 'type': 'checkbox', 'checked': (s.auto_switch !== false) ? 'checked' : null });
+
+		var chkSvc = E('textarea', { 'class': 'cbi-input-textarea', 'style': 'width:100%;height:80px;font-family:monospace',
+			'placeholder': 'www.youtube.com\nwww.instagram.com' },
+			(s.check_services || '').split(/\s+/).filter(Boolean).join('\n'));
+		var deadFilterCb = E('input', { 'type': 'checkbox', 'checked': (s.dead_filter !== false) ? 'checked' : null });
+		var deadStrikes = E('input', { 'type': 'number', 'min': '1', 'class': 'cbi-input-text', 'style': 'width:90px', 'value': String(s.dead_filter_strikes || 3) });
 
 		var kill = E('input', { 'type': 'checkbox', 'checked': s.killswitch ? 'checked' : null });
 		var dns  = E('input', { 'type': 'checkbox', 'checked': s.dns_protect ? 'checked' : null });
@@ -146,6 +175,20 @@ return view.extend({
 					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleToggleAuto', auto) }, _('Save'))
 				]),
 				E('p', { 'style': 'color:#888' }, _('Preferred node is now set right on the Dashboard — click 📌 on any node to pin it (used while reachable, auto-failover if it dies, switch back on recovery).'))
+			]),
+
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('Node check (does the service actually work?)')),
+				E('p', { 'style': 'color:#888;margin-top:0' }, _('The single, accurate node check. List the services the VPN must really open through a node — usually the blocked ones (one per line). A node is used for auto-switching ONLY if it opens EVERY one of them; nodes that ping but can’t reach the service (over-quota / blocked exits) are dropped from the auto-pool but stay manually selectable. Active-node selection, failover and self-heal all use this list.')),
+				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:block;margin-bottom:3px' }, _('Services to verify (one per line)')), chkSvc ]),
+				E('p', { 'style': 'color:#888' }, _('A bare host is probed as http://host/generate_204; a full URL is used as-is. Leave empty to fall back to a generic connectivity check.')),
+				E('div', { 'style': 'margin:6px 0' }, [
+					E('label', {}, [ deadFilterCb, E('span', { 'style': 'margin-left:6px' }, _('Drop nodes that ping but can’t reach the services (dead-node filter)')) ])
+				]),
+				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:inline-block;width:220px' }, _('Failures in a row before dropping')), deadStrikes ]),
+				E('div', { 'style': 'margin-top:6px' }, [
+					E('button', { 'class': 'btn cbi-button cbi-button-save', 'click': ui.createHandlerFn(this, 'handleSaveCheck', chkSvc, deadFilterCb, deadStrikes) }, _('Save'))
+				])
 			]),
 
 			E('div', { 'class': 'cbi-section' }, [

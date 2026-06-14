@@ -11,7 +11,16 @@ config vpnpool 'main'
 	# list extra_sub 'https://...'
 	option subscription_ua 'v2rayNG/1.8.5'
 	option subscription_interval '6h'
+	# Fallback liveness URL for sing-box urltest when check_services is empty.
 	option health_url 'http://cp.cloudflare.com/generate_204'
+	# Service-accuracy check — THE single node-quality criterion. The actual (often
+	# blocked) services the VPN must make work THROUGH each node. Every node is probed
+	# against these; one that can't reach ALL of them for dead_filter_strikes cycles is
+	# dropped from the auto/urltest pool (still manually selectable). The SAME set drives
+	# active-node selection (urltest url), failover and the self-heal watchdog, so the
+	# whole stack agrees on "working". Space/newline-separated; a bare host is probed as
+	# http://<host>/generate_204, a full URL is used as-is. Editable in the UI.
+	option check_services 'www.youtube.com'
 	option failover_interval '60'
 	option failover_tolerance '50'
 	option auto_switch '1'
@@ -54,18 +63,18 @@ config vpnpool 'main'
 	# Minimum available RAM (kB) required to run a speed test — guards tiny (16 MB)
 	# routers from OOM-killing sing-box during the test.
 	option speedtest_min_mem_kb '8192'
-	# Dead-node auto-filter: periodically e2e-probe every node through the clash delay
-	# API against a diverse set of generate_204 endpoints; nodes that reach NONE of them
-	# for dead_filter_strikes cycles in a row are dropped from the auto/urltest pool
-	# (still manually selectable). Catches "TCP-pings but carries no traffic" nodes
-	# (expired-sub placeholders, over-quota / blocked exits). On by default.
+	# Dead-node auto-filter: periodically e2e-probe every node (against check_services
+	# above) through the clash delay API; a node that fails to reach ALL of them for
+	# dead_filter_strikes cycles in a row is dropped from the auto/urltest pool (still
+	# manually selectable). Catches "TCP-pings / opens a CDN but the wanted service is
+	# dead" nodes (expired-sub placeholders, over-quota / service-blocked exits). On by
+	# default. Set to '0' to keep every node in the pool regardless.
 	option dead_filter '1'
 	option dead_filter_strikes '3'
-	# A node is healthy if it reaches at least this many of the probe URLs (1 = lenient:
-	# one provider's block won't condemn a node that serves the others).
-	option dead_filter_minpass '1'
-	# Probe URLs (space-separated). Empty = built-in diverse default set.
-	# option dead_filter_urls ''
+	# Max concurrent TCP probes in the build-time health prefilter. Bounded so a large
+	# subscription doesn't fork hundreds of curls at once and OOM sing-box on a 16 MB
+	# router. Default 16 (in-code) if unset.
+	# option prefilter_concurrency '16'
 	# Telegram alerts (failover / subscription / lifecycle)
 	option telegram_enabled '0'
 	option telegram_token ''

@@ -81,6 +81,18 @@ var DICT = {
 		'No devices seen yet (DHCP leases are empty).': 'Устройства пока не обнаружены (список DHCP пуст).',
 		'offline': 'офлайн',
 		'VPN Pool — Settings': 'VPN Pool — Настройки', 'Saved: %s': 'Сохранено: %s',
+		'Node check (does the service actually work?)': 'Проверка узлов (реально ли работает сервис?)',
+		'The single, accurate node check. List the services the VPN must really open through a node — usually the blocked ones (one per line). A node is used for auto-switching ONLY if it opens EVERY one of them; nodes that ping but can’t reach the service (over-quota / blocked exits) are dropped from the auto-pool but stay manually selectable. Active-node selection, failover and self-heal all use this list.':
+			'Единственная точная проверка узлов. Перечислите сервисы, которые VPN должен реально открывать через узел — обычно заблокированные (по одному в строке). Узел участвует в авто-переключении, ТОЛЬКО если открывает КАЖДЫЙ из них; узлы, которые пингуются, но до сервиса не достают (исчерпанная квота / заблокированный выход), убираются из авто-пула, но остаются доступны для ручного выбора. Выбор активного узла, переключение и самовосстановление используют этот список.',
+		'Services to verify (one per line)': 'Сервисы для проверки (по одному в строке)',
+		'A bare host is probed as http://host/generate_204; a full URL is used as-is. Leave empty to fall back to a generic connectivity check.':
+			'Голый хост проверяется как http://host/generate_204; полный URL используется как есть. Пусто — откат к обычной проверке связи.',
+		'Drop nodes that ping but can’t reach the services (dead-node filter)': 'Убирать узлы, которые пингуются, но не достают до сервисов (фильтр мёртвых узлов)',
+		'Failures in a row before dropping': 'Неудач подряд до отсева',
+		'Node-check settings saved — re-checking nodes.': 'Настройки проверки сохранены — перепроверяю узлы.',
+		'Adjusted to %s (allowed: %s–%s).': 'Скорректировано до %s (допустимо: %s–%s).',
+		'Save failed: %s': 'Не удалось сохранить: %s',
+		'Export failed': 'Экспорт не удался',
 		'Auto-ping & failover': 'Автопинг и переключение', 'Auto-ping interval (sec)': 'Интервал автопинга (сек)',
 		'Switch tolerance (ms)': 'Допуск переключения (мс)',
 		'Auto-switch to a working node (urltest)': 'Авто-переключение на рабочий узел (urltest)',
@@ -209,6 +221,29 @@ var DICT = {
 		'Paste links or load a file first.': 'Сначала вставьте ссылки или загрузите файл.',
 		'Imported %d new node(s) (manual list: %d).': 'Импортировано новых узлов: %d (ручной список: %d).',
 		'Import failed': 'Импорт не удался',
+		// --- out of the auto-pool (dead / manually-excluded / forced) ---
+		'Out of the auto-pool': 'Вне авто-пула',
+		'Nodes not used for auto-switching: ones that can’t open the configured services (service down), ones you excluded manually, and ones you force-kept. Each stays manually selectable and can be brought back with one button.':
+			'Узлы, не участвующие в авто-переключении: те, что не открывают заданные сервисы (сервис недоступен), исключённые вами вручную и принудительно удерживаемые. Каждый можно выбрать вручную и вернуть одной кнопкой.',
+		'No nodes outside the auto-pool — every node is auto-managed.': 'Все узлы в авто-пуле — вне него никого нет.',
+		'service down': 'сервис недоступен',
+		'excluded manually': 'исключён вручную',
+		'Add to auto-pool': 'В авто-пул',
+		'Add this node back to auto-switching': 'Вернуть узел в авто-переключение',
+		'Added to the auto-pool: %s': 'Добавлен в авто-пул: %s',
+		// --- unreachable nodes (service-accuracy dead-filter) ---
+		'Unreachable nodes (out of auto-pool)': 'Недоступные узлы (вне авто-пула)',
+		'These nodes ping but can’t open the configured services, so auto-switching skips them (they stay manually selectable). “Return to auto” forces one back into the pool regardless of the service check.':
+			'Эти узлы пингуются, но не открывают заданные сервисы, поэтому авто-переключение их пропускает (вручную выбрать можно). «Вернуть в авто» принудительно возвращает узел в пул, несмотря на сервис-проверку.',
+		'No unreachable nodes — every node opens the configured services.': 'Недоступных узлов нет — все узлы открывают заданные сервисы.',
+		'Return to auto': 'Вернуть в авто',
+		'Force this node back into auto-switching (keeps it even if the service check fails)': 'Принудительно вернуть узел в авто-переключение (останется даже если сервис-проверка падает)',
+		'forced': 'принудительно',
+		'Re-enable filter': 'Снова фильтровать',
+		'Stop forcing — let the service filter manage this node again': 'Снять принудительное удержание — пусть сервис-фильтр снова решает по этому узлу',
+		'Use this node manually': 'Выбрать этот узел вручную',
+		'Returned to the auto-pool: %s': 'Возвращён в авто-пул: %s',
+		'Node is back under the service filter: %s': 'Узел снова под сервис-фильтром: %s',
 		// --- saved-nodes section + bulk import (Sources page) ---
 		'Saved nodes': 'Сохранённые узлы', 'Activate': 'Активировать', 'Deactivate': 'Деактивировать',
 		'active': 'активен', 'idle': 'простаивает',
@@ -239,6 +274,10 @@ var DICT = {
 		'Add subscription': 'Добавить подписку', '(no extra subscriptions)': '(нет дополнительных подписок)',
 		'Enter a subscription URL first.': 'Сначала введите URL подписки.',
 		'Extra subscription added — fetching…': 'Доп. подписка добавлена — загружаю…',
+		'Extra subscription added — %d node(s) fetched.': 'Доп. подписка добавлена — получено узлов: %d.',
+		'Extra subscription added, but NO nodes were fetched (HTTP %s). Is the URL reachable from the router? Check the port/firewall on the server.':
+			'Доп. подписка добавлена, но узлы НЕ получены (HTTP %s). Доступен ли URL с роутера? Проверьте порт/файрвол на сервере.',
+		'Could not add subscription: %s': 'Не удалось добавить подписку: %s',
 		'Extra subscription removed.': 'Доп. подписка удалена.',
 		'Create a bot via @BotFather, get your chat id (e.g. @userinfobot). Alerts: failover, subscription expiry, start/stop. The control bot only obeys your chat id.':
 			'Создайте бота через @BotFather, узнайте chat id (напр. @userinfobot). Алерты: переключение узла, истечение подписки, старт/стоп. Бот управления слушает только ваш chat id.',

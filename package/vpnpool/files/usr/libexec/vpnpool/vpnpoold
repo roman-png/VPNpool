@@ -122,6 +122,7 @@ kill_tgbot() {
 # dies, hand control to urltest "auto"; when it recovers, switch back. A small
 # bad-streak counter avoids flapping.
 PREF_BAD=0
+PREF_GONE=0
 preferred_check() {
 	local pref sel asw p delay nowsel
 	pref=$(uci -q get vpnpool.main.preferred_node)
@@ -129,9 +130,38 @@ preferred_check() {
 	sel=$(uci -q get vpnpool.main.selected_node); [ -n "$sel" ] && return 0  # manual pin wins
 	asw=$(uci -q get vpnpool.main.auto_switch); [ "$asw" = "0" ] && return 0
 	p=$(curl -s -m3 "http://$CLASH_API/proxies" 2>/dev/null)
-	echo "$p" | jq -e --arg t "$pref" '.proxies[$t]' >/dev/null 2>&1 || return 0  # gone
-	delay=$(echo "$p" | jq -r --arg t "$pref" '(.proxies[$t].history // []) | last | .delay // 0' 2>/dev/null)
+	echo "$p" | jq -e '.proxies' >/dev/null 2>&1 || return 0   # clash API not ready — skip this cycle
 	nowsel=$(echo "$p" | jq -r '.proxies.proxy.now // ""' 2>/dev/null)
+	# Pin points to a tag that no longer exists (node removed / renamed / subscription changed
+	# its #tag). Clear the orphaned pin after a few cycles so a stale 📌 doesn't linger forever
+	# (the counter guards against a transient one-off miss).
+	if ! echo "$p" | jq -e --arg t "$pref" '.proxies[$t]' >/dev/null 2>&1; then
+		PREF_GONE=$((PREF_GONE + 1))
+		if [ "$PREF_GONE" -ge 4 ]; then
+			uci -q delete vpnpool.main.preferred_node; uci commit vpnpool
+			PREF_GONE=0
+			log "preferred node $pref no longer exists -> cleared stale pin"
+		fi
+		return 0
+	fi
+	PREF_GONE=0
+	delay=$(echo "$p" | jq -r --arg t "$pref" '(.proxies[$t].history // []) | last | .delay // 0' 2>/dev/null)
+	# Respect the service-accuracy dead-filter: NEVER pin a node it demoted (one that "pings"
+	# but fails the user's services — e.g. a Reality node that connects but carries no data).
+	# If the preferred node is in the dead set, treat it as down: hand over to auto and don't
+	# re-pin (even if its clash-delay history flaps positive) until it leaves the dead set.
+	if [ "$(uci -q get vpnpool.main.dead_filter)" != "0" ] && [ -f /tmp/vpnpool/.dead_tags.json ] \
+	   && grep -Fq "\"$pref\"" /tmp/vpnpool/.dead_tags.json 2>/dev/null; then
+		# A node demoted to the dead set is a SUSTAINED failure (failed the service check
+		# dead_filter_strikes times in a row), not a transient blip — so don't just hand the
+		# selector to auto, CLEAR the pin entirely (the 📌 goes away). A brief outage that
+		# hasn't reached the dead set still keeps the pin + switches back on recovery (below).
+		[ "$nowsel" = "$pref" ] && curl -s -m5 -X PUT "http://$CLASH_API/proxies/proxy" --data '{"name":"auto"}' >/dev/null 2>&1
+		uci -q delete vpnpool.main.preferred_node; uci commit vpnpool
+		PREF_BAD=0
+		log "preferred node $pref is in the dead set -> unpinned and handed over to auto"
+		return 0
+	fi
 	if [ -n "$delay" ] && [ "$delay" -gt 0 ] 2>/dev/null; then
 		PREF_BAD=0
 		if [ "$nowsel" != "$pref" ]; then
@@ -167,15 +197,19 @@ WD_LIMIT=8        # confirmed-dead checks (each does 3 attempts) before acting
 WD_COOLDOWN=1800  # >= 30 min between self-heals — the real bug was hours-long, not flaps
 WD_GRACE=180      # after a (re)start, give urltest this long to warm up before judging
 WD_LAST=0
-WD_URLS="http://cp.cloudflare.com/generate_204 http://www.gstatic.com/generate_204 http://detectportal.firefox.com/success.txt"
 
-# one tunnel probe through the test-mixed inbound; alive if ANY probe URL returns 2xx
+# one tunnel probe through the test-mixed inbound (which egresses via the active node).
+# The self-heal now keys on the SAME user-configured services as the node-quality filter
+# (check_probe_urls): the tunnel is "alive" if the active node can actually REACH any of
+# them. A reachable host answers with SOME HTTP code (200/204/301/404 — the path is just
+# /generate_204); an over-quota / service-blocked exit can't connect at all (curl yields
+# 000), which is exactly the "pings but the service is dead" state we want to heal.
 probe_tunnel_once() {
 	local tp u code
 	tp=$(uci -q get vpnpool.main.test_port); [ -n "$tp" ] || tp=1605
-	for u in $WD_URLS; do
+	for u in $(check_probe_urls); do
 		code=$(curl -s -o /dev/null -m6 --proxy "http://127.0.0.1:$tp" -w '%{http_code}' "$u" 2>/dev/null)
-		case "$code" in 2??) return 0 ;; esac
+		case "$code" in ""|000) ;; *) return 0 ;; esac
 	done
 	return 1
 }
@@ -264,6 +298,7 @@ tg_notify "🟢 vpnpool: routing is up"
 
 REFRESH=$(interval_seconds)
 LAST=$(date +%s)
+SB_FAILS=0        # consecutive supervisor restarts of a dead sing-box (for crash-loop backoff)
 LAST_NODE=""
 SNAP_LAST=0
 SNAP_EVERY=1800   # auto-snapshot reachable nodes at most every 30 min (self-guards on the toggle)
@@ -295,9 +330,21 @@ while : ; do
 	cap_log
 
 	if ! singbox_alive; then
-		log "sing-box not running, restarting"
+		SB_FAILS=$(( SB_FAILS + 1 ))
+		log "sing-box not running, restarting (consecutive: $SB_FAILS)"
 		start_singbox
-		sleep 2
+		# Crash-loop backoff: if sing-box keeps dying right after start (e.g. a config that
+		# passes `check` but faults at runtime), don't hot-loop every 15 s — back off so the
+		# router stays responsive and logs aren't flooded. Resets once it stays alive.
+		if [ "$SB_FAILS" -ge 3 ]; then
+			bo=$(( SB_FAILS * 10 )); [ "$bo" -gt 120 ] && bo=120
+			log "sing-box crash-looping — backing off ${bo}s"
+			sleep "$bo" & wait $!
+		else
+			sleep 2
+		fi
+	else
+		SB_FAILS=0
 	fi
 
 	# keep the Telegram control bot alive (if enabled)
