@@ -89,6 +89,9 @@ var DICT = {
 			'Голый хост проверяется как http://host/generate_204; полный URL используется как есть. Пусто — откат к обычной проверке связи.',
 		'Drop nodes that ping but can’t reach the services (dead-node filter)': 'Убирать узлы, которые пингуются, но не достают до сервисов (фильтр мёртвых узлов)',
 		'Failures in a row before dropping': 'Неудач подряд до отсева',
+		'Retries per check': 'Повторов на проверку',
+		'A node counts as reaching a service if any of these back-to-back attempts succeeds — absorbs the intermittent cold-handshake flakiness of Reality/Vision nodes so a usable node isn’t wrongly dropped. Default 3.':
+			'Узел считается достигшим сервиса, если успешна хотя бы одна из попыток подряд — сглаживает перемежающуюся флакость «холодного» хендшейка Reality/Vision-узлов, чтобы рабочий узел не отсеялся по ошибке. По умолчанию 3.',
 		'Node-check settings saved — re-checking nodes.': 'Настройки проверки сохранены — перепроверяю узлы.',
 		'Adjusted to %s (allowed: %s–%s).': 'Скорректировано до %s (допустимо: %s–%s).',
 		'Save failed: %s': 'Не удалось сохранить: %s',
@@ -127,6 +130,12 @@ var DICT = {
 		'Unlock test failed for %s.': 'Проверка разблокировки не удалась для %s.',
 		'Anti-DPI & adaptive routing': 'Анти-DPI и адаптивная маршрутизация',
 		'Anti-DPI: fragment the TLS handshake (defeats SNI blocking)': 'Анти-DPI: фрагментировать TLS-хендшейк (обход SNI-блокировок)',
+		'Anti-DPI (TLS fragmentation)': 'Анти-DPI (фрагментация TLS)',
+		'off': 'выкл',
+		'on — fragment TLS handshake': 'вкл — фрагментировать TLS-хендшейк',
+		'aggressive — also record fragmentation': 'агрессивно — плюс фрагментация TLS-записей',
+		'Splits the TLS handshake so plaintext-SNI DPI can not match it. Defeats BASIC filtering only — not robust censorship (for TSPU/strong DPI use zapret). Needs sing-box ≥ 1.12; ignored if unsupported.':
+			'Разбивает TLS-хендшейк, чтобы DPI по открытому SNI не мог его сопоставить. Помогает только против БАЗОВОЙ фильтрации — не против устойчивой цензуры (для TSPU/сильного DPI нужен zapret). Требуется sing-box ≥ 1.12; игнорируется, если не поддерживается.',
 		'Needs sing-box ≥ 1.12. If your build does not support it, the service keeps the previous config (no effect).':
 			'Требуется sing-box ≥ 1.12. Если ваша сборка не поддерживает — сервис сохранит прежний конфиг (без эффекта).',
 		'Adaptive routing: auto-route sites that are blocked for a direct connection': 'Адаптивная маршрутизация: авто-направлять в VPN сайты, заблокированные напрямую',

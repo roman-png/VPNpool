@@ -215,6 +215,7 @@ call)
 		: > /tmp/vpnpool/.probe-running
 		rm -f /tmp/vpnpool/.probe-result.json
 		setsid sh -c '/usr/libexec/vpnpool/probe.sh "$1" > /tmp/vpnpool/.probe-result.json 2>/dev/null; rm -f /tmp/vpnpool/.probe-running' _ "$u" >/dev/null 2>&1 &
+		echo $! > /tmp/vpnpool/.probe-running   # record worker PID -> clear_stale_lock frees it the instant it dies
 		echo '{"running":true,"started":true}'
 		;;
 	probe_result)
@@ -334,13 +335,16 @@ call)
 		k=$(echo "$input" | jq -r '.name // ""')
 		v=$(echo "$input" | jq -r '.value // ""')
 		case "$k" in
-		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|check_services|subscription_ua|telegram_enabled|telegram_token|telegram_chat|telegram_control|telegram_via_proxy|ipv6|killswitch|dns_protect|preferred_node|auto_snapshot|auto_snapshot_max|antidpi|adaptive_routing|adaptive_max_per_run|dead_filter|dead_filter_strikes)
+		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|check_services|subscription_ua|telegram_enabled|telegram_token|telegram_chat|telegram_control|telegram_via_proxy|ipv6|killswitch|dns_protect|preferred_node|auto_snapshot|auto_snapshot_max|antidpi|adaptive_routing|adaptive_max_per_run|dead_filter|dead_filter_strikes|dead_filter_tries)
 			# Server-side clamp for numeric options: never store a non-numeric/out-of-range
 			# value (the UI also surfaces this, but the backend must not trust the client).
 			case "$k" in
 			failover_interval)    case "$v" in (''|*[!0-9]*) v=60 ;; esac; [ "$v" -lt 10 ] && v=10 ;;
 			failover_tolerance)   case "$v" in (''|*[!0-9]*) v=50 ;; esac; [ "$v" -gt 5000 ] && v=5000 ;;
 			dead_filter_strikes)  case "$v" in (''|*[!0-9]*) v=3 ;; esac;  [ "$v" -lt 1 ] && v=1 ;;
+			dead_filter_tries)    case "$v" in (''|*[!0-9]*) v=3 ;; esac;  [ "$v" -lt 1 ] && v=1; [ "$v" -gt 10 ] && v=10 ;;
+			ipv6)                 case "$v" in block|off) ;; *) v=block ;; esac ;;   # 'proxy' mode removed -> safe default
+			antidpi)              case "$v" in off|on|aggressive) ;; 0) v=off ;; 1) v=on ;; *) v=off ;; esac ;;   # 3-way + legacy 0/1
 			auto_snapshot_max)    case "$v" in (''|*[!0-9]*) v=20 ;; esac; [ "$v" -lt 1 ] && v=1; [ "$v" -gt 1000 ] && v=1000 ;;
 			adaptive_max_per_run) case "$v" in (''|*[!0-9]*) v=8 ;; esac;  [ "$v" -lt 1 ] && v=1; [ "$v" -gt 50 ] && v=50 ;;
 			esac
@@ -348,7 +352,7 @@ call)
 			# check_services changes the urltest probe URL -> needs a rebuild (falls into
 			# the default signal_reload below). dead_filter* are read live by nodecheck.sh.
 			case "$k" in
-				subscription_interval|telegram_*|preferred_node|auto_snapshot|auto_snapshot_max|adaptive_max_per_run|dead_filter|dead_filter_strikes) : ;;   # read live by the daemon, no reload
+				subscription_interval|telegram_*|preferred_node|auto_snapshot|auto_snapshot_max|adaptive_max_per_run|dead_filter|dead_filter_strikes|dead_filter_tries) : ;;   # read live by the daemon, no reload
 				*) signal_reload ;;
 			esac
 			echo '{"ok":true}'
@@ -616,10 +620,12 @@ call)
 		tag=$(echo "$input" | jq -r '.tag // ""')
 		[ -n "$tag" ] || { echo '{"error":"no tag"}'; exit 0; }
 		mkdir -p /tmp/vpnpool
+		clear_stale_lock /tmp/vpnpool/.unlock-running 180   # don't let a killed unlock block forever
 		if [ -f /tmp/vpnpool/.unlock-running ]; then echo '{"running":true,"already":true}'; exit 0; fi
 		: > /tmp/vpnpool/.unlock-running
 		rm -f /tmp/vpnpool/.unlock-result.json
 		setsid sh -c '/usr/libexec/vpnpool/unlock.sh "$1"; rm -f /tmp/vpnpool/.unlock-running' _ "$tag" >/dev/null 2>&1 &
+		echo $! > /tmp/vpnpool/.unlock-running   # record worker PID -> clear_stale_lock frees it the instant it dies
 		echo '{"running":true,"started":true}'
 		;;
 	unlock_result)
@@ -669,6 +675,7 @@ call)
 		: > /tmp/vpnpool/.speedtest-running
 		rm -f /tmp/vpnpool/.speedtest-result.json
 		setsid sh -c '/usr/libexec/vpnpool/speedtest.sh "$1"; rm -f /tmp/vpnpool/.speedtest-running' _ "$tag" >/dev/null 2>&1 &
+		echo $! > /tmp/vpnpool/.speedtest-running   # record worker PID -> clear_stale_lock frees it the instant it dies
 		echo '{"running":true,"started":true}'
 		;;
 	speedtest_result)

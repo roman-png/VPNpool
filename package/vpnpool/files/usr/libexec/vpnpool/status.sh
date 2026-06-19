@@ -101,21 +101,28 @@ if [ "$RUNNING" = true ] && [ -s "${CONNF:-/dev/null}" ]; then
 fi
 
 UNLOCKF=/etc/vpnpool/unlock.map.json; [ -f "$UNLOCKF" ] || echo '{}' > "$UNLOCKF"
+# nodecheck.sh publishes tag->measured-delay here; used as a ping fallback when sing-box's
+# own urltest history has no recent successful probe for a node (flaky Reality/Vision exit).
+NDELAYF="$SB_DATA/.nodedelay.json"; [ -f "$NDELAYF" ] || echo '{}' > "$NDELAYF"
 jq -n \
 	--slurpfile p "$PROXF" \
 	--slurpfile n <(cat "$NODES_FILE" 2>/dev/null || echo '[]') \
 	--slurpfile nt "$NTF" \
 	--slurpfile ul "$UNLOCKF" \
+	--slurpfile nd "$NDELAYF" \
 	--argjson imp "$IMPTAGS" \
 	--argjson man "$MANTAGS" \
 	--argjson archids "$ARCHIVE_IDS" \
 	--argjson actsavids "$ACTSAVED_IDS" \
 	'def nid: (.server|tostring)+":"+(.server_port|tostring)+":"+(.uuid//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//"");
-	(($p[0] // {}) | .proxies // {}) as $px | ($nt[0] // {}) as $tr | ($ul[0] // {}) as $un | ($n[0] // []) | map({
+	(($p[0] // {}) | .proxies // {}) as $px | ($nt[0] // {}) as $tr | ($ul[0] // {}) as $un | ($nd[0] // {}) as $ndelay | ($n[0] // []) | map({
 		tag: .tag,
 		server: .server,
 		port: .server_port,
-		delay: (($px[.tag].history // []) | last | .delay // null),
+		# ping = most recent SUCCESSFUL urltest probe (sing-box records a miss as delay 0),
+		# else the delay nodecheck.sh last measured for this node (it probes with retry), so a
+		# reachable-but-flaky node still shows a ping; only a truly dead node falls through to null.
+		delay: (((($px[.tag].history // []) | map(.delay) | map(select(. != null and . > 0))) | last) // ($ndelay[.tag]) // null),
 		up: ($tr[.tag].up // 0),
 		down: ($tr[.tag].down // 0),
 		saved: (nid as $id | ($archids | index($id)) != null),
@@ -185,10 +192,11 @@ CLIENTS=$(uci -q get vpnpool.main.client | tr ' ' '\n' | jq -R . | jq -s 'map(se
 # Saved device MACs (picked by DHCP name). MACs have no spaces -> safe to split.
 CLDEV=$(uci -q get vpnpool.main.client_dev | tr ' ' '\n' | jq -R . | jq -s 'map(select(length>0))' 2>/dev/null)
 [ -n "$CLDEV" ] || CLDEV='[]'
-ANTIDPI=$(uci -q get vpnpool.main.antidpi); [ -n "$ANTIDPI" ] || ANTIDPI=0
+ANTIDPI=$(uci -q get vpnpool.main.antidpi); case "$ANTIDPI" in 1) ANTIDPI=on ;; on|off|aggressive) ;; *) ANTIDPI=off ;; esac
 ADAPT=$(uci -q get vpnpool.main.adaptive_routing); [ -n "$ADAPT" ] || ADAPT=0
 DEADF=$(uci -q get vpnpool.main.dead_filter); [ -n "$DEADF" ] || DEADF=1
 DFSTR=$(uci -q get vpnpool.main.dead_filter_strikes); case "$DFSTR" in (*[!0-9]*|"") DFSTR=3 ;; esac
+DFTRY=$(uci -q get vpnpool.main.dead_filter_tries); case "$DFTRY" in (*[!0-9]*|"") DFTRY=3 ;; esac
 # Service-accuracy check targets (raw uci string; the UI shows one per line).
 CHKSVC=$(uci -q get vpnpool.main.check_services)
 # Tags the dead-node filter currently demoted from the auto pool (read-only display).
@@ -220,10 +228,11 @@ jq -n \
 	--argjson sources "$SOURCES" \
 	--argjson extrasubs "$EXTRASUBS" \
 	--argjson autodom "$AUTODOM" \
-	--argjson antidpi "${ANTIDPI:-0}" \
+	--arg antidpi "${ANTIDPI:-off}" \
 	--argjson adapt "${ADAPT:-0}" \
 	--argjson deadf "${DEADF:-1}" \
 	--arg dfstr "$DFSTR" \
+	--arg dftry "$DFTRY" \
 	--arg chksvc "$CHKSVC" \
 	--argjson deadtags "$DEADTAGS" \
 	--argjson kepttags "$KEPT" \
@@ -298,10 +307,11 @@ jq -n \
 			client_mode: $clm,
 			auto_snapshot: ($asnap==1),
 			auto_snapshot_max: $asnapmax,
-			antidpi: ($antidpi==1),
+			antidpi: $antidpi,
 			adaptive_routing: ($adapt==1),
 			dead_filter: ($deadf==1),
 			dead_filter_strikes: ($dfstr|tonumber? // 3),
+			dead_filter_tries: ($dftry|tonumber? // 3),
 			check_services: $chksvc,
 			sched_enabled: ($schen==1),
 			sched_on: $schon,

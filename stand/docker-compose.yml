@@ -1,0 +1,59 @@
+# vpnpool debug stand. Core service runs everything on loopback (offline => independent of
+# the host WireGuard). Shipped package files are mounted READ-ONLY at their real paths so
+# the stand exercises the genuine scripts and can't "fix" them in place.
+services:
+  stand:
+    build:
+      context: ..
+      dockerfile: stand/Dockerfile
+      args:
+        SINGBOX_VER: "1.12.25"
+    image: vpnpool-stand
+    container_name: vpnpool-stand
+    working_dir: /work
+    volumes:
+      - ../package/vpnpool/files/usr/libexec/vpnpool:/usr/libexec/vpnpool:ro
+      - ../package/luci-app-vpnpool/files/usr/libexec/rpcd:/stage/rpcd:ro
+      - ./:/work:ro
+      - vpnpool-etc:/etc/vpnpool
+      - vpnpool-tmp:/tmp/vpnpool
+    tty: true
+    stdin_open: true
+    command: ["sleep", "infinity"]
+
+  # Routing/tproxy tests need NET_ADMIN + netns. Same image/volumes; run with:
+  #   docker compose --profile routing up -d stand-routing
+  stand-routing:
+    extends: stand
+    container_name: vpnpool-stand-routing
+    profiles: ["routing"]
+    privileged: true
+    cap_add: ["NET_ADMIN", "NET_RAW"]
+
+  # Web-UI variant: real LuCI dashboard over HTTP for user-interaction tests. Build first:
+  #   docker build -f stand/Dockerfile.ui -t vpnpool-stand-ui ..
+  #   docker compose --profile ui up -d stand-ui   ->  http://localhost:8080/ (root/vpnpool)
+  stand-ui:
+    image: vpnpool-stand-ui
+    container_name: vpnpool-stand-ui
+    profiles: ["ui"]
+    working_dir: /work
+    volumes:
+      - ../package/vpnpool/files/usr/libexec/vpnpool:/usr/libexec/vpnpool:ro
+      - ../package/luci-app-vpnpool/files/usr/libexec/rpcd:/stage/rpcd:ro
+      - ../package/luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool:/www/luci-static/resources/view/vpnpool:ro
+      - ../package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool:/www/luci-static/resources/vpnpool:ro
+      - ../package/luci-app-vpnpool/files/usr/share/luci/menu.d/luci-app-vpnpool.json:/usr/share/luci/menu.d/luci-app-vpnpool.json:ro
+      - ../package/luci-app-vpnpool/files/usr/share/rpcd/acl.d/luci-app-vpnpool.json:/usr/share/rpcd/acl.d/luci-app-vpnpool.json:ro
+      - ./:/work:ro
+      - vpnpool-etc:/etc/vpnpool
+      - vpnpool-tmp:/tmp/vpnpool
+    ports:
+      - "8080:80"
+    tty: true
+    stdin_open: true
+    command: ["sleep", "infinity"]
+
+volumes:
+  vpnpool-etc:
+  vpnpool-tmp:

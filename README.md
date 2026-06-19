@@ -98,8 +98,9 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
   nodes from the dashboard and **auto‑activates your saved nodes** so you stay connected.
 - 🎬 **Per‑node unlock test** — check what each node opens (YouTube / ChatGPT /
   Netflix / Instagram / Telegram / Google) and see badges right in the dashboard.
-- 🛡️ **Anti‑DPI** — one toggle to fragment the TLS ClientHello (sing‑box
-  `tls_fragment`) and defeat SNI‑based DPI.
+- 🛡️ **Anti‑DPI** — three levels: **off / on** (sing‑box `tls_fragment` — split the
+  TLS ClientHello so plaintext‑SNI DPI can't match) **/ aggressive** (`tls_record_fragment`).
+  Defeats *basic* filtering; for robust censorship (TSPU) use zapret alongside.
 - 🎛️ **Configurable auto‑pool** — on the Dashboard, click **⚙ Configure** next to the
   AUTO row to pick **exactly which nodes take part in automatic switching**.
   Unchecked nodes stay available for manual selection but are never auto‑picked.
@@ -417,7 +418,7 @@ the data plane is **sing‑box**, exactly like v2RayTun/Happ wrap an engine.
 | **Two‑way Telegram control bot** | ✅ | — | — | — |
 | **Adaptive routing (auto‑detect blocks)** | ✅ | — | — | — |
 | **Per‑node unlock test (YT/AI/NF…)** | ✅ | — | — | — |
-| **Anti‑DPI TLS fragmentation** | ✅ toggle | — | — | — |
+| **Anti‑DPI TLS fragmentation** | ✅ off/on/aggressive | — | — | — |
 | **Kill‑switch + DNS‑leak guard** | ✅ opt‑in | partial | ✅ | partial |
 | Community SRS lists | ✅ (itdoginfo) | ✅ | own | own |
 | Per‑client routing | ✅ | — | ✅ | partial |

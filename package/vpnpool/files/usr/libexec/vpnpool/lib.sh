@@ -14,7 +14,16 @@ log() { logger -t "$NAME" "$1"; }
 # fired — can't block every future run forever. No-op if the lock is fresh or absent.
 clear_stale_lock() {   # $1=lockfile  $2=maxage_seconds (default 600)
 	[ -f "$1" ] || return 0
-	local now lk
+	local now lk pid
+	# PID-aware (preferred): if the lock records its owner's PID, trust liveness over age —
+	# a live owner keeps the lock no matter how long it runs (a slow fetch/build on a weak
+	# router must NOT lose its lock mid-run), and a dead owner releases it IMMEDIATELY
+	# (don't wait out maxage). Falls back to the age check only when the lock has no PID.
+	pid=$(cat "$1" 2>/dev/null)
+	case "$pid" in
+		''|*[!0-9]*) ;;   # no / non-numeric PID -> age-based check below
+		*) if kill -0 "$pid" 2>/dev/null; then return 0; else rm -f "$1"; return 0; fi ;;
+	esac
 	now=$(date +%s); lk=$(date -r "$1" +%s 2>/dev/null || echo 0)
 	[ $(( now - lk )) -ge "${2:-600}" ] && rm -f "$1"
 	return 0
@@ -131,10 +140,12 @@ RT_PRIO=$(uci -q get vpnpool.main.route_priority); [ -n "$RT_PRIO" ] || RT_PRIO=
 CLASH_API=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH_API" ] || CLASH_API=127.0.0.1:9091
 COEXIST=$(uci -q get vpnpool.main.coexist); [ -n "$COEXIST" ] || COEXIST=auto
 # IPv6 policy: block (fail-closed: drop LAN v6 to internet so it can't bypass the
-# v4 VPN), off (don't touch v6), proxy (reserved for future v6 tproxy).
+# v4 VPN) or off (don't touch v6). (A 'proxy' mode for real v6 tproxy transit was
+# never implemented — it silently behaved exactly like 'off' — so it's removed; any
+# leftover ipv6=proxy now validates to the safe 'block' below.)
 # Validate, don't just default: an unknown/typo value (e.g. ipv6=blok) must not silently
 # disable the leak guard — fall back to the safe 'block'.
-IPV6=$(uci -q get vpnpool.main.ipv6); case "$IPV6" in block|off|proxy) ;; *) IPV6=block ;; esac
+IPV6=$(uci -q get vpnpool.main.ipv6); case "$IPV6" in block|off) ;; *) IPV6=block ;; esac
 # Kill-switch (fail-closed for IPv4): when on, in full-tunnel ("exclude") mode mark
 # ALL LAN ports for tproxy so nothing can leak past the VPN if sing-box is down
 # (marked traffic routes to the lo blackhole table when no listener answers).

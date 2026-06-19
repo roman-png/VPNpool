@@ -1,0 +1,15 @@
+# vpnpool stand — UI variant. Extends the base stand image with LuCI + uhttpd so the
+# REAL web dashboard (the shipped luci-app JS views) can be driven end-to-end for
+# user-interaction tests. Built on top of vpnpool-stand:latest (no re-download of sing-box).
+#   docker build -f stand/Dockerfile.ui -t vpnpool-stand-ui ..    (context = repo root)
+FROM vpnpool-stand:latest
+
+# LuCI JS framework + ubus-over-HTTP bridge + a theme + admin menu + rpcd ACL plumbing.
+RUN opkg update \
+ && opkg install uhttpd uhttpd-mod-ubus luci-base luci-theme-bootstrap \
+      luci-mod-admin-full rpcd-mod-luci rpcd-mod-file || true
+
+COPY stand/entrypoint-ui.sh /entrypoint-ui.sh
+RUN chmod +x /entrypoint-ui.sh
+ENTRYPOINT ["/entrypoint-ui.sh"]
+CMD ["sleep", "infinity"]
