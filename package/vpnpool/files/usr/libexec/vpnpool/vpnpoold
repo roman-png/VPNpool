@@ -248,6 +248,19 @@ cleanup() {
 	exit 0
 }
 
+# Bring routing up and report HONESTLY. route.sh exits non-zero when nft fails to apply
+# the table (missing kernel module, ruleset error) — in that case traffic is NOT going
+# through the VPN. Logging "routing is UP" unconditionally masked a dead tunnel in the
+# logs/diagnostics, so check the exit code and say what actually happened.
+routing_up() {
+	if "$LIBEXEC/route.sh" up; then
+		log "routing is UP"
+		return 0
+	fi
+	log "routing FAILED to apply (nft) — traffic is NOT going through the VPN"
+	return 1
+}
+
 # USR1 = rebuild config from cache + manual nodes and hot-reload sing-box.
 # Sent by the LuCI backend after manual node / domain edits so they apply live.
 reload_config() {
@@ -256,8 +269,8 @@ reload_config() {
 		start_singbox   # stops the old instance and waits for the port/lock to free
 		# re-apply routing so per-client / ipv6 / coexist / domain edits take effect
 		"$LIBEXEC/route.sh" down
-		"$LIBEXEC/route.sh" up
-		log "reloaded: sing-box + routing"
+		routing_up
+		log "reload complete (sing-box reloaded)"
 	else
 		log "reload: build failed, keeping current config"
 	fi
@@ -291,8 +304,7 @@ done
 
 start_singbox
 sleep 3
-"$LIBEXEC/route.sh" up
-log "routing is UP"
+routing_up
 start_tgbot
 tg_notify "🟢 vpnpool: routing is up"
 

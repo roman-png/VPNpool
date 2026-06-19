@@ -1,0 +1,7 @@
+# Stand-generated secrets / runtime artifacts — never commit (CLAUDE.md security rule).
+.env.generated
+.env.real
+reality-server/server.json
+*.key
+*.pem
+*.crt

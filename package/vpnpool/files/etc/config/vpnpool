@@ -52,10 +52,12 @@ config vpnpool 'main'
 	option sched_refresh ''
 	# On-demand per-node speed test target (sized download endpoint)
 	option speedtest_url 'https://speed.cloudflare.com/__down?bytes=10000000'
-	# Anti-DPI: fragment the TLS ClientHello (sing-box tls_fragment) to defeat SNI
-	# DPI. Needs sing-box >= 1.12; if unsupported, the resilient build keeps the
-	# previous config (no effect). Opt-in.
-	option antidpi '0'
+	# Anti-DPI TLS fragmentation (sing-box route-options). Levels: off / on
+	# (tls_fragment — split the ClientHello so plaintext SNI DPI can't match) /
+	# aggressive (also tls_record_fragment). Defeats BASIC filtering, not robust
+	# censorship (for TSPU use zapret). Needs sing-box >= 1.12; ignored if
+	# unsupported. Opt-in. (legacy values '0'=off, '1'=on are still accepted.)
+	option antidpi 'off'
 	# Adaptive routing: auto-detect domains blocked for a DIRECT connection and route
 	# them through the proxy (stored in routing.auto_domain). Opt-in.
 	option adaptive_routing '0'
@@ -71,6 +73,11 @@ config vpnpool 'main'
 	# default. Set to '0' to keep every node in the pool regardless.
 	option dead_filter '1'
 	option dead_filter_strikes '3'
+	# Per-cycle probe retries: a node counts as reaching a service if ANY of these back-to-back
+	# clash-delay attempts succeeds. Absorbs the intermittent COLD-handshake flakiness of
+	# Reality/Vision nodes (a working node can miss a single probe, then a retry succeeds) so a
+	# usable node isn't flapped into "unreachable"; a genuinely dead node fails every attempt.
+	option dead_filter_tries '3'
 	# Max concurrent TCP probes in the build-time health prefilter. Bounded so a large
 	# subscription doesn't fork hundreds of curls at once and OOM sing-box on a 16 MB
 	# router. Default 16 (in-code) if unset.

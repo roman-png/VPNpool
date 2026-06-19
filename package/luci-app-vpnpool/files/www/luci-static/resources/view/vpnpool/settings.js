@@ -36,19 +36,21 @@ return view.extend({
 	handleSaveInterval: function(inp) { return this.save('failover_interval', this.clampInt(inp, 10, null, 60)); },
 	handleSaveTolerance: function(inp) { return this.save('failover_tolerance', this.clampInt(inp, 0, 5000, 50)); },
 	handleToggleAuto: function(cb) { return this.save('auto_switch', cb.checked ? '1' : '0'); },
-	handleSaveCheck: function(ta, cb, strk) {
+	handleSaveCheck: function(ta, cb, strk, tries) {
 		var self = this;
 		// store as a single space-separated string (hosts/URLs never contain spaces)
 		var svc = (ta.value || '').split(/\s+/).filter(Boolean).join(' ');
 		var n = this.clampInt(strk, 1, 20, 3);
+		var t = this.clampInt(tries, 1, 10, 3);
 		return callSetOpt('check_services', svc)
 			.then(function() { return callSetOpt('dead_filter', cb.checked ? '1' : '0'); })
 			.then(function() { return callSetOpt('dead_filter_strikes', n); })
+			.then(function() { return callSetOpt('dead_filter_tries', t); })
 			.then(function() { self.notify(_('Node-check settings saved — re-checking nodes.')); });
 	},
 	handleToggleKill: function(cb) { return this.save('killswitch', cb.checked ? '1' : '0'); },
 	handleToggleDns: function(cb) { return this.save('dns_protect', cb.checked ? '1' : '0'); },
-	handleToggleAntidpi: function(cb) { return this.save('antidpi', cb.checked ? '1' : '0'); },
+	handleSaveAntidpi: function(sel) { return this.save('antidpi', sel.value); },
 	handleToggleAdaptive: function(cb) { return this.save('adaptive_routing', cb.checked ? '1' : '0'); },
 	renderAutoDomains: function(st) {
 		var self = this;
@@ -130,11 +132,17 @@ return view.extend({
 			(s.check_services || '').split(/\s+/).filter(Boolean).join('\n'));
 		var deadFilterCb = E('input', { 'type': 'checkbox', 'checked': (s.dead_filter !== false) ? 'checked' : null });
 		var deadStrikes = E('input', { 'type': 'number', 'min': '1', 'class': 'cbi-input-text', 'style': 'width:90px', 'value': String(s.dead_filter_strikes || 3) });
+		var deadTries = E('input', { 'type': 'number', 'min': '1', 'max': '10', 'class': 'cbi-input-text', 'style': 'width:90px', 'value': String(s.dead_filter_tries || 3) });
 
 		var kill = E('input', { 'type': 'checkbox', 'checked': s.killswitch ? 'checked' : null });
 		var dns  = E('input', { 'type': 'checkbox', 'checked': s.dns_protect ? 'checked' : null });
 
-		var antidpiCb = E('input', { 'type': 'checkbox', 'checked': s.antidpi ? 'checked' : null });
+		var antidpiVal = (s.antidpi === true || s.antidpi === 1) ? 'on' : (s.antidpi || 'off');
+		var antidpiSel = E('select', { 'class': 'cbi-input-select' }, [
+			E('option', { 'value': 'off',        'selected': antidpiVal === 'off' ? 'selected' : null }, _('off')),
+			E('option', { 'value': 'on',         'selected': antidpiVal === 'on' ? 'selected' : null }, _('on — fragment TLS handshake')),
+			E('option', { 'value': 'aggressive', 'selected': antidpiVal === 'aggressive' ? 'selected' : null }, _('aggressive — also record fragmentation'))
+		]);
 		var adaptiveCb = E('input', { 'type': 'checkbox', 'checked': s.adaptive_routing ? 'checked' : null });
 		var autoDomInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:260px', 'placeholder': 'example.com' });
 
@@ -186,8 +194,10 @@ return view.extend({
 					E('label', {}, [ deadFilterCb, E('span', { 'style': 'margin-left:6px' }, _('Drop nodes that ping but can’t reach the services (dead-node filter)')) ])
 				]),
 				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:inline-block;width:220px' }, _('Failures in a row before dropping')), deadStrikes ]),
+				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:inline-block;width:220px' }, _('Retries per check')), deadTries ]),
+				E('p', { 'style': 'color:#888' }, _('A node counts as reaching a service if any of these back-to-back attempts succeeds — absorbs the intermittent cold-handshake flakiness of Reality/Vision nodes so a usable node isn’t wrongly dropped. Default 3.')),
 				E('div', { 'style': 'margin-top:6px' }, [
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'click': ui.createHandlerFn(this, 'handleSaveCheck', chkSvc, deadFilterCb, deadStrikes) }, _('Save'))
+					E('button', { 'class': 'btn cbi-button cbi-button-save', 'click': ui.createHandlerFn(this, 'handleSaveCheck', chkSvc, deadFilterCb, deadStrikes, deadTries) }, _('Save'))
 				])
 			]),
 
@@ -206,9 +216,9 @@ return view.extend({
 
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Anti-DPI & adaptive routing')),
-				E('div', { 'style': 'margin:6px 0' }, [ E('label', {}, [ antidpiCb, E('span', { 'style': 'margin-left:6px' }, _('Anti-DPI: fragment the TLS handshake (defeats SNI blocking)')) ]),
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleToggleAntidpi', antidpiCb) }, _('Save')) ]),
-				E('p', { 'style': 'color:#888' }, _('Needs sing-box ≥ 1.12. If your build does not support it, the service keeps the previous config (no effect).')),
+				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'margin-right:6px' }, _('Anti-DPI (TLS fragmentation)')), antidpiSel,
+					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleSaveAntidpi', antidpiSel) }, _('Save')) ]),
+				E('p', { 'style': 'color:#888' }, _('Splits the TLS handshake so plaintext-SNI DPI can not match it. Defeats BASIC filtering only — not robust censorship (for TSPU/strong DPI use zapret). Needs sing-box ≥ 1.12; ignored if unsupported.')),
 				E('div', { 'style': 'margin:10px 0 6px' }, [ E('label', {}, [ adaptiveCb, E('span', { 'style': 'margin-left:6px' }, _('Adaptive routing: auto-route sites that are blocked for a direct connection')) ]),
 					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleToggleAdaptive', adaptiveCb) }, _('Save')),
 					E('button', { 'class': 'btn cbi-button cbi-button-action', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleRunAdaptive') }, _('Scan now')) ]),

@@ -1,0 +1,6 @@
+#!/bin/sh
+# stand logger shim (PATH-prepended, /opt/stand/bin): tee vpnpool log lines to stderr so
+# the package scripts' log() (logger -t vpnpool ...) is visible off-router, then best-effort
+# hand to the real busybox logger (no-op if no syslogd runs in the container).
+printf '[log] %s\n' "$*" >&2
+/bin/logger "$@" 2>/dev/null || true

@@ -87,9 +87,14 @@ for (let c in communities) {
 		tag: tag,
 		format: 'binary',
 		url: SRS_BASE + '/' + c + '.srs',
-		// download_detour is DEPRECATED (replacement http_client, added in sing-box 1.14)
-		// and scheduled for REMOVAL in 1.16. Works on the targeted >=1.12. TODO: before
-		// moving to sing-box 1.16, switch to http_client (verify schema on that build).
+		// download_detour: route rule-set downloads via the "direct" outbound (so SRS
+		// fetches don't loop through the proxy before it's up). VERIFIED working on the
+		// targeted sing-box 1.12.25 (rule-sets download, build ok). It is DEPRECATED from
+		// 1.14 (replacement: route-level rule_set download via `http_client`) and slated
+		// for REMOVAL in 1.16 — but that replacement does NOT exist before 1.14, so we must
+		// keep download_detour while targeting 1.12.x. MIGRATION GATE: when the package
+		// bumps sing-box to >=1.14, switch to the http_client form and re-verify on that
+		// build; do NOT change it earlier or rule-set downloads break on the current target.
 		download_detour: 'direct',
 		update_interval: '24h'
 	});
@@ -229,13 +234,19 @@ let rules = [ { action: 'sniff' } ];
 // field — so it is applied here, before the outbound-selecting rules. On a sing-box that
 // predates 1.12 the field is rejected at decode time and build.sh keeps the previous
 // working config (worst case: "no effect"), so the toggle is always safe.
-let antidpi = opt('main', 'antidpi', '0');
-if (antidpi == '1')
-	push(rules, {
-		action: 'route-options',
-		tls_fragment: true,
-		tls_fragment_fallback_delay: '500ms'
-	});
+// 3 levels (back-compat: legacy '0'->off, '1'->on):
+//   off        - no fragmentation
+//   on         - tls_fragment: split the ClientHello so plaintext-SNI DPI can't match it
+//   aggressive - tls_record_fragment: break the handshake into multiple TLS records
+// NOTE: sing-box treats tls_fragment and tls_record_fragment as MUTUALLY EXCLUSIVE
+// (setting both fails decode), so aggressive uses the record variant INSTEAD of, not on
+// top of, tls_fragment. Both defeat BASIC filtering only — not robust censorship (TSPU);
+// for that the user needs zapret. tls_fragment_fallback_delay applies to tls_fragment only.
+let antidpi = opt('main', 'antidpi', 'off');
+if (antidpi == 'aggressive')
+	push(rules, { action: 'route-options', tls_record_fragment: true });
+else if (antidpi == '1' || antidpi == 'on')
+	push(rules, { action: 'route-options', tls_fragment: true, tls_fragment_fallback_delay: '500ms' });
 // the local test/SOCKS inbound always egresses through the proxy (for the
 // "test exit via VPN" diagnostic and as a handy local proxy port)
 push(rules, { inbound: [ 'test-mixed-in' ], outbound: 'proxy' });
