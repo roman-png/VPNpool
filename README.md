@@ -72,8 +72,11 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
   generated **client‑side** so node secrets never leave the router.
 - 🧩 **Multiple subscriptions** — add extra full subscriptions that are bulk‑merged
   into the pool alongside the main one.
-- 🤖 **Two‑way Telegram bot** — `/status /nodes /switch /speedtest /quota /saved
-  /clients /on /off /refresh`, locked to your chat id, tunnelled through the VPN.
+- 🤖 **Two‑way Telegram bot** — a **button menu** (`/menu`): tap to switch node, run a
+  speed test, toggle routing, see status/quota/clients. Slash commands still work
+  (`/status /nodes /switch /speedtest /quota /saved /clients /on /off /refresh`), locked
+  to your chat id, tunnelled through the VPN. Runs as its own supervised service so it
+  stays responsive and can't get stuck.
 - 🧠 **Adaptive routing** — auto‑detects domains that are **blocked for a direct
   connection** (RST/timeout) and routes just those through the VPN, so the proxy
   list maintains itself for *your* ISP. Plus a one‑click “this site is blocked”.

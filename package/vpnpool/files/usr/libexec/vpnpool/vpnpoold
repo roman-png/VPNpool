@@ -8,7 +8,6 @@
 . /usr/libexec/vpnpool/lib.sh
 
 SB_PIDFILE=/var/run/vpnpool-singbox.pid
-TGBOT_PIDFILE=/var/run/vpnpool-tgbot.pid
 LIBEXEC=/usr/libexec/vpnpool
 
 SB_LOG="$SB_DATA/sing-box.log"
@@ -90,31 +89,15 @@ current_node() {
 	fi
 }
 
-# ---- two-way Telegram control bot (optional, telegram_control=1) ----
-tgbot_enabled() {
-	[ "$(uci -q get vpnpool.main.telegram_control)" = "1" ] || return 1
-	[ -n "$(uci -q get vpnpool.main.telegram_token)" ] || return 1
-	[ -n "$(uci -q get vpnpool.main.telegram_chat)" ] || return 1
-}
-tgbot_alive() {
-	local p; p=$(cat "$TGBOT_PIDFILE" 2>/dev/null)
-	[ -n "$p" ] && kill -0 "$p" 2>/dev/null
-}
-start_tgbot() {
-	tgbot_enabled || return 0
-	tgbot_alive && return 0
-	# 9>&- so the bot doesn't inherit the restart lock fd (same trap as sing-box).
-	"$LIBEXEC/tgbot.sh" >/dev/null 2>&1 9>&- &
-	echo $! > "$TGBOT_PIDFILE"
-	log "tgbot started pid=$(cat "$TGBOT_PIDFILE" 2>/dev/null)"
-}
-kill_tgbot() {
-	local p; p=$(cat "$TGBOT_PIDFILE" 2>/dev/null)
-	[ -n "$p" ] && kill "$p" 2>/dev/null
-	# also sweep any stray instance
-	for p in $(pgrep -f "$LIBEXEC/tgbot.sh" 2>/dev/null); do kill "$p" 2>/dev/null; done
-	rm -f "$TGBOT_PIDFILE"
-}
+# ---- two-way Telegram control bot ----
+# The bot (tgbot.sh) is NOT forked/supervised here any more. It runs as its OWN procd
+# instance (see /etc/init.d/vpnpool), so procd is its single supervisor: it reliably
+# kills the bot on stop/restart and respawns it on crash. The old fork-as-background-child
+# model orphaned the bot whenever this daemon was SIGKILLed (OOM, or procd's
+# SIGTERM->SIGKILL on restart) — the orphan kept long-polling getUpdates while the next
+# daemon spawned a second one, and Telegram's one-poller-per-bot rule made the two race
+# (409 Conflict) so the bot "answered every other message". Moving it under procd removes
+# that failure class at the root.
 
 # ---- preferred-node soft pin with switch-back ----
 # If preferred_node is set (and the user hasn't manually pinned a node and
@@ -241,7 +224,6 @@ watchdog_check() {
 cleanup() {
 	log "stopping: removing routing and sing-box"
 	tg_notify "🔴 vpnpool: stopped"
-	kill_tgbot
 	"$LIBEXEC/route.sh" down
 	kill_singbox
 	log "stopped cleanly"
@@ -305,7 +287,6 @@ done
 start_singbox
 sleep 3
 routing_up
-start_tgbot
 tg_notify "🟢 vpnpool: routing is up"
 
 REFRESH=$(interval_seconds)
@@ -359,13 +340,7 @@ while : ; do
 		SB_FAILS=0
 	fi
 
-	# keep the Telegram control bot alive (if enabled)
-	if tgbot_enabled && ! tgbot_alive; then
-		log "tgbot not running, restarting"
-		start_tgbot
-	elif ! tgbot_enabled && tgbot_alive; then
-		kill_tgbot   # disabled via UI -> stop it
-	fi
+	# (the Telegram control bot is a separate procd instance — procd supervises it)
 
 	# preferred-node soft pin + switch-back
 	preferred_check

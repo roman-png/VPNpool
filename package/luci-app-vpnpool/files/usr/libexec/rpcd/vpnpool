@@ -352,6 +352,10 @@ call)
 			# check_services changes the urltest probe URL -> needs a rebuild (falls into
 			# the default signal_reload below). dead_filter* are read live by nodecheck.sh.
 			case "$k" in
+				telegram_control)
+					# starts/stops the tgbot procd instance. `reload` re-runs start_service
+					# and procd diffs instances, so the tunnel daemon is NOT bounced.
+					/etc/init.d/vpnpool reload >/dev/null 2>&1 ;;
 				subscription_interval|telegram_*|preferred_node|auto_snapshot|auto_snapshot_max|adaptive_max_per_run|dead_filter|dead_filter_strikes|dead_filter_tries) : ;;   # read live by the daemon, no reload
 				*) signal_reload ;;
 			esac

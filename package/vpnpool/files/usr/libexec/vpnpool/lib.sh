@@ -52,12 +52,35 @@ TG_TEST_PORT=$(uci -q get vpnpool.main.test_port); [ -n "$TG_TEST_PORT" ] || TG_
 # Captures the proxy attempt and only emits it on success, so a failed proxy run
 # (which still prints -w output) can't get concatenated with the direct fallback.
 tg_curl() {
-	local out rc
+	local out rc i
 	if [ "$TG_VIA_PROXY" = "1" ]; then
-		out=$(curl -s --proxy "socks5h://127.0.0.1:$TG_TEST_PORT" "$@"); rc=$?
-		if [ "$rc" -eq 0 ]; then printf '%s' "$out"; return 0; fi
+		# The socks proxy path through the node is intermittently flaky (observed: ~1/3 of
+		# requests fail TLS with curl rc=35) — so RETRY the proxy a few times before giving
+		# up. A failed TLS connect returns fast and sends nothing, so a retry can't double-
+		# send; this turns ~66% per-try success into ~96%+ and stops button replies from
+		# being lost or punted to the (RU-blocked, slow) direct fallback.
+		i=0
+		while [ "$i" -lt 3 ]; do
+			out=$(curl -s --proxy "socks5h://127.0.0.1:$TG_TEST_PORT" "$@"); rc=$?
+			if [ "$rc" -eq 0 ]; then printf '%s' "$out"; return 0; fi
+			i=$((i + 1))
+		done
 	fi
 	curl -s "$@"
+}
+
+# getUpdates long-poll transport. UNLIKE tg_curl, a failed PROXY attempt does NOT fall
+# back to a DIRECT request: api.telegram.org is blocked in RU, so a direct long-poll would
+# block for the FULL -m timeout (~60s) on every proxy hiccup — delaying every queued button
+# press / command until it expires (the bot "answers after a long time"). Proxy-only keeps
+# polling responsive: a transient proxy failure returns empty fast and the caller retries
+# the proxy after a short sleep. Honors telegram_via_proxy=0 (then it polls direct).
+tg_poll() {
+	if [ "$TG_VIA_PROXY" = "1" ]; then
+		curl -s --proxy "socks5h://127.0.0.1:$TG_TEST_PORT" "$@"
+	else
+		curl -s "$@"
+	fi
 }
 
 # Low-level Telegram send (ignores the enable toggle). Needs token+chat.
@@ -73,6 +96,48 @@ tg_send() {
 		"$TG_API/bot$tok/sendMessage" 2>/dev/null)
 	echo "${code:-000}"
 	[ "$code" = "200" ]
+}
+
+# Send a message WITH an inline keyboard. $1=text, $2=reply_markup JSON (compact).
+# Echoes the HTTP status code (200 = delivered).
+tg_send_kb() {
+	local tok chat code
+	tok=$(uci -q get vpnpool.main.telegram_token)
+	chat=$(uci -q get vpnpool.main.telegram_chat)
+	[ -n "$tok" ] && [ -n "$chat" ] || { echo "000"; return 1; }
+	code=$(tg_curl -m 12 -o /dev/null -w '%{http_code}' \
+		--data-urlencode "chat_id=$chat" \
+		--data-urlencode "text=$1" \
+		--data-urlencode "reply_markup=$2" \
+		"$TG_API/bot$tok/sendMessage" 2>/dev/null)
+	echo "${code:-000}"
+	[ "$code" = "200" ]
+}
+
+# Edit an existing bot message's text + keyboard in place (clean nav, no chat spam).
+# $1=message_id $2=text $3=reply_markup JSON. "message is not modified" is harmless.
+tg_edit_kb() {
+	local tok chat
+	tok=$(uci -q get vpnpool.main.telegram_token)
+	chat=$(uci -q get vpnpool.main.telegram_chat)
+	[ -n "$tok" ] && [ -n "$chat" ] || return 1
+	tg_curl -m 12 -o /dev/null \
+		--data-urlencode "chat_id=$chat" \
+		--data-urlencode "message_id=$1" \
+		--data-urlencode "text=$2" \
+		--data-urlencode "reply_markup=$3" \
+		"$TG_API/bot$tok/editMessageText" >/dev/null 2>&1
+}
+
+# Acknowledge a callback query (stops the button's spinner). MUST be called once per
+# callback. $1=callback_query_id $2=optional toast text (<=200 chars).
+tg_answer_cbq() {
+	local tok
+	tok=$(uci -q get vpnpool.main.telegram_token); [ -n "$tok" ] || return 1
+	tg_curl -m 8 -o /dev/null \
+		--data-urlencode "callback_query_id=$1" \
+		--data-urlencode "text=${2:-}" \
+		"$TG_API/bot$tok/answerCallbackQuery" >/dev/null 2>&1
 }
 
 # Send a Telegram alert ONLY if notifications are enabled (used by the daemon).
