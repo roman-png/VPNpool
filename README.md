@@ -189,11 +189,25 @@ Installs (or upgrades) the latest release. Downloads the prebuilt packages from
 GitHub Releases and pulls dependencies from the standard OpenWrt feeds. Your
 `/etc/config/vpnpool` (subscription, Telegram, routing) is preserved on upgrade.
 
+There are **two variants** — pick by whether you need AmneziaWG:
+
+**Standard** (VLESS / VMess / Trojan / Shadowsocks, stock sing-box):
+
 ```sh
 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
 ```
 
-If your BusyBox `wget` doesn't support `<(...)`:
+**With AmneziaWG** (`VPNPOOL_AWG=1`) — additionally replaces sing-box with the AmneziaWG
+fork (so you can import AmneziaWG `.conf` / `vpn://` nodes; stock sing-box can't do AWG).
+The fork binary is held against `opkg upgrade`; ⚠ podkop, if installed, rides the same
+binary:
+
+```sh
+VPNPOOL_AWG=1 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
+```
+
+If your BusyBox `wget` doesn't support `<(...)`, fetch then run (add `VPNPOOL_AWG=1 ` before
+`sh` for the AmneziaWG variant):
 
 ```sh
 wget -O /tmp/vpnpool-install.sh https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh

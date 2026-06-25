@@ -290,8 +290,9 @@ return view.extend({
 		var extraSubInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:100%',
 			'placeholder': 'https://…/sub' });
 		var manInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:100%', 'placeholder': 'vless://…' });
+		var awgOk = !!(st && st.awg);   // installed sing-box supports AmneziaWG?
 		var importTA = E('textarea', { 'class': 'cbi-input-textarea', 'style': 'width:100%;min-height:90px;font-family:monospace;font-size:12px',
-			'placeholder': 'vless://…\n' + _('or a base64 subscription') + '\n' + _('or an AmneziaWG .conf / vpn:// link') });
+			'placeholder': 'vless://…\n' + _('or a base64 subscription') + (awgOk ? '\n' + _('or an AmneziaWG .conf / vpn:// link') : '') });
 		var fileInput = E('input', { 'type': 'file', 'accept': '.txt,.text,text/plain', 'style': 'display:none' });
 		fileInput.addEventListener('change', L.bind(function() { this.handleImportFile(importTA, fileInput); }, this));
 		var intInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:120px',
@@ -341,7 +342,7 @@ return view.extend({
 
 				E('h4', { 'style': 'margin-top:14px' }, _('Bulk import')),
 				E('p', { 'style': 'color:#888' }, _('Paste many node links (one per line) or a whole base64 subscription, or load them from a file. New links are added to the manual list above.')),
-				E('p', { 'style': 'color:#888' }, _('AmneziaWG: paste an AmneziaWG .conf or an AmneziaVPN vpn:// link here (not in the single field above) — it joins the same pool. The single field above is for vless:// / vmess:// / trojan:// / ss:// links only.')),
+				awgOk ? E('p', { 'style': 'color:#888' }, _('AmneziaWG: paste an AmneziaWG .conf or an AmneziaVPN vpn:// link here (not in the single field above) — it joins the same pool. The single field above is for vless:// / vmess:// / trojan:// / ss:// links only.')) : '',
 				importTA,
 				E('div', { 'style': 'margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;align-items:center' }, [
 					E('button', { 'class': 'btn cbi-button cbi-button-add', 'click': ui.createHandlerFn(this, 'handleImportNodes', importTA) }, '⤓ ' + _('Import')),
@@ -352,11 +353,11 @@ return view.extend({
 				E('div', { 'id': 'vp-manlist', 'style': 'margin-top:8px' }, this.renderManual(st))
 			]),
 
-			E('div', { 'class': 'cbi-section' }, [
+			awgOk ? E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('AmneziaWG nodes')),
 				E('p', { 'style': 'color:#888' }, _('Imported AmneziaWG nodes (from a .conf or vpn:// link). They join the same auto-failover pool as other nodes and are service-checked the same way.')),
 				E('div', { 'id': 'vp-awglist', 'style': 'margin-top:4px' }, this.renderAwg(st))
-			]),
+			]) : '',
 
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Saved nodes')),
