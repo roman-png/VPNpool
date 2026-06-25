@@ -307,7 +307,7 @@ return view.extend({
 			'placeholder': 'https://…/sub' });
 		var manInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:100%', 'placeholder': 'vless://…' });
 		var importTA = E('textarea', { 'class': 'cbi-input-textarea', 'style': 'width:100%;min-height:90px;font-family:monospace;font-size:12px',
-			'placeholder': 'vless://…\nvless://…\n' + _('or a base64 subscription') });
+			'placeholder': 'vless://…\n' + _('or a base64 subscription') + '\n' + _('or an AmneziaWG .conf / vpn:// link') });
 		var fileInput = E('input', { 'type': 'file', 'accept': '.txt,.text,text/plain', 'style': 'display:none' });
 		fileInput.addEventListener('change', L.bind(function() { this.handleImportFile(importTA, fileInput); }, this));
 		var intInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:120px',
@@ -357,6 +357,7 @@ return view.extend({
 
 				E('h4', { 'style': 'margin-top:14px' }, _('Bulk import')),
 				E('p', { 'style': 'color:#888' }, _('Paste many node links (one per line) or a whole base64 subscription, or load them from a file. New links are added to the manual list above.')),
+				E('p', { 'style': 'color:#888' }, _('AmneziaWG: paste an AmneziaWG .conf or an AmneziaVPN vpn:// link here (not in the single field above) — it is decoded in the browser and joins the same pool. The single field above is for vless:// / vmess:// / trojan:// / ss:// links only.')),
 				importTA,
 				E('div', { 'style': 'margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;align-items:center' }, [
 					E('button', { 'class': 'btn cbi-button cbi-button-add', 'click': ui.createHandlerFn(this, 'handleImportNodes', importTA) }, '⤓ ' + _('Import')),
