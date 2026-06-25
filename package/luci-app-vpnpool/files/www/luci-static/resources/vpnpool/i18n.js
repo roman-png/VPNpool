@@ -266,6 +266,23 @@ var DICT = {
 		'Bulk import': 'Массовый импорт',
 		'Paste many node links (one per line) or a whole base64 subscription, or load them from a file. New links are added to the manual list above.':
 			'Вставьте много ссылок (по одной в строке) или целую base64-подписку, либо загрузите из файла. Новые ссылки добавятся в ручной список выше.',
+		// --- AmneziaWG ---
+		'or an AmneziaWG .conf / vpn:// link': 'или AmneziaWG .conf / ссылку vpn://',
+		'AmneziaWG: paste an AmneziaWG .conf or an AmneziaVPN vpn:// link here (not in the single field above) — it is decoded in the browser and joins the same pool. The single field above is for vless:// / vmess:// / trojan:// / ss:// links only.':
+			'AmneziaWG: вставляйте .conf или ссылку vpn:// сюда (не в одиночное поле выше) — она декодируется в браузере и входит в тот же пул. Одиночное поле выше — только для ссылок vless:// / vmess:// / trojan:// / ss://.',
+		'AmneziaWG: paste an AmneziaWG .conf or an AmneziaVPN vpn:// link here too — it is decoded in the browser and joins the same pool.':
+			'AmneziaWG: сюда также можно вставить .conf или ссылку vpn:// — декодируется в браузере и входит в тот же пул.',
+		'AmneziaWG node imported.': 'Узел AmneziaWG импортирован.',
+		'AmneziaWG node removed.': 'Узел AmneziaWG удалён.',
+		'Could not decode vpn:// link': 'Не удалось декодировать ссылку vpn://',
+		'browser lacks zlib support': 'браузер не поддерживает zlib',
+		'no AmneziaWG container in link': 'в ссылке нет контейнера AmneziaWG',
+		'no config in link': 'в ссылке нет конфигурации',
+		'AmneziaWG nodes': 'Узлы AmneziaWG',
+		'AmneziaWG': 'AmneziaWG',
+		'Imported AmneziaWG nodes (from a .conf or vpn:// link). They join the same auto-failover pool as other nodes and are service-checked the same way.':
+			'Импортированные узлы AmneziaWG (из .conf или ссылки vpn://). Они входят в общий пул авто-переключения и проверяются на сервисы так же, как остальные.',
+		'(no AmneziaWG nodes)': '(нет узлов AmneziaWG)',
 		'File loaded — review and press Import.': 'Файл загружен — проверьте и нажмите Импорт.',
 		'Importing nodes…': 'Импортирую узлы…', 'Paste node links (or load a file) first.': 'Сначала вставьте ссылки (или загрузите файл).',
 		'Delete the subscription? All saved nodes will be auto-activated so you stay connected.':

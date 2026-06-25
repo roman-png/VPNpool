@@ -333,10 +333,31 @@ return view.extend({
 		if (tags.length !== 1) { ui.addNotification(null, E('p', _('Select exactly one node for the unblock test.')), 'warning'); return; }
 		return this.handleUnlock(tags[0]);
 	},
+	// AmneziaVPN vpn:// link = base64url( 4-byte BE length + zlib(JSON) ). The router has no
+	// zlib, so decode it in the browser and hand the embedded .conf to the same import path.
+	decodeAmneziaVpnLink: function(link) {
+		var tok = link.trim().replace(/^vpn:\/\//, '');
+		var b64 = tok.replace(/-/g, '+').replace(/_/g, '/');
+		while (b64.length % 4) b64 += '=';
+		var bin = atob(b64), bytes = new Uint8Array(bin.length), i;
+		for (i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+		if (typeof DecompressionStream === 'undefined')
+			return Promise.reject(new Error(_('browser lacks zlib support')));
+		var ds = new DecompressionStream('deflate');
+		var resp = new Response(new Blob([bytes.subarray(4)]).stream().pipeThrough(ds));
+		return resp.text().then(function(jsonStr) {
+			var o = JSON.parse(jsonStr);
+			var awg = o && o.containers && o.containers[0] && o.containers[0].awg;
+			if (!awg) throw new Error(_('no AmneziaWG container in link'));
+			var lc = (typeof awg.last_config === 'string') ? JSON.parse(awg.last_config) : awg.last_config;
+			if (!lc || !lc.config) throw new Error(_('no config in link'));
+			return lc.config;
+		});
+	},
 	handleImport: function() {
 		var self = this;
 		var ta = E('textarea', { 'style': 'width:100%;min-height:120px;font-family:monospace;font-size:12px',
-			'placeholder': 'vless://…\nvless://…\n' + _('or a base64 subscription') });
+			'placeholder': 'vless://…\n' + _('or a base64 subscription') + '\n' + _('or an AmneziaWG .conf / vpn:// link') });
 		var fileInput = E('input', { 'type': 'file', 'accept': '.txt,.text,text/plain', 'style': 'display:none' });
 		fileInput.addEventListener('change', function() {
 			var f = fileInput.files && fileInput.files[0]; if (!f) return;
@@ -347,6 +368,7 @@ return view.extend({
 		});
 		ui.showModal(_('Import nodes'), [
 			E('p', {}, _('Paste node links (one per line) or a whole base64 subscription, or load a .txt file. New links are added to your manual nodes.')),
+			E('p', { 'style': 'color:#888' }, _('AmneziaWG: paste an AmneziaWG .conf or an AmneziaVPN vpn:// link here too — it is decoded in the browser and joins the same pool.')),
 			ta,
 			E('div', { 'style': 'margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, [
 				E('button', { 'class': 'btn cbi-button', 'click': function() { fileInput.click(); } }, '📄 ' + _('Load file…')),
@@ -361,13 +383,23 @@ return view.extend({
 		var self = this;
 		var txt = (ta && ta.value || '').trim();
 		if (!txt) { ui.addNotification(null, E('p', _('Paste links or load a file first.')), 'warning'); return; }
-		return callImportNodes(txt).then(function(r) {
-			ui.hideModal();
-			if (r && r.ok) self.notify(_('Imported %d new node(s) (manual list: %d).').format((r.added != null ? r.added : 0), (r.total != null ? r.total : 0)));
-			else ui.addNotification(null, E('p', _('Import failed') + (r && r.error ? (': ' + r.error) : '.')), 'error');
-		}).catch(function(e) {
-			ui.hideModal();
-			ui.addNotification(null, E('p', _('Import failed') + ': ' + e + ' — ' + _('try re-logging into LuCI (permissions update on login).')), 'error');
+		var prep = /^vpn:\/\//.test(txt)
+			? this.decodeAmneziaVpnLink(txt).catch(function(e) {
+				ui.hideModal();
+				ui.addNotification(null, E('p', _('Could not decode vpn:// link') + ': ' + (e && e.message || e)), 'error');
+				return null;
+			})
+			: Promise.resolve(txt);
+		return prep.then(function(payload) {
+			if (payload == null) return;
+			return callImportNodes(payload).then(function(r) {
+				ui.hideModal();
+				if (r && r.ok) self.notify(r.awg ? _('AmneziaWG node imported.') : _('Imported %d new node(s) (manual list: %d).').format((r.added != null ? r.added : 0), (r.total != null ? r.total : 0)));
+				else ui.addNotification(null, E('p', _('Import failed') + (r && r.error ? (': ' + r.error) : '.')), 'error');
+			}).catch(function(e) {
+				ui.hideModal();
+				ui.addNotification(null, E('p', _('Import failed') + ': ' + e + ' — ' + _('try re-logging into LuCI (permissions update on login).')), 'error');
+			});
 		});
 	},
 	handleExport: function() {
@@ -629,8 +661,8 @@ return view.extend({
 			]);
 		}, this);
 
-		var order = [ 'subscription', 'imported', 'manual' ];
-		var labels = { subscription: _('Subscription'), imported: _('Imported'), manual: _('Manual') };
+		var order = [ 'subscription', 'imported', 'manual', 'amneziawg' ];
+		var labels = { subscription: _('Subscription'), imported: _('Imported'), manual: _('Manual'), amneziawg: _('AmneziaWG') };
 		var byGroup = {};
 		nodes.forEach(function(n) { var g = n.group || 'subscription'; (byGroup[g] = byGroup[g] || []).push(n); });
 		var present = order.filter(function(g) { return byGroup[g] && byGroup[g].length; });

@@ -17,6 +17,7 @@ var callProbeRes = rpc.declare({ object: 'vpnpool', method: 'probe_result' });
 var callImport   = rpc.declare({ object: 'vpnpool', method: 'import_select',    params: [ 'url', 'idx' ] });
 var callAddNode  = rpc.declare({ object: 'vpnpool', method: 'add_node',         params: [ 'link' ] });
 var callDelNode  = rpc.declare({ object: 'vpnpool', method: 'del_node',         params: [ 'link' ] });
+var callDeleteNode = rpc.declare({ object: 'vpnpool', method: 'delete_node',    params: [ 'tag' ] });
 var callImportNodes = rpc.declare({ object: 'vpnpool', method: 'import_nodes',  params: [ 'text' ] });
 var callActivateSaved   = rpc.declare({ object: 'vpnpool', method: 'activate_saved',   params: [ 'tag' ] });
 var callDeactivateSaved = rpc.declare({ object: 'vpnpool', method: 'deactivate_saved', params: [ 'tag' ] });
@@ -37,6 +38,7 @@ return view.extend({
 	reload: function() { return callStatus().then(L.bind(function(st) { this.st = st;
 		dom.content(document.getElementById('vp-srclist'), this.renderSources(st));
 		dom.content(document.getElementById('vp-manlist'), this.renderManual(st));
+		var aw = document.getElementById('vp-awglist'); if (aw) dom.content(aw, this.renderAwg(st));
 		var sv = document.getElementById('vp-savedlist'); if (sv) dom.content(sv, this.renderSaved(st));
 		var es = document.getElementById('vp-extrasublist'); if (es) dom.content(es, this.renderExtraSubs(st)); }, this)); },
 
@@ -125,6 +127,23 @@ return view.extend({
 		});
 		return E('ul', {}, items.length ? items : [ E('li', { 'style': 'color:#888' }, _('(no manual nodes)')) ]);
 	},
+
+	// AmneziaWG nodes are stored as .conf files (not vless-style links), so they aren't in
+	// manual_nodes — list them from the live node set (proto=='awg') with a delete by tag.
+	renderAwg: function(st) {
+		var self = this;
+		var awg = (st.nodes || []).filter(function(n) { return n.proto === 'awg'; });
+		var items = awg.map(function(n) {
+			return E('li', { 'style': 'margin:3px 0' }, [
+				E('span', {}, (n.server || n.tag) + ':' + (n.port || '') + '  '),
+				E('span', { 'style': 'color:' + pingColor(n.delay) }, pingText(n.delay)),
+				E('button', { 'class': 'btn cbi-button cbi-button-remove', 'style': 'margin-left:8px',
+					'click': ui.createHandlerFn(self, 'handleDelAwg', n.tag) }, _('Remove'))
+			]);
+		});
+		return E('ul', {}, items.length ? items : [ E('li', { 'style': 'color:#888' }, _('(no AmneziaWG nodes)')) ]);
+	},
+	handleDelAwg: function(tag) { return callDeleteNode(tag).then(L.bind(function() { this.notify(_('AmneziaWG node removed.')); this.reload(); }, this)); },
 
 	handleSaveUrl: function(inp) { return callSetUrl(inp.value || '').then(L.bind(function() { this.notify(_('Subscription URL saved.')); }, this)); },
 	handleDelSub: function() { if (!confirm(_('Delete the subscription? All saved nodes will be auto-activated so you stay connected.'))) return; return callDelSub().then(L.bind(function(r) { this.notify(_('Subscription deleted — %d saved node(s) kept active.').replace('%d', (r && r.promoted != null) ? r.promoted : 0)); this.reload(); }, this)); },
@@ -366,6 +385,12 @@ return view.extend({
 				]),
 
 				E('div', { 'id': 'vp-manlist', 'style': 'margin-top:8px' }, this.renderManual(st))
+			]),
+
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('AmneziaWG nodes')),
+				E('p', { 'style': 'color:#888' }, _('Imported AmneziaWG nodes (from a .conf or vpn:// link). They join the same auto-failover pool as other nodes and are service-checked the same way.')),
+				E('div', { 'id': 'vp-awglist', 'style': 'margin-top:4px' }, this.renderAwg(st))
 			]),
 
 			E('div', { 'class': 'cbi-section' }, [
