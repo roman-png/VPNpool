@@ -22,8 +22,18 @@ signal_refetch() {
 # logic so a bulk delete does ONE rebuild+reload instead of N sing-box restarts. Returns 1 if
 # the tag has no resolvable link.
 _delete_one_tag() {   # $1=tag
-	local tag="$1" link="" removed=0 LINKS=/etc/vpnpool/links.json MAP
+	local tag="$1" link="" removed=0 LINKS=/etc/vpnpool/links.json MAP __af
 	[ -n "$tag" ] || return 1
+	# AmneziaWG nodes are stored as /etc/vpnpool/awg/*.conf files (no vless-style link).
+	# If the tag matches a stored .conf, remove that file and clear its keep-auto state.
+	for __af in /etc/vpnpool/awg/*.conf; do
+		[ -f "$__af" ] || continue
+		if [ "$(ucode /usr/libexec/vpnpool/parser.uc "$__af" 2>/dev/null | jq -r '.[0].tag // ""')" = "$tag" ]; then
+			rm -f "$__af"
+			uci del_list vpnpool.main.keep_auto="$tag" 2>/dev/null
+			return 0
+		fi
+	done
 	[ -f "$LINKS" ] && link=$(jq -r --arg t "$tag" 'map(select(.tag==$t)) | .[0].link // ""' "$LINKS" 2>/dev/null)
 	[ -n "$link" ] || link=$(saved_link_for_tag "$tag")
 	[ -n "$link" ] || return 1
@@ -402,6 +412,22 @@ call)
 		mkdir -p /tmp/vpnpool
 		RAW=/tmp/vpnpool/.import.raw
 		printf '%s\n' "$txt" > "$RAW"
+		# AmneziaWG / WireGuard .conf: multi-line INI, no single-line link — store the whole
+		# config as its own file under /etc/vpnpool/awg/ (build.sh globs them). vpn:// links
+		# are decoded to a .conf in the browser before reaching here (ucode has no zlib).
+		# Validate it parses to an 'awg' endpoint before saving so junk isn't kept.
+		if printf '%s' "$txt" | grep -qF '[Interface]'; then
+			if ucode /usr/libexec/vpnpool/parser.uc "$RAW" 2>/dev/null | jq -e '.[0].type=="awg"' >/dev/null 2>&1; then
+				mkdir -p /etc/vpnpool/awg
+				id=$(md5sum "$RAW" | cut -c1-12)
+				cp "$RAW" "/etc/vpnpool/awg/$id.conf"
+				rm -f "$RAW"; signal_reload
+				jq -n --arg id "$id" '{ok:true, awg:true, added:1, id:$id}'
+			else
+				rm -f "$RAW"; echo '{"ok":false,"error":"invalid AmneziaWG config"}'
+			fi
+			exit 0
+		fi
 		TMP=/tmp/vpnpool/.import.links
 		ucode /usr/libexec/vpnpool/parser.uc --keep-link "$RAW" 2>/dev/null \
 			| jq -r '.[]?._link // empty' 2>/dev/null \

@@ -117,7 +117,12 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
   from the DHCP lease list** (matched by **MAC**, so a profile survives DHCP IP
   changes); static/unknown hosts can still be added as raw IPv4.
 - 🧩 **Protocols** — VLESS (Reality + `xtls‑rprx‑vision`), VMess, Trojan, Shadowsocks,
-  plus sing‑box JSON configs.
+  plus sing‑box JSON configs. **AmneziaWG** (obfuscated WireGuard that survives RU mobile
+  DPI where TLS/Reality gets reset) is supported as a first‑class pool member — import an
+  AmneziaWG `.conf` or an AmneziaVPN `vpn://` link on the **Sources** tab; it joins the
+  same auto‑ping/failover pool and is service‑checked like every other node. AmneziaWG
+  needs the AWG sing‑box fork: install with `VPNPOOL_AWG=1` (see Install). Prebuilt for
+  `aarch64`/`mipsel`; flash routers hold the fork binary, RAM routers fetch it on boot.
 - 🛡️ **Leak protection** — **IPv6 leak guard** (fail‑closed), opt‑in **kill‑switch**
   (fail‑closed IPv4 in full‑tunnel mode, so nothing leaks if the VPN drops) and
   opt‑in **DNS‑leak guard** (routes LAN DNS through the tunnel). **Clash API bound
@@ -291,6 +296,13 @@ in `/etc/hotplug.d/iface/99-vpnpool-singbox-ram`.
 > **Updating on small flash:** re‑run the same one‑liner. Do **not** use `opkg upgrade`
 > here — it resolves the `sing-box` dependency against flash and would try to pull the
 > ~38 MB binary into ROM (the install deliberately uses `--nodeps` to avoid that).
+
+> **AmneziaWG (`VPNPOOL_AWG=1`):** add this env var to either one‑liner to use the
+> AmneziaWG sing‑box fork instead of stock (stock sing‑box can't do AmneziaWG). Prebuilt
+> for `aarch64` and `mipsel`; on flash it replaces `/usr/bin/sing‑box` and holds the
+> package, on small‑flash the WAN‑up hook fetches the fork into RAM. Then import an
+> AmneziaWG `.conf` / `vpn://` link on the **Sources** tab. ⚠ podkop (if installed) shares
+> the binary and will run on the fork too.
 
 <details>
 <summary>Manual steps (what the one‑liner does under the hood)</summary>

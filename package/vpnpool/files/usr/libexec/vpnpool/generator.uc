@@ -213,8 +213,16 @@ push(outbounds, {
 
 // the actual node outbounds (anti-DPI is applied as a route rule action below,
 // not as an outbound field — sing-box only exposes tls_fragment via route-options).
-for (let n in nodes)
-	push(outbounds, n);
+// sing-box >=1.13: WireGuard/AmneziaWG is an ENDPOINT (top-level "endpoints" array),
+// NOT an outbound — but its tag is still referenced from the urltest/selector groups
+// like any node. So route type=='wireguard' into endpoints, the rest into outbounds.
+let endpoints = [];
+for (let n in nodes) {
+	if (n.type == 'wireguard' || n.type == 'awg')
+		push(endpoints, n);
+	else
+		push(outbounds, n);
+}
 
 // direct egress
 push(outbounds, { type: 'direct', tag: 'direct' });
@@ -321,5 +329,7 @@ let config = {
 if (dns)
 	config.dns = dns;
 config.inbounds = inbounds;
+if (length(endpoints))
+	config.endpoints = endpoints;          // sing-box >=1.13 WireGuard/AmneziaWG endpoints
 
 printf("%.J\n", config);

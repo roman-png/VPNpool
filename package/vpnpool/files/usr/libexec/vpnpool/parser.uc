@@ -196,6 +196,74 @@ function parse_ss(line) {
 	};
 }
 
+function awg_split_csv(s) {
+	let out = [];
+	for (let p in split(s, ',')) {
+		p = trim(p);
+		if (length(p)) push(out, p);
+	}
+	return out;
+}
+
+// AmneziaWG / WireGuard .conf (INI) -> sing-box >=1.13 "wireguard" endpoint object.
+// (The generator routes type=='wireguard' into the top-level "endpoints" array, not
+// "outbounds".) AWG2 junk/obfuscation params (jc/jmin/jmax, s1..s4, h1..h4, i1..i5) are
+// endpoint-root fields; h1..h4 may be a single int OR an AWG2 "lo-hi" range (kept as a
+// string). Endpoint host:port -> peers[0].address + .port.
+function parse_awg_conf(raw) {
+	let iface = {}, peer = {}, sect = '';
+	for (let line in split(raw, /\r?\n/)) {
+		line = trim(line);
+		if (!length(line) || substr(line, 0, 1) == '#' || substr(line, 0, 1) == ';') continue;
+		let low = lc(line);
+		if (low == '[interface]') { sect = 'i'; continue; }
+		if (low == '[peer]')      { sect = 'p'; continue; }
+		let eq = index(line, '=');
+		if (eq < 0) continue;
+		let k = lc(trim(substr(line, 0, eq)));
+		let v = trim(substr(line, eq + 1));
+		if (sect == 'i') iface[k] = v;
+		else if (sect == 'p') peer[k] = v;
+	}
+	if (!length(iface.privatekey) || !length(peer.publickey) || !length(peer.endpoint))
+		return null;
+
+	// type 'awg' = AmneziaWG endpoint (amnezia-box fork, constant.TypeAwg). jc/jmin/jmax
+	// and s1..s4 are ints; h1..h4 and i1..i5 are STRINGS (h may be a single value or an
+	// AWG2 "lo-hi" range — kept verbatim either way).
+	let ep = { type: 'awg', private_key: iface.privatekey };
+	if (length(iface.address)) ep.address = awg_split_csv(iface.address);
+	for (let f in ['jc', 'jmin', 'jmax', 's1', 's2', 's3', 's4'])
+		if (length(iface[f])) ep[f] = int(iface[f]);
+	for (let f in ['h1', 'h2', 'h3', 'h4'])
+		if (length(iface[f])) ep[f] = iface[f];
+	for (let f in ['i1', 'i2', 'i3', 'i4', 'i5'])
+		if (length(iface[f])) ep[f] = iface[f];
+
+	// MTU: honor explicit; else default 1280 for AWG2 (s3/s4 add junk to every packet,
+	// so a too-high MTU lets the handshake pass but stalls data with "message too long").
+	if (length(iface.mtu)) ep.mtu = int(iface.mtu);
+	else if (length(iface.s3) || length(iface.s4)) ep.mtu = 1280;
+
+	let endp = peer.endpoint;
+	let cc = rindex(endp, ':');
+	if (cc < 0) return null;
+	let host = substr(endp, 0, cc), port = int(substr(endp, cc + 1));
+	if (substr(host, 0, 1) == '[' && substr(host, length(host) - 1) == ']')
+		host = substr(host, 1, length(host) - 2);     // strip IPv6 brackets
+	if (!length(host) || !port) return null;
+
+	let pr = {
+		address: host, port: port, public_key: peer.publickey,
+		allowed_ips: length(peer.allowedips) ? awg_split_csv(peer.allowedips) : ['0.0.0.0/0', '::/0']
+	};
+	if (length(peer.presharedkey)) pr.preshared_key = peer.presharedkey;
+	if (length(peer.persistentkeepalive)) pr.persistent_keepalive_interval = int(peer.persistentkeepalive);
+	ep.peers = [ pr ];
+	ep.tag = host + ':' + port;
+	return ep;
+}
+
 function looks_base64(s) {
 	if (index(s, '://') >= 0) return false;
 	let c = substr(s, 0, 1);
@@ -205,7 +273,7 @@ function looks_base64(s) {
 
 let PROXY_TYPES = {
 	vless: 1, vmess: 1, trojan: 1, shadowsocks: 1, shadowtls: 1,
-	hysteria: 1, hysteria2: 1, tuic: 1, wireguard: 1, ssh: 1
+	hysteria: 1, hysteria2: 1, tuic: 1, wireguard: 1, awg: 1, ssh: 1
 };
 
 function process_json(raw) {
@@ -232,6 +300,14 @@ function process_text(raw) {
 	if (looks_base64(raw)) {
 		let dec = b64dec(replace(raw, /\s/g, ''));
 		if (dec) raw = trim(dec);
+	}
+
+	// AmneziaWG / WireGuard .conf (one config per input text block; build.sh writes
+	// each awg_node entry to its own file).
+	if (index(raw, '[Interface]') >= 0 || index(raw, '[interface]') >= 0) {
+		let ob = parse_awg_conf(raw);
+		if (ob) add_node(ob, 'awg:' + ob.peers[0].public_key + '@' + ob.tag);
+		return;
 	}
 
 	let c0 = substr(raw, 0, 1);
