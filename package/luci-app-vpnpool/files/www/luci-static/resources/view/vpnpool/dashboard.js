@@ -333,27 +333,6 @@ return view.extend({
 		if (tags.length !== 1) { ui.addNotification(null, E('p', _('Select exactly one node for the unblock test.')), 'warning'); return; }
 		return this.handleUnlock(tags[0]);
 	},
-	// AmneziaVPN vpn:// link = base64url( 4-byte BE length + zlib(JSON) ). The router has no
-	// zlib, so decode it in the browser and hand the embedded .conf to the same import path.
-	decodeAmneziaVpnLink: function(link) {
-		var tok = link.trim().replace(/^vpn:\/\//, '');
-		var b64 = tok.replace(/-/g, '+').replace(/_/g, '/');
-		while (b64.length % 4) b64 += '=';
-		var bin = atob(b64), bytes = new Uint8Array(bin.length), i;
-		for (i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-		if (typeof DecompressionStream === 'undefined')
-			return Promise.reject(new Error(_('browser lacks zlib support')));
-		var ds = new DecompressionStream('deflate');
-		var resp = new Response(new Blob([bytes.subarray(4)]).stream().pipeThrough(ds));
-		return resp.text().then(function(jsonStr) {
-			var o = JSON.parse(jsonStr);
-			var awg = o && o.containers && o.containers[0] && o.containers[0].awg;
-			if (!awg) throw new Error(_('no AmneziaWG container in link'));
-			var lc = (typeof awg.last_config === 'string') ? JSON.parse(awg.last_config) : awg.last_config;
-			if (!lc || !lc.config) throw new Error(_('no config in link'));
-			return lc.config;
-		});
-	},
 	handleImport: function() {
 		var self = this;
 		var ta = E('textarea', { 'style': 'width:100%;min-height:120px;font-family:monospace;font-size:12px',
@@ -368,7 +347,7 @@ return view.extend({
 		});
 		ui.showModal(_('Import nodes'), [
 			E('p', {}, _('Paste node links (one per line) or a whole base64 subscription, or load a .txt file. New links are added to your manual nodes.')),
-			E('p', { 'style': 'color:#888' }, _('AmneziaWG: paste an AmneziaWG .conf or an AmneziaVPN vpn:// link here too — it is decoded in the browser and joins the same pool.')),
+			E('p', { 'style': 'color:#888' }, _('AmneziaWG: paste an AmneziaWG .conf or an AmneziaVPN vpn:// link here too — it joins the same pool.')),
 			ta,
 			E('div', { 'style': 'margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, [
 				E('button', { 'class': 'btn cbi-button', 'click': function() { fileInput.click(); } }, '📄 ' + _('Load file…')),
@@ -383,23 +362,14 @@ return view.extend({
 		var self = this;
 		var txt = (ta && ta.value || '').trim();
 		if (!txt) { ui.addNotification(null, E('p', _('Paste links or load a file first.')), 'warning'); return; }
-		var prep = /^vpn:\/\//.test(txt)
-			? this.decodeAmneziaVpnLink(txt).catch(function(e) {
-				ui.hideModal();
-				ui.addNotification(null, E('p', _('Could not decode vpn:// link') + ': ' + (e && e.message || e)), 'error');
-				return null;
-			})
-			: Promise.resolve(txt);
-		return prep.then(function(payload) {
-			if (payload == null) return;
-			return callImportNodes(payload).then(function(r) {
-				ui.hideModal();
-				if (r && r.ok) self.notify(r.awg ? _('AmneziaWG node imported.') : _('Imported %d new node(s) (manual list: %d).').format((r.added != null ? r.added : 0), (r.total != null ? r.total : 0)));
-				else ui.addNotification(null, E('p', _('Import failed') + (r && r.error ? (': ' + r.error) : '.')), 'error');
-			}).catch(function(e) {
-				ui.hideModal();
-				ui.addNotification(null, E('p', _('Import failed') + ': ' + e + ' — ' + _('try re-logging into LuCI (permissions update on login).')), 'error');
-			});
+		// vpn:// is decoded server-side (rpcd awgdecode.uc) — send the raw text as-is.
+		return callImportNodes(txt).then(function(r) {
+			ui.hideModal();
+			if (r && r.ok) self.notify(r.awg ? _('AmneziaWG node imported.') : _('Imported %d new node(s) (manual list: %d).').format((r.added != null ? r.added : 0), (r.total != null ? r.total : 0)));
+			else ui.addNotification(null, E('p', _('Import failed') + (r && r.error ? (': ' + r.error) : '.')), 'error');
+		}).catch(function(e) {
+			ui.hideModal();
+			ui.addNotification(null, E('p', _('Import failed') + ': ' + e + ' — ' + _('try re-logging into LuCI (permissions update on login).')), 'error');
 		});
 	},
 	handleExport: function() {
@@ -580,7 +550,10 @@ return view.extend({
 		var f = (nodeFilter || '').toLowerCase();
 		var nodes = allNodes.filter(function(n) {
 			if (deadSet[n.tag]) return false;       // service-dead -> "out of auto-pool" section
-			if (!inPool(n.tag)) return false;        // manually excluded -> same section
+			// AmneziaWG nodes are persistent, file-based and managed in their own section —
+			// keep them in the MAIN list even when a curated auto_member subset excludes them,
+			// so they're never lumped with "unused/excluded" nodes (and bulk-deleted by mistake).
+			if (!inPool(n.tag) && n.proto !== 'awg') return false;   // manually excluded -> dead section
 			if (nodeReachOnly && !(n.delay > 0)) return false;
 			if (!f) return true;
 			return (n.tag || '').toLowerCase().indexOf(f) >= 0 || (n.server || '').toLowerCase().indexOf(f) >= 0;
@@ -744,10 +717,14 @@ return view.extend({
 		var members = st.auto_members || [], poolAll = (members.length === 0);
 		var deadSet = {}; dead.forEach(function(t) { deadSet[t] = 1; });
 		var keptSet = {}; kept.forEach(function(t) { keptSet[t] = 1; });
+		// AmneziaWG nodes have their own management section and stay in the main list, so they
+		// must NOT show up here as "excluded/unused" (else a bulk delete of unused nodes would
+		// sweep them away too).
+		var awgSet = {}; (st.nodes || []).forEach(function(n) { if (n.proto === 'awg') awgSet[n.tag] = 1; });
 		// manually excluded = a pinned subset is configured AND this node isn't in it
-		// (and it isn't already covered by the dead/forced groups).
+		// (and it isn't already covered by the dead/forced/awg groups).
 		var excluded = poolAll ? [] : (st.nodes || []).map(function(n) { return n.tag; })
-			.filter(function(t) { return members.indexOf(t) < 0 && !deadSet[t] && !keptSet[t]; });
+			.filter(function(t) { return members.indexOf(t) < 0 && !deadSet[t] && !keptSet[t] && !awgSet[t]; });
 		if (!dead.length && !excluded.length && !kept.length) return E('em', { 'style': 'color:#888' },
 			_('No nodes outside the auto-pool — every node is auto-managed.'));
 		var byTag = {};

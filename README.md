@@ -119,8 +119,9 @@ xtls-rprx-vision reality, urltest auto failover, обход блокировок
 - 🧩 **Protocols** — VLESS (Reality + `xtls‑rprx‑vision`), VMess, Trojan, Shadowsocks,
   plus sing‑box JSON configs. **AmneziaWG** (obfuscated WireGuard that survives RU mobile
   DPI where TLS/Reality gets reset) is supported as a first‑class pool member — import an
-  AmneziaWG `.conf` or an AmneziaVPN `vpn://` link on the **Sources** tab; it joins the
-  same auto‑ping/failover pool and is service‑checked like every other node. AmneziaWG
+  AmneziaWG `.conf` or an AmneziaVPN `vpn://` link on the **Sources** tab (vpn:// is decoded
+  right on the router — no Amnezia app needed); it joins the same auto‑ping/failover pool and
+  is service‑checked like every other node, with its own "AmneziaWG nodes" list. AmneziaWG
   needs the AWG sing‑box fork: install with `VPNPOOL_AWG=1` (see Install). Prebuilt for
   `aarch64`/`mipsel`; flash routers hold the fork binary, RAM routers fetch it on boot.
 - 🛡️ **Leak protection** — **IPv6 leak guard** (fail‑closed), opt‑in **kill‑switch**

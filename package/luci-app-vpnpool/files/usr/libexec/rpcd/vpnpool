@@ -15,6 +15,18 @@ signal_refetch() {
 	signal_daemon USR2
 }
 
+# Drop a tag from the dashboard's node list (nodes.json) RIGHT NOW. signal_reload only
+# rebuilds asynchronously (USR1), and a full rebuild of a big pool takes several seconds —
+# long enough that the 3 s dashboard poll catches the not-yet-rebuilt list and the node looks
+# like it "didn't delete" (then reappears gone a poll later -> "deletes every other time").
+# Pruning here makes the very next poll reflect the delete; the async rebuild then regenerates
+# the authoritative config. status.sh reads /tmp/vpnpool/nodes.json directly.
+prune_nodes_json() {   # $1=tag
+	local NJ=/tmp/vpnpool/nodes.json
+	[ -n "$1" ] && [ -f "$NJ" ] || return 0
+	jq --arg t "$1" 'map(select(.tag != $t))' "$NJ" > "$NJ.pt" 2>/dev/null && mv "$NJ.pt" "$NJ"
+}
+
 # Remove ONE node by tag: resolve its link, drop it from whichever list owns it, prune the
 # saved/snapshot maps, and (for a pure subscription node) add its link to excluded_node so a
 # refetch can't bring it back. STAGES uci changes only — the caller must rebuild_saved_list
@@ -412,6 +424,16 @@ call)
 		mkdir -p /tmp/vpnpool
 		RAW=/tmp/vpnpool/.import.raw
 		printf '%s\n' "$txt" > "$RAW"
+		# AmneziaVPN vpn:// link -> decode to a .conf ON THE ROUTER (no browser/zlib dep):
+		# awgdecode.uc base64url-decodes + inflates the zlib payload in pure ucode and prints
+		# the embedded AmneziaWG .conf. Then it flows through the .conf path below.
+		case "$txt" in
+			vpn://*)
+				dec=$(printf '%s' "$txt" | ucode /usr/libexec/vpnpool/awgdecode.uc 2>/dev/null)
+				if [ -n "$dec" ]; then printf '%s\n' "$dec" > "$RAW"; txt="$dec"
+				else rm -f "$RAW"; echo '{"ok":false,"error":"could not decode vpn:// link"}'; exit 0; fi
+				;;
+		esac
 		# AmneziaWG / WireGuard .conf: multi-line INI, no single-line link — store the whole
 		# config as its own file under /etc/vpnpool/awg/ (build.sh globs them). vpn:// links
 		# are decoded to a .conf in the browser before reaching here (ucode has no zlib).
@@ -454,6 +476,7 @@ call)
 		tag=$(echo "$input" | jq -r '.tag // ""')
 		[ -n "$tag" ] || { echo '{"ok":false,"error":"no tag"}'; exit 0; }
 		if _delete_one_tag "$tag"; then
+			prune_nodes_json "$tag"  # reflect the delete on the next poll (pre-rebuild)
 			rebuild_saved_list      # commits vpnpool (incl. the staged del_lists)
 			signal_reload
 			echo '{"ok":true}'
@@ -466,7 +489,7 @@ call)
 		# Deleting N nodes one-by-one fired N signal_reloads = N sing-box restarts in a row
 		# (tunnel flapping). Tags can contain spaces, so read one-per-line (never split).
 		echo "$input" | jq -r '.tags[]? // empty' | while IFS= read -r t; do
-			[ -n "$t" ] && _delete_one_tag "$t"
+			[ -n "$t" ] && { _delete_one_tag "$t"; prune_nodes_json "$t"; }
 		done
 		rebuild_saved_list      # commits all staged del_lists/excludes from the loop
 		signal_reload
