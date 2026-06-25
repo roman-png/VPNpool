@@ -129,7 +129,7 @@ jq -n \
 		saved: (nid as $id | ($archids | index($id)) != null),
 		active_saved: (nid as $id | ($actsavids | index($id)) != null),
 		unlock: ($un[.tag] // null),
-		group: (.tag as $t | if ($imp | index($t)) then "imported" elif ($man | index($t)) then "manual" else "subscription" end)
+		group: (if .type=="awg" then "amneziawg" else (.tag as $t | if ($imp | index($t)) then "imported" elif ($man | index($t)) then "manual" else "subscription" end) end)
 	})' > "$NODESF" 2>/dev/null
 [ -s "$NODESF" ] || echo '[]' > "$NODESF"
 
