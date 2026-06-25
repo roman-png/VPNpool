@@ -66,8 +66,8 @@ MANTAGS=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/manual.links" 2>/dev/nu
 # saved nodes by tag wrongly dropped the ⭐ off live saved nodes. nid is defined per jq.
 saved_archive_json 2>/dev/null | jq -r '.[].link' 2>/dev/null > "$SB_DATA/.archive.links"
 ARCHIVE_NODES=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/.archive.links" 2>/dev/null | jq -c '.' 2>/dev/null); [ -n "$ARCHIVE_NODES" ] || ARCHIVE_NODES='[]'
-ARCHIVE_IDS=$(echo "$ARCHIVE_NODES" | jq -c 'def nid: (.server|tostring)+":"+(.server_port|tostring)+":"+(.uuid//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//""); [ .[] | nid ]' 2>/dev/null); [ -n "$ARCHIVE_IDS" ] || ARCHIVE_IDS='[]'
-ACTSAVED_IDS=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/active_saved.links" 2>/dev/null | jq -c 'def nid: (.server|tostring)+":"+(.server_port|tostring)+":"+(.uuid//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//""); [ .[] | nid ]' 2>/dev/null); [ -n "$ACTSAVED_IDS" ] || ACTSAVED_IDS='[]'
+ARCHIVE_IDS=$(echo "$ARCHIVE_NODES" | jq -c 'def nid: ((.server // .peers[0].address)|tostring)+":"+((.server_port // .peers[0].port)|tostring)+":"+((.uuid // .peers[0].public_key)//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//""); [ .[] | nid ]' 2>/dev/null); [ -n "$ARCHIVE_IDS" ] || ARCHIVE_IDS='[]'
+ACTSAVED_IDS=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/active_saved.links" 2>/dev/null | jq -c 'def nid: ((.server // .peers[0].address)|tostring)+":"+((.server_port // .peers[0].port)|tostring)+":"+((.uuid // .peers[0].public_key)//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//""); [ .[] | nid ]' 2>/dev/null); [ -n "$ACTSAVED_IDS" ] || ACTSAVED_IDS='[]'
 
 # Per-node + per-client LIVE traffic, aggregated from clash connections (bytes,
 # cumulative per connection). Read-only; written to small files for the final jq.
@@ -114,11 +114,12 @@ jq -n \
 	--argjson man "$MANTAGS" \
 	--argjson archids "$ARCHIVE_IDS" \
 	--argjson actsavids "$ACTSAVED_IDS" \
-	'def nid: (.server|tostring)+":"+(.server_port|tostring)+":"+(.uuid//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//"");
+	'def nid: ((.server // .peers[0].address)|tostring)+":"+((.server_port // .peers[0].port)|tostring)+":"+((.uuid // .peers[0].public_key)//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//"");
 	(($p[0] // {}) | .proxies // {}) as $px | ($nt[0] // {}) as $tr | ($ul[0] // {}) as $un | ($nd[0] // {}) as $ndelay | ($n[0] // []) | map({
 		tag: .tag,
-		server: .server,
-		port: .server_port,
+		server: (.server // .peers[0].address),
+		port: (.server_port // .peers[0].port),
+		proto: .type,
 		# ping = most recent SUCCESSFUL urltest probe (sing-box records a miss as delay 0),
 		# else the delay nodecheck.sh last measured for this node (it probes with retry), so a
 		# reachable-but-flaky node still shows a ping; only a truly dead node falls through to null.
@@ -138,13 +139,13 @@ jq -n \
 # NOT the display tag or raw link (this subscription reuses one uuid/server under many
 # country names, so tags and even base links can't tell duplicates apart). Parse the
 # archive links and diff against the parsed active nodes (nodes.json) on that key.
-ACTIVE_IDS=$(jq -c '[ .[] | (.server|tostring)+":"+(.server_port|tostring)+":"+(.uuid//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//"") ]' "$NODES_FILE" 2>/dev/null); [ -n "$ACTIVE_IDS" ] || ACTIVE_IDS='[]'
+ACTIVE_IDS=$(jq -c '[ .[] | ((.server // .peers[0].address)|tostring)+":"+((.server_port // .peers[0].port)|tostring)+":"+((.uuid // .peers[0].public_key)//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//"") ]' "$NODES_FILE" 2>/dev/null); [ -n "$ACTIVE_IDS" ] || ACTIVE_IDS='[]'
 # Inactive saved list = archived nodes whose identity is NOT currently live. Active saved
 # nodes are shown with a 💾 marker in the MAIN list instead; here we list only the ones
 # that fell out of the subscription, each with an "Add to active" button.
 SAVEDINACTIVE=$(echo "$ARCHIVE_NODES" \
 	| jq -c --argjson act "$ACTIVE_IDS" '
-		def nid: (.server|tostring)+":"+(.server_port|tostring)+":"+(.uuid//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//"");
+		def nid: ((.server // .peers[0].address)|tostring)+":"+((.server_port // .peers[0].port)|tostring)+":"+((.uuid // .peers[0].public_key)//"")+":"+((.tls.server_name)//"")+":"+((.tls.reality.short_id)//"");
 		map(. + {_id: nid}) | unique_by(._id)
 		| map(select(._id as $i | ($act | index($i)) == null))
 		| map({tag, server, port:.server_port})' 2>/dev/null); [ -n "$SAVEDINACTIVE" ] || SAVEDINACTIVE='[]'

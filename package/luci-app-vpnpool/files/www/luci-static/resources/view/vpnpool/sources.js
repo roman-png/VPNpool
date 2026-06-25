@@ -132,20 +132,57 @@ return view.extend({
 	handleAddNode: function(inp) { var v = (inp.value || '').trim(); if (!v) return; return callAddNode(v).then(L.bind(function() { inp.value = ''; this.notify(_('Node added.')); this.reload(); }, this)); },
 	handleDelNode: function(l) { return callDelNode(l).then(L.bind(this.reload, this)); },
 
-	// --- bulk import: paste many links / a base64 subscription, or load a file ------
+	// AmneziaVPN vpn:// link = base64url( 4-byte BE length + zlib(JSON) ). The router has no
+	// zlib (ucode/busybox), so decode it here in the browser and hand the embedded .conf to
+	// the same import path as a pasted AmneziaWG config.
+	decodeAmneziaVpnLink: function(link) {
+		var tok = link.trim().replace(/^vpn:\/\//, '');
+		var b64 = tok.replace(/-/g, '+').replace(/_/g, '/');
+		while (b64.length % 4) b64 += '=';
+		var bin = atob(b64), bytes = new Uint8Array(bin.length), i;
+		for (i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+		if (typeof DecompressionStream === 'undefined')
+			return Promise.reject(new Error(_('browser lacks zlib support')));
+		var ds = new DecompressionStream('deflate');                 // zlib (keeps 0x78 header)
+		var resp = new Response(new Blob([bytes.subarray(4)]).stream().pipeThrough(ds));
+		return resp.text().then(function(jsonStr) {
+			var o = JSON.parse(jsonStr);
+			var awg = o && o.containers && o.containers[0] && o.containers[0].awg;
+			if (!awg) throw new Error(_('no AmneziaWG container in link'));
+			var lc = (typeof awg.last_config === 'string') ? JSON.parse(awg.last_config) : awg.last_config;
+			if (!lc || !lc.config) throw new Error(_('no config in link'));
+			return lc.config;
+		});
+	},
+
+	// --- bulk import: paste many links / a base64 subscription / an AmneziaWG .conf or
+	//     vpn:// link, or load a file -------------------------------------------------
 	handleImportNodes: function(ta) {
 		var txt = (ta && ta.value || '').trim();
 		if (!txt) { ui.addNotification(null, E('p', _('Paste node links (or load a file) first.')), 'warning'); return; }
-		this.notify(_('Importing nodes…'));
-		return callImportNodes(txt).then(L.bind(function(r) {
-			if (r && r.ok) {
-				ta.value = '';
-				this.notify(_('Imported %d new node(s) (manual list: %d).').replace('%d', (r.added != null ? r.added : 0)).replace('%d', (r.total != null ? r.total : 0)));
-				this.reload();
-			} else {
-				ui.addNotification(null, E('p', _('Import failed') + (r && r.error ? (': ' + r.error) : '.')), 'error');
-			}
-		}, this));
+		var self = this;
+		var prep = /^vpn:\/\//.test(txt)
+			? this.decodeAmneziaVpnLink(txt).catch(function(e) {
+				ui.addNotification(null, E('p', _('Could not decode vpn:// link') + ': ' + (e && e.message || e)), 'error');
+				return null;
+			})
+			: Promise.resolve(txt);
+		return prep.then(function(payload) {
+			if (payload == null) return;
+			self.notify(_('Importing nodes…'));
+			return callImportNodes(payload).then(L.bind(function(r) {
+				if (r && r.ok) {
+					ta.value = '';
+					if (r.awg)
+						this.notify(_('AmneziaWG node imported.'));
+					else
+						this.notify(_('Imported %d new node(s) (manual list: %d).').replace('%d', (r.added != null ? r.added : 0)).replace('%d', (r.total != null ? r.total : 0)));
+					this.reload();
+				} else {
+					ui.addNotification(null, E('p', _('Import failed') + (r && r.error ? (': ' + r.error) : '.')), 'error');
+				}
+			}, self));
+		});
 	},
 	handleImportFile: function(ta, fileInput) {
 		var f = fileInput && fileInput.files && fileInput.files[0];

@@ -35,6 +35,11 @@ done
 [ -s "$SB_DATA/manual.links" ]       && FILES="$FILES $SB_DATA/manual.links"
 [ -s "$SB_DATA/imported.links" ]     && FILES="$FILES $SB_DATA/imported.links"
 [ -s "$SB_DATA/active_saved.links" ] && FILES="$FILES $SB_DATA/active_saved.links"
+# AmneziaWG / WireGuard nodes: each .conf is its own file (multi-line INI), so the
+# parser sees one [Interface] block per file -> one wireguard endpoint each.
+for f in /etc/vpnpool/awg/*.conf; do
+	[ -f "$f" ] && FILES="$FILES $f"
+done
 
 # shellcheck disable=SC2086
 ucode /usr/libexec/vpnpool/parser.uc $FILES > "$NODES" 2>"$SB_DATA/build.err"
@@ -133,6 +138,20 @@ health_prefilter() {
 }
 health_prefilter
 
+# WireGuard/AmneziaWG endpoints are UDP and have no server:port the HTTPS prefilter can
+# probe, so they're absent from .alive_tags.json. Always keep them in the auto-pool (their
+# real health comes from nodecheck's clash-delay). Only acts when AWG nodes exist; no
+# change to the pure-VLESS path.
+# Only when the prefilter actually produced a filtered set (ALIVE present): add the AWG
+# tags back. If ALIVE is absent (unfiltered fallback) the generator already uses ALL nodes
+# incl. AWG, so nothing to do.
+if [ -s "$ALIVE" ]; then
+	WGTAGS=$(jq -c '[.[] | select(.type=="wireguard" or .type=="awg") | .tag]' "$NODES" 2>/dev/null)
+	if [ -n "$WGTAGS" ] && [ "$WGTAGS" != "[]" ]; then
+		jq -c --argjson wg "$WGTAGS" '. + $wg | unique' "$ALIVE" > "$ALIVE.x" 2>/dev/null && mv "$ALIVE.x" "$ALIVE"
+	fi
+fi
+
 ucode /usr/libexec/vpnpool/generator.uc "$NODES" > "$SB_CONF.new" 2>>"$SB_DATA/build.err"
 
 # Resilient validation. A SINGLE malformed node (unsupported flow, reality without
@@ -147,26 +166,34 @@ while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 		log "build: >50 bad outbounds (dropped $dropped so far), giving up; keeping previous config — check subscription source quality"
 		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; rm -f "$SB_CONF.new"; exit 1
 	fi
+	# sing-box >=1.13 reports a bad WireGuard/AmneziaWG node as endpoint[N] (it lives in
+	# .endpoints), everything else as outbound[N]. Drop from whichever array it came from;
+	# the urltest/selector groups (which reference the tag) always live in .outbounds.
+	arr=outbounds
 	idx=$(grep -oE 'outbound\[[0-9]+\]' "$SB_DATA/check.err" | head -1 | grep -oE '[0-9]+')
 	if [ -z "$idx" ]; then
-		log "build: sing-box check failed (non-outbound error), keeping previous config"
+		idx=$(grep -oE 'endpoint\[[0-9]+\]' "$SB_DATA/check.err" | head -1 | grep -oE '[0-9]+')
+		[ -n "$idx" ] && arr=endpoints
+	fi
+	if [ -z "$idx" ]; then
+		log "build: sing-box check failed (non-node error), keeping previous config"
 		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; rm -f "$SB_CONF.new"; exit 1
 	fi
-	badtype=$(jq -r ".outbounds[$idx].type // \"\"" "$SB_CONF.new" 2>/dev/null)
+	badtype=$(jq -r ".${arr}[$idx].type // \"\"" "$SB_CONF.new" 2>/dev/null)
 	case "$badtype" in
-		vless|vmess|trojan|shadowsocks|shadowtls|hysteria|hysteria2|tuic|wireguard|socks|http) ;;
+		vless|vmess|trojan|shadowsocks|shadowtls|hysteria|hysteria2|tuic|wireguard|awg|socks|http) ;;
 		*)  # structural outbound (auto/proxy/direct/block) failed — don't gut the config
-			log "build: check failed on non-node outbound[$idx] ($badtype), keeping previous config"
+			log "build: check failed on non-node ${arr}[$idx] ($badtype), keeping previous config"
 			cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; rm -f "$SB_CONF.new"; exit 1 ;;
 	esac
-	badtag=$(jq -r ".outbounds[$idx].tag // \"\"" "$SB_CONF.new" 2>/dev/null)
-	jq --argjson i "$idx" --arg t "$badtag" '
-		del(.outbounds[$i])
+	badtag=$(jq -r ".${arr}[$idx].tag // \"\"" "$SB_CONF.new" 2>/dev/null)
+	jq --arg arr "$arr" --argjson i "$idx" --arg t "$badtag" '
+		del(.[$arr][$i])
 		| .outbounds |= map(
 			if (.type=="urltest" or .type=="selector") and (.outbounds|type=="array")
 			then .outbounds -= [$t] else . end)
 	' "$SB_CONF.new" > "$SB_CONF.tmp" 2>/dev/null && mv "$SB_CONF.tmp" "$SB_CONF.new" || {
-		log "build: failed to prune bad outbound, keeping previous config"; rm -f "$SB_CONF.new" "$SB_CONF.tmp"; exit 1; }
+		log "build: failed to prune bad node, keeping previous config"; rm -f "$SB_CONF.new" "$SB_CONF.tmp"; exit 1; }
 	dropped=$((dropped + 1))
 done
 
@@ -176,7 +203,7 @@ mv "$SB_CONF.new" "$SB_CONF"
 # dashboard never lists phantom nodes that sing-box check rejected and we pruned
 # (they would show up but be un-pingable / un-selectable — they aren't in sing-box).
 if [ "$dropped" -gt 0 ]; then
-	CFGTAGS=$(jq -c '[.outbounds[].tag]' "$SB_CONF" 2>/dev/null)
+	CFGTAGS=$(jq -c '[.outbounds[].tag] + [(.endpoints//[])[].tag]' "$SB_CONF" 2>/dev/null)
 	if [ -n "$CFGTAGS" ]; then
 		jq --argjson ct "$CFGTAGS" 'map(select(.tag as $x | $ct | index($x)))' "$NODES" > "$NODES.f" 2>/dev/null \
 			&& mv "$NODES.f" "$NODES"
