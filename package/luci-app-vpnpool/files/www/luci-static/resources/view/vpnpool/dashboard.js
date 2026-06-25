@@ -335,8 +335,9 @@ return view.extend({
 	},
 	handleImport: function() {
 		var self = this;
+		var awgOk = !!(this._st && this._st.awg);   // installed sing-box supports AmneziaWG?
 		var ta = E('textarea', { 'style': 'width:100%;min-height:120px;font-family:monospace;font-size:12px',
-			'placeholder': 'vless://…\n' + _('or a base64 subscription') + '\n' + _('or an AmneziaWG .conf / vpn:// link') });
+			'placeholder': 'vless://…\n' + _('or a base64 subscription') + (awgOk ? '\n' + _('or an AmneziaWG .conf / vpn:// link') : '') });
 		var fileInput = E('input', { 'type': 'file', 'accept': '.txt,.text,text/plain', 'style': 'display:none' });
 		fileInput.addEventListener('change', function() {
 			var f = fileInput.files && fileInput.files[0]; if (!f) return;
@@ -347,7 +348,7 @@ return view.extend({
 		});
 		ui.showModal(_('Import nodes'), [
 			E('p', {}, _('Paste node links (one per line) or a whole base64 subscription, or load a .txt file. New links are added to your manual nodes.')),
-			E('p', { 'style': 'color:#888' }, _('AmneziaWG: paste an AmneziaWG .conf or an AmneziaVPN vpn:// link here too — it joins the same pool.')),
+			awgOk ? E('p', { 'style': 'color:#888' }, _('AmneziaWG: paste an AmneziaWG .conf or an AmneziaVPN vpn:// link here too — it joins the same pool.')) : '',
 			ta,
 			E('div', { 'style': 'margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, [
 				E('button', { 'class': 'btn cbi-button', 'click': function() { fileInput.click(); } }, '📄 ' + _('Load file…')),

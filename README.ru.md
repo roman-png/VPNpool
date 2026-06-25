@@ -170,11 +170,24 @@ vless vmess trojan shadowsocks подписка, xtls-rprx-vision reality, urlte
 и подтягивает зависимости из штатных фидов OpenWrt. Ваш `/etc/config/vpnpool`
 (подписка, Telegram, маршрутизация) при обновлении сохраняется.
 
+**Два варианта** — выбирайте по тому, нужен ли AmneziaWG:
+
+**Обычный** (VLESS / VMess / Trojan / Shadowsocks, стоковый sing-box):
+
 ```sh
 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
 ```
 
-Если ваш BusyBox `wget` не поддерживает `<(...)`:
+**С AmneziaWG** (`VPNPOOL_AWG=1`) — дополнительно заменяет sing-box на форк с AmneziaWG
+(чтобы импортировать узлы AmneziaWG `.conf` / `vpn://`; сток AWG не умеет). Бинарник форка
+фиксируется от `opkg upgrade`; ⚠ podkop, если установлен, поедет на том же бинарнике:
+
+```sh
+VPNPOOL_AWG=1 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
+```
+
+Если ваш BusyBox `wget` не поддерживает `<(...)`, скачайте и запустите (для варианта с
+AmneziaWG добавьте `VPNPOOL_AWG=1 ` перед `sh`):
 
 ```sh
 wget -O /tmp/vpnpool-install.sh https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh

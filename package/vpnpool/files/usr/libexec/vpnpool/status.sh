@@ -212,11 +212,15 @@ SCHED_OFF=$(uci -q get vpnpool.main.sched_off)
 SCHED_REF=$(uci -q get vpnpool.main.sched_refresh)
 AUTOMEM=$(uci_list_json main auto_member)
 [ -n "$AUTOMEM" ] || AUTOMEM='[]'
+# AmneziaWG capability of the installed sing-box (cached by build.sh). The LuCI UI hides
+# AWG import/fields when false so a stock sing-box doesn't offer AmneziaWG it can't run.
+AWGCAP=$(cat /tmp/vpnpool/.awgcap 2>/dev/null); case "$AWGCAP" in (true|false) ;; (*) AWGCAP=false ;; esac
 
 jq -n \
 	--argjson enabled "${ENABLED:-0}" \
 	--argjson running "$RUNNING" \
 	--argjson routing "$ROUTING" \
+	--argjson awg "$AWGCAP" \
 	--arg active "$ACTIVE" \
 	--arg auto_now "$AUTONOW" \
 	--arg mode "$MODE" \
@@ -273,6 +277,7 @@ jq -n \
 		enabled: ($enabled==1),
 		running: $running,
 		routing: $routing,
+		awg: $awg,
 		mode: $mode,
 		active: $active,
 		auto_now: $auto_now,

@@ -8,6 +8,12 @@ mkdir -p "$SB_DATA"
 SRCDIR="$SB_DATA/sources"
 NODES="$SB_DATA/nodes.json"
 
+# Cache whether the installed sing-box supports AmneziaWG (the AWG fork reports it in its
+# version string / build tags). status.sh reads this so the LuCI UI hides AWG import/fields
+# on a stock sing-box that can't run AmneziaWG. Cheap to compute here (once per rebuild)
+# instead of forking `sing-box version` on every dashboard poll.
+if sing-box version 2>/dev/null | grep -qiE 'awg'; then echo true > "$SB_DATA/.awgcap"; else echo false > "$SB_DATA/.awgcap"; fi
+
 # manual nodes (uci: list manual_node 'vless://...') and imported nodes (uci: list
 # imported_node — links the user hand-picked from a probed source) each as their own
 # file. vless:// links never contain spaces, so a uci LIST read is safe here.
