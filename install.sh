@@ -282,7 +282,10 @@ else
 	# feed upgrade can't revert it. podkop (if present) shares this binary and rides along.
 	if [ "$AWG" = 1 ]; then
 		if awg_resolve && awg_fetch_to /usr/bin/sing-box; then
-			grep -qx 'sing-box hold' /etc/opkg.conf 2>/dev/null || echo 'sing-box hold' >> /etc/opkg.conf
+			# hold the package so `opkg upgrade` can't revert the fork to the stock binary.
+			# (The hold is a package flag in opkg's status DB — NOT a line in opkg.conf, which
+			# opkg would reject as an invalid directive.)
+			opkg flag hold sing-box >/dev/null 2>&1 || true
 			say "AmneziaWG sing-box fork installed (held): $(/usr/bin/sing-box version 2>/dev/null | head -1)"
 		else
 			say "AWG: keeping stock sing-box (no AmneziaWG support)"
