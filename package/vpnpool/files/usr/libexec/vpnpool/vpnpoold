@@ -197,6 +197,19 @@ probe_tunnel_once() {
 	return 1
 }
 
+# Is the tunnel actually carrying traffic right now? (end-to-end through the test inbound,
+# a few attempts so a single flap doesn't read as dead). Used to AVOID committing the whole
+# LAN to a tunnel with no working exit: if the subscription is empty/stale and every node is
+# down, we keep the LAN on DIRECT (internet still works, just unprotected) instead of
+# blackholing it — the very state that made "enable vpnpool -> whole LAN + Tailscale die".
+tunnel_healthy() {
+	probe_tunnel_once || { sleep 3; probe_tunnel_once; } || { sleep 3; probe_tunnel_once; }
+}
+
+# Whether the LAN is currently committed to the tunnel (0 = kept on DIRECT because no node
+# works yet). The supervise loop brings routing up as soon as a node becomes reachable.
+ROUTED=0
+
 watchdog_check() {
 	local now
 	[ -n "$(uci -q get vpnpool.main.selected_node)" ] && { WD_BAD=0; return 0; }
@@ -249,9 +262,12 @@ reload_config() {
 	log "reload (USR1): rebuilding config + routing"
 	if "$LIBEXEC/build.sh"; then
 		start_singbox   # stops the old instance and waits for the port/lock to free
-		# re-apply routing so per-client / ipv6 / coexist / domain edits take effect
-		"$LIBEXEC/route.sh" down
-		routing_up
+		# re-apply routing so per-client / ipv6 / coexist / domain edits take effect —
+		# but gate on tunnel health so a rebuild that ends up with no working node keeps
+		# the LAN on DIRECT instead of blackholing it (the supervise loop re-routes once a
+		# node is reachable). ROUTED=0 hands the decision back to that loop.
+		"$LIBEXEC/route.sh" down; ROUTED=0
+		if tunnel_healthy; then routing_up && ROUTED=1; fi
 		log "reload complete (sing-box reloaded)"
 	else
 		log "reload: build failed, keeping current config"
@@ -286,8 +302,22 @@ done
 
 start_singbox
 sleep 3
-routing_up
-tg_notify "🟢 vpnpool: routing is up"
+# Wait (bounded) for the tunnel to pick a working node BEFORE committing the whole LAN to
+# it. Never blackhole the LAN into a dead tunnel: if no node works (empty/stale
+# subscription, every exit down) keep the LAN on DIRECT and let the refresh loop retry —
+# routing comes up automatically once a node is reachable (see the supervise loop).
+_wu=0
+while [ "$_wu" -lt 12 ]; do
+	tunnel_healthy && break
+	_wu=$((_wu + 1)); sleep 2
+done
+if tunnel_healthy; then
+	routing_up && ROUTED=1
+	tg_notify "🟢 vpnpool: routing is up"
+else
+	log "no working node yet (empty/stale subscription?) — keeping LAN on DIRECT, will route once a node is reachable"
+	tg_notify "🟡 vpnpool: no working node — LAN stays on direct for now"
+fi
 
 REFRESH=$(interval_seconds)
 LAST=$(date +%s)
@@ -347,6 +377,15 @@ while : ; do
 
 	# end-to-end tunnel health: restart sing-box if it's alive-but-stuck
 	watchdog_check
+
+	# deferred routing: if we kept the LAN on DIRECT at startup/reload because no node
+	# worked, bring routing up the moment the tunnel becomes healthy (subscription
+	# restored / an exit came back). Cheap when already routed (the [ = 0 ] guard).
+	if [ "$ROUTED" = 0 ] && singbox_alive && tunnel_healthy; then
+		routing_up && ROUTED=1
+		log "a node became reachable — routing is now UP"
+		tg_notify "🟢 vpnpool: node reachable, routing is up"
+	fi
 
 	# auto-snapshot reachable nodes into the persistent saved store (opt-in)
 	NOWS=$(date +%s)
