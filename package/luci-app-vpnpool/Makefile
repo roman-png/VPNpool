@@ -21,11 +21,14 @@ define Package/luci-app-vpnpool
 endef
 
 define Package/luci-app-vpnpool/description
-  Five-tab LuCI web UI for vpnpool: Dashboard (status, live node pings, traffic, manual
-  ping/select, on/off), Sources (subscription + extra sources + manual nodes), Routing
-  (selective/exclude modes, community SRS lists, custom domains, per-client routing),
-  Settings (failover, Telegram alerts, backup/restore) and Diagnostics (service state,
-  coexistence, VPN-exit test, logs). Auto RU/EN UI.
+  Five-tab LuCI web UI for vpnpool: Dashboard (status, live node pings, traffic and
+  per-client stats, preferred-node pin, auto-pool picker, saved and out-of-pool lists,
+  speed/unlock tests, share link with offline QR, import/export, bulk delete), Sources
+  (subscription + extra subscriptions + source probing + manual nodes + AmneziaWG nodes),
+  Routing (selective/exclude modes, community SRS lists, custom domains, per-client
+  routing by DHCP name/MAC), Settings (failover, service-based node check, kill-switch
+  and DNS guard, anti-DPI, adaptive routing, schedule, Telegram, backup/restore) and
+  Diagnostics (service state, coexistence, VPN-exit test, logs). Auto RU/EN UI.
 endef
 
 define Build/Prepare
