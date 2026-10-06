@@ -5,6 +5,7 @@ Thumbs.db
 
 # build artifacts
 *.ipk
+*.apk
 /build/
 /bin/
 

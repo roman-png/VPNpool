@@ -1,15 +1,19 @@
-name: Publish opkg feed (GitHub Pages)
+name: Publish package feeds (GitHub Pages)
 
-# Builds the .ipk + opkg index (Packages/Packages.gz) and publishes them to
-# GitHub Pages, so users can add a custom feed and `opkg update && opkg install`
-# vpnpool directly. Our packages are arch-independent (_all), so one feed serves
-# every router; dependencies (sing-box, …) come from the stock OpenWrt feeds.
+# Builds the packages + indexes for BOTH package managers and publishes them to
+# GitHub Pages, so users can add a custom feed and install/upgrade vpnpool with the
+# router's own package manager:
+#   /       opkg feed (OpenWrt <= 24.10): *.ipk + Packages(.gz/.sig), usign-signed
+#   /apk/   apk feed  (OpenWrt 25.12+):   *.apk + packages.adb, signed with an EC key
+# Our packages are arch-independent, so one feed of each kind serves every router;
+# dependencies (sing-box, …) come from the stock OpenWrt feeds.
 
 on:
   push:
     branches: [ main ]
     paths:
       - 'package/**'
+      - 'keys/**'
       - '.github/workflows/pages.yml'
   release:
     types: [ published ]
@@ -37,11 +41,13 @@ jobs:
           git config gc.auto 0
           git repack -ad || true
           git gc --prune=now || true
+          mkdir -p out-ipk out-apk
 
-      - name: Build packages + index (OpenWrt SDK)
+      - name: Build .ipk + index (OpenWrt 24.10 SDK)
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: x86_64-24.10.4
+          ARTIFACTS_DIR: ${{ github.workspace }}/out-ipk
           FEEDNAME: vpnpool
           PACKAGES: vpnpool luci-app-vpnpool
           INDEX: 1
@@ -51,19 +57,48 @@ jobs:
           # below for users to install into /etc/opkg/keys/.
           KEY_BUILD: ${{ secrets.USIGN_KEY_BUILD }}
 
-      - name: Assemble feed
+      - name: Build .apk + index (OpenWrt 25.12 SDK)
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: x86_64-25.12.4
+          ARTIFACTS_DIR: ${{ github.workspace }}/out-apk
+          FEEDNAME: vpnpool
+          PACKAGES: vpnpool luci-app-vpnpool
+          INDEX: 1
+          # EC (prime256v1) private key -> packages.adb is signed, so apk keeps
+          # signature verification ON. Public key: keys/vpnpool-apk.pem, published
+          # below for users to install into /etc/apk/keys/.
+          PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+
+      - name: Assemble feeds
         run: |
-          mkdir -p public
-          # our packages
-          find bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' \) -exec cp {} public/ \;
-          # opkg index produced by the SDK for our feed (signed: Packages.sig)
-          find bin -path '*vpnpool*' \( -name 'Packages' -o -name 'Packages.gz' -o -name 'Packages.sig' \) -exec cp {} public/ \; || true
-          # publish the usign public key so users can verify the feed signature
+          mkdir -p public/apk
+          # --- opkg feed at the root (unchanged URL for existing users) ---
+          find out-ipk/bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' \) -exec cp {} public/ \;
+          find out-ipk/bin -path '*vpnpool*' \( -name 'Packages' -o -name 'Packages.gz' -o -name 'Packages.sig' \) -exec cp {} public/ \; || true
           cp keys/vpnpool-feed.pub public/vpnpool-feed.pub
+          # --- apk feed under /apk/ ---
+          find out-apk/bin \( -name 'vpnpool-[0-9]*.apk' -o -name 'luci-app-vpnpool-[0-9]*.apk' \) -exec cp {} public/apk/ \;
+          find out-apk/bin -path '*vpnpool*' -name 'packages.adb' -exec cp {} public/apk/ \;
+          cp keys/vpnpool-apk.pem public/apk/vpnpool-apk.pem
+          # both feeds must be complete, or the publish would silently ship a broken feed
+          [ "$(ls public/*.ipk | wc -l)" -eq 2 ] || { echo "opkg feed: expected 2 .ipk"; exit 1; }
+          [ "$(ls public/apk/*.apk | wc -l)" -eq 2 ] || { echo "apk feed: expected 2 .apk"; exit 1; }
+          [ -f public/Packages ] || { echo "opkg feed: Packages index missing"; exit 1; }
+          [ -f public/apk/packages.adb ] || { echo "apk feed: packages.adb missing"; exit 1; }
           # landing page
           cat > public/index.html <<'HTML'
-          <!doctype html><meta charset=utf-8><title>vpnpool opkg feed</title>
-          <h1>vpnpool — OpenWrt opkg feed</h1>
+          <!doctype html><meta charset=utf-8><title>vpnpool package feeds</title>
+          <h1>vpnpool — OpenWrt package feeds</h1>
+          <p>Easiest: the one-line installer picks the right format by itself
+          (<a href="https://github.com/roman-png/VPNpool#-install">README</a>).</p>
+          <h2>OpenWrt 25.12+ (apk)</h2>
+          <p>The feed is <b>signed</b>. Install the public key once, then add the feed:</p>
+          <pre>wget -O /etc/apk/keys/vpnpool-apk.pem https://roman-png.github.io/VPNpool/apk/vpnpool-apk.pem
+          echo "https://roman-png.github.io/VPNpool/apk/packages.adb" &gt;&gt; /etc/apk/repositories.d/customfeeds.list
+          apk update
+          apk add luci-app-vpnpool</pre>
+          <h2>OpenWrt 23.05 / 24.10 (opkg)</h2>
           <p>The feed is <b>signed</b> (usign, fingerprint 807479500e0ce219). Install the public key once, then add the feed:</p>
           <pre>wget -O /etc/opkg/keys/807479500e0ce219 https://roman-png.github.io/VPNpool/vpnpool-feed.pub
           echo "src/gz vpnpool https://roman-png.github.io/VPNpool" &gt;&gt; /etc/opkg/customfeeds.conf
@@ -71,8 +106,8 @@ jobs:
           opkg install luci-app-vpnpool</pre>
           <p><a href="https://github.com/roman-png/VPNpool">Project on GitHub</a></p>
           HTML
-          echo "=== feed contents ==="; ls -l public
-          if [ ! -f public/Packages.sig ]; then echo "WARNING: Packages.sig missing — feed is NOT signed"; fi
+          echo "=== feed contents ==="; ls -l public public/apk
+          if [ ! -f public/Packages.sig ]; then echo "WARNING: Packages.sig missing — opkg feed is NOT signed"; fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

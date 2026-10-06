@@ -1,8 +1,11 @@
-name: Build .ipk
+name: Build .ipk + .apk
 
-# Builds opkg packages (vpnpool + luci-app-vpnpool) for several OpenWrt targets
-# using the official OpenWrt SDK, so the app is installable via opkg on most
-# router hardware. On a published release the .ipk files are attached to it.
+# Builds the packages (vpnpool + luci-app-vpnpool) with the official OpenWrt SDK for
+# both package-manager generations:
+#   - OpenWrt 24.10 SDK -> .ipk (opkg, OpenWrt <= 24.10)
+#   - OpenWrt 25.12 SDK -> .apk (apk,  OpenWrt 25.12+)
+# The Makefiles are the same; the SDK decides the format. On a published release the
+# .ipk and .apk files are attached to it.
 
 on:
   push:
@@ -25,10 +28,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch:
-          - aarch64_cortex-a53-24.10.4   # MediaTek Filogic (Cudy TR3000 etc.)
-          - x86_64-24.10.4               # x86 / VM routers
-          - mipsel_24kc-24.10.4          # ramips MT76x8 (older routers)
+        include:
+          # opkg / .ipk (OpenWrt <= 24.10)
+          - { arch: aarch64_cortex-a53-24.10.4, ext: ipk }               # MediaTek Filogic (Cudy TR3000 etc.)
+          - { arch: x86_64-24.10.4,             ext: ipk, attach: true } # x86 / VM routers
+          - { arch: mipsel_24kc-24.10.4,        ext: ipk }               # ramips MT76x8 (older routers)
+          # apk / .apk (OpenWrt 25.12+)
+          - { arch: aarch64_cortex-a53-25.12.4, ext: apk }
+          - { arch: x86_64-25.12.4,             ext: apk, attach: true }
+          - { arch: mipsel_24kc-25.12.4,        ext: apk }
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,24 +59,31 @@ jobs:
           FEEDNAME: vpnpool_feed
           PACKAGES: vpnpool luci-app-vpnpool
 
-      - name: Collect .ipk
+      # .ipk: vpnpool_1.5.0-r1_all.ipk     .apk: vpnpool-1.5.0-r1.apk
+      # Fails the job if a package is missing, so a silent SDK skip can't go green.
+      - name: Collect packages
         run: |
           mkdir -p artifacts
-          find bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' \) -exec cp {} artifacts/ \; || true
-          ls -l artifacts || true
+          if [ "${{ matrix.ext }}" = apk ]; then
+            find bin \( -name 'vpnpool-[0-9]*.apk' -o -name 'luci-app-vpnpool-[0-9]*.apk' \) -exec cp {} artifacts/ \;
+          else
+            find bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' \) -exec cp {} artifacts/ \;
+          fi
+          ls -l artifacts
+          n=$(ls artifacts/*.${{ matrix.ext }} 2>/dev/null | wc -l)
+          [ "$n" -eq 2 ] || { echo "expected 2 .${{ matrix.ext }} packages, got $n"; exit 1; }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ipk-${{ matrix.arch }}
-          path: artifacts/*.ipk
-          if-no-files-found: warn
+          name: ${{ matrix.ext }}-${{ matrix.arch }}
+          path: artifacts/*.${{ matrix.ext }}
 
-      # Our packages are arch-independent (_all): every matrix job produces the
-      # SAME two .ipk filenames. Attach from ONE job only, otherwise the upload
-      # steps collide on duplicate asset names.
+      # Our packages are arch-independent (PKGARCH:=all): every job of one format
+      # produces the SAME two filenames. Attach from ONE job per format only,
+      # otherwise the upload steps collide on duplicate asset names.
       - name: Attach to release
-        if: github.event_name == 'release' && matrix.arch == 'x86_64-24.10.4'
+        if: github.event_name == 'release' && matrix.attach
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.ipk
+          files: artifacts/*.${{ matrix.ext }}
