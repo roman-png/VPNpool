@@ -19,8 +19,15 @@ info() { echo "  ..   $1"; }
 hdr()  { echo; echo "== $1 =="; }
 
 hdr "1. Packages"
+# OpenWrt 25.12+ uses apk, older releases opkg
+if command -v apk >/dev/null 2>&1 && [ -d /etc/apk ]; then PM=apk; else PM=opkg; fi
+info "package manager: $PM"
 for p in vpnpool luci-app-vpnpool; do
-	v=$(opkg list-installed 2>/dev/null | awk -v p="$p" '$1==p{print $3}')
+	if [ "$PM" = apk ]; then
+		v=$(apk list -I "$p" 2>/dev/null | sed -n "s/^$p-\([0-9][^ ]*\) .*/\1/p" | head -n1)
+	else
+		v=$(opkg list-installed 2>/dev/null | awk -v p="$p" '$1==p{print $3}')
+	fi
 	[ -n "$v" ] && ok "$p $v" || fail "$p not installed"
 done
 
