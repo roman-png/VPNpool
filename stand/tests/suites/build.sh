@@ -60,7 +60,7 @@ run_build "$SUB"
 begin "build/poison-port-70000"
 expect_good_config
 expect_jq "bad node not in config" "$(cat /etc/vpnpool/sing-box.json 2>/dev/null)" '[.outbounds[].tag] | index("Port70000") == null'
-end 2.1
+end
 metric build_port70000_seconds "$BSECS"
 
 # ---- poison: subscription node tagged with a reserved name ----
@@ -69,7 +69,7 @@ for rt in direct auto proxy; do
 	run_build "$SUB"
 	begin "build/poison-reserved-tag-$rt"
 	expect_good_config
-	end 2.1
+	end
 done
 
 # ---- poison: duplicate tags produced by the " #N" suffix scheme ----
@@ -80,7 +80,7 @@ printf '%s\n%s\n%s\n%s\n' "$GOOD" \
 run_build "$SUB"
 begin "build/poison-duplicate-tags"
 expect_good_config
-end 2.1
+end
 
 # ---- the pool must not stay frozen: the SAME poison on the next rebuild still builds ----
 printf '%s\n%s\n' "$GOOD" "vless://$U@203.0.113.50:70000?type=tcp&security=tls#Port70000" > "$SUB"
@@ -91,6 +91,18 @@ run_with_timeout 120 sh /usr/libexec/vpnpool/build.sh > "$T_STATE/build.out" 2>&
 begin "build/not-frozen-new-node-arrives-despite-poison"
 expect_eq "second build exit code" "$BRC" 0
 expect_jq "new node Good4 reached the config" "$(cat /etc/vpnpool/sing-box.json 2>/dev/null)" '[.outbounds[].tag] | index("Good4") != null'
+end
+
+# The link poisons above are now dropped / renamed by parser.uc itself (stage 5 + 2.1 parser
+# part). build.sh's OWN pruning of a `sing-box check` error (2.1: outbounds[N] / endpoints[N] /
+# duplicate tag) is still needed for what the parser passes through verbatim — a sing-box
+# JSON source: one outbound there with port 70000 must not freeze the pool either.
+printf '%s\n' "$GOOD" > "$SUB"
+printf '{"outbounds":[{"type":"vless","tag":"JsonPort70000","server":"203.0.113.56","server_port":70000,"uuid":"%s"}]}\n' "$U" > "$T_STATE/build/poison.json"
+run_build "$SUB" "$T_STATE/build/poison.json"
+begin "build/poison-json-source-port-70000"
+expect_good_config
+expect_jq "bad node not in config" "$(cat /etc/vpnpool/sing-box.json 2>/dev/null)" '[.outbounds[].tag] | index("JsonPort70000") == null'
 end 2.1
 
 # ---- xhttp: unsupported transport must not become a (dead) node in the config ----
@@ -101,7 +113,7 @@ expect_good_config
 end
 begin "build/xhttp-not-in-config"
 expect_jq "xhttp node absent" "$(cat /etc/vpnpool/sing-box.json 2>/dev/null)" '[.outbounds[].tag] | index("XHTTP") == null'
-end 5
+end
 
 # ---- a second source whose body looks like JSON but isn't: parser.uc dies => 0 nodes ----
 printf '%s\n' "$GOOD" > "$SUB"
@@ -109,7 +121,7 @@ printf '[{"broken": \n' > "$T_STATE/build/junk.raw"
 run_build "$SUB" "$T_STATE/build/junk.raw"
 begin "build/junk-json-source-does-not-empty-pool"
 expect_good_config
-end NEW-1
+end
 
 # ---- an AWG node without an AWG-capable engine must not break the build (stock sing-box) ----
 reset_state

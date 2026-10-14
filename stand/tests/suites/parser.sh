@@ -65,53 +65,264 @@ P singbox-json-outbounds - \
 	"{\"outbounds\":[{\"type\":\"selector\",\"tag\":\"sel\",\"outbounds\":[\"j1\"]},{\"type\":\"vless\",\"tag\":\"j1\",\"server\":\"203.0.113.22\",\"server_port\":443,\"uuid\":\"$U\"},{\"type\":\"direct\",\"tag\":\"direct\"}]}" \
 	'length==1 and .[0].tag=="j1"'
 P junk-and-unknown-schemes - "$(printf 'hello\nhttp://x.example/\nsocks://abc\nvless://broken\n')" 'length==0'
-# A body that merely LOOKS like JSON (starts with "[" or "{") makes json() throw: parser.uc
-# dies with no output at all, so in build.sh ONE such source file empties the whole pool.
-# Not an item of ROADMAP-2.0 -> new defect, id NEW-1 (see HANDOFF_stage0.md).
-P json-looking-junk-no-crash NEW-1 "[not json at all" 'length==0'
+# A body that merely LOOKS like JSON (starts with "[" or "{") made json() throw: parser.uc
+# died with no output at all, so in build.sh ONE such source file emptied the whole pool
+# (NEW-1 / ROADMAP 2.1a, fixed: try around json(), fall back to the line parser).
+P json-looking-junk-no-crash - "[not json at all" 'length==0'
+P json-looking-then-links - "$(printf '[broken header\nvless://%s@203.0.113.24:443?security=tls#AfterJunk\n' "$U")" \
+	'length==1' '.[0].tag=="AfterJunk"'
 P duplicate-line-dedup - \
 	"$(printf 'vless://%s@203.0.113.23:443?security=tls#Same\nvless://%s@203.0.113.23:443?security=tls#Same\n' "$U" "$U")" 'length==1'
 
-# ---- known parser gaps (ROADMAP §8, stage 5) ----
-P ss-base64url-nopad 5 "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpUcT5-P2I@ss.example.com:8388#U" \
+# ---- stage 5 (ROADMAP §8): protocols, transports, addresses, ss ----
+P ss-base64url-nopad - "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpUcT5-P2I@ss.example.com:8388#U" \
 	'length==1' '.[0].method=="chacha20-ietf-poly1305"' '.[0].password=="Tq>~?b"'
-P ss-2022-urlencoded-userinfo 5 "ss://2022-blake3-aes-128-gcm:AAECAwQFBgcICQoLDA0ODw%3D%3D@ss.example.com:8388#S22" \
+P ss-2022-urlencoded-userinfo - "ss://2022-blake3-aes-128-gcm:AAECAwQFBgcICQoLDA0ODw%3D%3D@ss.example.com:8388#S22" \
 	'.[0].method=="2022-blake3-aes-128-gcm"' '.[0].password=="AAECAwQFBgcICQoLDA0ODw=="'
-P ss-plugin 5 "ss://$(printf 'aes-256-gcm:pp' | base64 -w0)@ss.example.com:8388/?plugin=obfs-local%3Bobfs%3Dhttp%3Bobfs-host%3Dcdn.example.com#P" \
+P ss-plugin - "ss://$(printf 'aes-256-gcm:pp' | base64 -w0)@ss.example.com:8388/?plugin=obfs-local%3Bobfs%3Dhttp%3Bobfs-host%3Dcdn.example.com#P" \
 	'.[0].server_port==8388' '.[0].plugin=="obfs-local"' '.[0].plugin_opts=="obfs=http;obfs-host=cdn.example.com"'
-P vless-ipv6-brackets 5 "vless://$U@[2001:db8::1]:443?security=tls&sni=v6.example.com&type=tcp#V6" \
+P vless-ipv6-brackets - "vless://$U@[2001:db8::1]:443?security=tls&sni=v6.example.com&type=tcp#V6" \
 	'length==1' '.[0].server=="2001:db8::1"' '.[0].server_port==443'
-P trojan-ipv6-brackets 5 "trojan://pw@[2001:db8::2]:443?sni=v6.example.com#T6" \
+P trojan-ipv6-brackets - "trojan://pw@[2001:db8::2]:443?sni=v6.example.com#T6" \
 	'length==1' '.[0].server=="2001:db8::2"'
-P vless-host-port-slash-query 5 "vless://$U@slash.example.com:443/?type=tcp&security=tls&sni=slash.example.com#S" \
+P vless-host-port-slash-query - "vless://$U@slash.example.com:443/?type=tcp&security=tls&sni=slash.example.com#S" \
 	'length==1' '.[0].server=="slash.example.com"' '.[0].tls.server_name=="slash.example.com"'
-P hysteria2 5 "hysteria2://hypw@hy.example.com:8443?sni=hy.example.com&obfs=salamander&obfs-password=obpw&insecure=1#HY" \
+P hysteria2 - "hysteria2://hypw@hy.example.com:8443?sni=hy.example.com&obfs=salamander&obfs-password=obpw&insecure=1#HY" \
 	'length==1' '.[0].type=="hysteria2"' '.[0].password=="hypw"' '.[0].server_port==8443' \
 	'.[0].obfs.type=="salamander" and .[0].obfs.password=="obpw"' '.[0].tls.server_name=="hy.example.com"' '.[0].tls.insecure==true'
-P hy2-alias 5 "hy2://hypw@hy.example.com:443?sni=hy.example.com#HY2" '.[0].type=="hysteria2"'
-P tuic 5 "tuic://$U:tupw@tu.example.com:443?congestion_control=bbr&alpn=h3&sni=tu.example.com&udp_relay_mode=native#TU" \
+P hy2-alias - "hy2://hypw@hy.example.com:443?sni=hy.example.com#HY2" '.[0].type=="hysteria2"'
+P tuic - "tuic://$U:tupw@tu.example.com:443?congestion_control=bbr&alpn=h3&sni=tu.example.com&udp_relay_mode=native#TU" \
 	'.[0].type=="tuic"' ".[0].uuid==\"$U\"" '.[0].password=="tupw"' '.[0].congestion_control=="bbr"' \
 	'.[0].udp_relay_mode=="native"' '.[0].tls.alpn==["h3"]'
-P vless-xhttp-refused 5 "vless://$U@x.example.com:443?type=xhttp&security=tls&path=%2Fx#XH" 'length==0'
-P vless-splithttp-refused 5 "vless://$U@x.example.com:443?type=splithttp&security=tls#SH" 'length==0'
-P vless-httpupgrade 5 "vless://$U@u.example.com:443?type=httpupgrade&security=tls&path=%2Fup&host=u.example.com#HU" \
+P vless-xhttp-refused - "vless://$U@x.example.com:443?type=xhttp&security=tls&path=%2Fx#XH" 'length==0'
+P vless-splithttp-refused - "vless://$U@x.example.com:443?type=splithttp&security=tls#SH" 'length==0'
+P vless-httpupgrade - "vless://$U@u.example.com:443?type=httpupgrade&security=tls&path=%2Fup&host=u.example.com#HU" \
 	'.[0].transport.type=="httpupgrade" and .[0].transport.path=="/up"'
-P vless-h2 5 "vless://$U@h.example.com:443?type=http&security=tls&path=%2Fh2&host=h.example.com#H2" \
+P vless-h2 - "vless://$U@h.example.com:443?type=http&security=tls&path=%2Fh2&host=h.example.com#H2" \
 	'.[0].transport.type=="http"'
-P vless-quic 5 "vless://$U@q.example.com:443?type=quic&security=tls#Q" '.[0].transport.type=="quic"'
-P vless-ws-early-data 5 "vless://$U@ws.example.com:443?type=ws&security=tls&path=%2Fws%3Fed%3D2048#ED" \
+P vless-quic - "vless://$U@q.example.com:443?type=quic&security=tls#Q" '.[0].transport.type=="quic"'
+P vless-ws-early-data - "vless://$U@ws.example.com:443?type=ws&security=tls&path=%2Fws%3Fed%3D2048#ED" \
 	'.[0].transport.path=="/ws"' '.[0].transport.max_early_data==2048'
-P vless-tcp-http-header 5 "vless://$U@t.example.com:80?type=tcp&headerType=http&host=t.example.com&path=%2F#TH" \
+P vless-tcp-http-header - "vless://$U@t.example.com:80?type=tcp&headerType=http&host=t.example.com&path=%2F#TH" \
 	'.[0].transport.type=="http"'
-P vless-alpn 5 "vless://$U@a.example.com:443?security=tls&alpn=h2%2Chttp%2F1.1#AL" '.[0].tls.alpn==["h2","http/1.1"]'
-P vless-allow-insecure 5 "vless://$U@a.example.com:443?security=tls&allowInsecure=1#AI" '.[0].tls.insecure==true'
-P trojan-security-none 5 "trojan://pw@tn.example.com:80?security=none#TN" '(.[0].tls.enabled // false)==false'
-P trojan-reality 5 "trojan://pw@tr.example.com:443?security=reality&pbk=$PBK&sid=01&sni=www.microsoft.com#TRR" \
+P vless-alpn - "vless://$U@a.example.com:443?security=tls&alpn=h2%2Chttp%2F1.1#AL" '.[0].tls.alpn==["h2","http/1.1"]'
+P vless-allow-insecure - "vless://$U@a.example.com:443?security=tls&allowInsecure=1#AI" '.[0].tls.insecure==true'
+P trojan-security-none - "trojan://pw@tn.example.com:80?security=none#TN" '(.[0].tls.enabled // false)==false'
+P trojan-reality - "trojan://pw@tr.example.com:443?security=reality&pbk=$PBK&sid=01&sni=www.microsoft.com#TRR" \
 	".[0].tls.reality.public_key==\"$PBK\""
-# tag suffixes must be unique (ROADMAP 2.1): "A", "A", "A #2" -> today two nodes end up tagged "A #2"
-P tag-suffix-unique 2.1 \
+# tag suffixes must be unique (ROADMAP 2.1): "A", "A", "A #2" -> two nodes tagged "A #2" before the fix
+P tag-suffix-unique - \
 	"$(printf 'vless://%s@203.0.113.31:443?security=tls#A\nvless://%s@203.0.113.32:443?security=tls#A\nvless://%s@203.0.113.33:443?security=tls#A%%20%%232\n' "$U" "$U" "$U")" \
 	'length==3' '(map(.tag)|unique|length)==3'
+
+# ---- more stage-5 coverage ----
+P vless-ipv6-default-tag - "vless://$U@[2001:db8::7]:8443?security=tls" '.[0].tag=="[2001:db8::7]:8443"'
+P vless-port-out-of-range-dropped - "$(printf 'vless://%s@203.0.113.40:70000?security=tls#P1\nvless://%s@203.0.113.40:0?security=tls#P2\nvless://%s@203.0.113.40?security=tls#P3\n' "$U" "$U" "$U")" 'length==0'
+P vless-bad-host-dropped - "vless://$U@bad<host>:443?security=tls#BH" 'length==0'
+P vless-empty-uuid-dropped - "vless://@203.0.113.41:443?security=tls#EU" 'length==0'
+P vless-reality-long-sid-dropped - "vless://$U@203.0.113.42:443?security=reality&pbk=$PBK&sid=0123456789abcdef01#LS" 'length==0'
+P vless-reality-nonhex-sid-dropped - "vless://$U@203.0.113.42:443?security=reality&pbk=$PBK&sid=zz#ZS" 'length==0'
+P vless-encryption-dropped - "vless://$U@203.0.113.43:443?security=tls&encryption=mlkem768x25519plus.native.0rtt.abc#EN" 'length==0'
+P vless-encryption-none-kept - "vless://$U@203.0.113.43:443?security=tls&encryption=none#EN0" 'length==1'
+P vless-unknown-security-dropped - "vless://$U@203.0.113.44:443?security=foo#SF" 'length==0'
+P vless-kcp-refused - "vless://$U@203.0.113.45:443?type=kcp#KCP" 'length==0'
+P vless-quic-needs-tls - "vless://$U@q.example.com:443?type=quic#QN" 'length==0'
+P vless-quic-no-utls - "vless://$U@q.example.com:443?type=quic&security=tls&fp=chrome#QU" \
+	'.[0].transport.type=="quic"' '.[0].tls.utls==null'
+P vless-quic-reality-refused - "vless://$U@q.example.com:443?type=quic&security=reality&pbk=$PBK#QR" 'length==0'
+P vless-unknown-fp-chrome - "vless://$U@203.0.113.46:443?security=tls&fp=chrome_120#FP" '.[0].tls.utls.fingerprint=="chrome"'
+P vless-fp-lowercased - "vless://$U@203.0.113.47:443?security=tls&fp=Firefox#FF" '.[0].tls.utls.fingerprint=="firefox"'
+P vless-ws-ed-params - "vless://$U@ws.example.com:443?type=ws&security=tls&path=%2Fws2&ed=1024&eh=X-ED#ED2" \
+	'.[0].transport.path=="/ws2"' '.[0].transport.max_early_data==1024' '.[0].transport.early_data_header_name=="X-ED"'
+P vless-ws-ed-keeps-other-query - "vless://$U@ws.example.com:443?type=ws&security=tls&path=%2Fws%3Fa%3D1%26ed%3D512#ED3" \
+	'.[0].transport.path=="/ws?a=1"' '.[0].transport.max_early_data==512'
+P vless-httpupgrade-host - "vless://$U@u.example.com:443?type=httpupgrade&security=tls&path=%2Fup&host=u.example.com#HU2" \
+	'.[0].transport.host=="u.example.com"'
+P vless-h2-host-list - "vless://$U@h.example.com:443?type=h2&security=tls&path=%2Fh2&host=a.example%2Cb.example#H2L" \
+	'.[0].transport.type=="http"' '.[0].transport.host==["a.example","b.example"]' '.[0].transport.path=="/h2"'
+P vless-tcp-http-header-fields - "vless://$U@t.example.com:80?type=tcp&headerType=http&host=t.example.com&path=%2Fa%2C%2Fb#TH2" \
+	'.[0].transport.host==["t.example.com"]' '.[0].transport.path=="/a"' '.[0].transport.method=="GET"' '.[0].tls==null'
+P vless-scheme-uppercase - "VLESS://$U@203.0.113.48:443?security=tls#UP" 'length==1'
+P trojan-default-tls - "trojan://pw@tr.example.com:443#TD" '.[0].tls.enabled==true'
+P trojan-ws - "trojan://pw@tr.example.com:443?type=ws&path=%2Ft&host=cdn.example.com#TW" \
+	'.[0].transport.type=="ws" and .[0].transport.headers.Host=="cdn.example.com"'
+P trojan-xhttp-refused - "trojan://pw@tr.example.com:443?type=xhttp#TX" 'length==0'
+P trojan-password-urldecoded - "trojan://p%40ss%3Aw@tr.example.com:443#TP" '.[0].password=="p@ss:w"'
+VMH2=$(printf '%s' "{\"v\":\"2\",\"ps\":\"VMH2\",\"add\":\"vm.example.com\",\"port\":443,\"id\":\"$U\",\"aid\":\"x\",\"scy\":\"weird\",\"net\":\"h2\",\"host\":\"vm.example.com\",\"path\":\"/vm\",\"tls\":\"tls\"}" | base64 -w0 | tr '+/' '-_' | tr -d '=')
+P vmess-base64url-h2-normalised - "vmess://$VMH2" \
+	'.[0].transport.type=="http"' '.[0].security=="auto"' '.[0].alter_id==0' '.[0].server_port==443'
+VMX=$(printf '%s' "{\"v\":\"2\",\"ps\":\"VMX\",\"add\":\"vm.example.com\",\"port\":\"443\",\"id\":\"$U\",\"net\":\"xhttp\"}" | base64 -w0)
+P vmess-xhttp-refused - "vmess://$VMX" 'length==0'
+VMHU=$(printf '%s' "{\"v\":\"2\",\"ps\":\"VMHU\",\"add\":\"vm.example.com\",\"port\":\"80\",\"id\":\"$U\",\"net\":\"httpupgrade\",\"host\":\"h.example\",\"path\":\"/u\"}" | base64 -w0)
+P vmess-httpupgrade - "vmess://$VMHU" '.[0].transport.type=="httpupgrade" and .[0].transport.host=="h.example"'
+VMP=$(printf '%s' "{\"v\":\"2\",\"ps\":\"VMP\",\"add\":\"vm.example.com\",\"port\":\"99999\",\"id\":\"$U\"}" | base64 -w0)
+P vmess-bad-port-dropped - "vmess://$VMP" 'length==0'
+P vmess-garbage-dropped - "vmess://%%%notbase64" 'length==0'
+P hy2-port-hopping - "hy2://hypw@hy.example.com:443,5000-6000/?sni=hy.example.com&mport=7000-7100&hop_interval=30#HOP" \
+	'.[0].server_port==443' '.[0].server_ports==["5000:6000","7000:7100"]' '.[0].hop_interval=="30s"'
+P hy2-only-range - "hysteria2://pw@hy.example.com:20000-30000#RNG" '.[0].server_ports==["20000:30000"]' '.[0].server_port==null'
+P hy2-default-port - "hy2://pw@hy.example.com/?sni=hy.example.com#DP" '.[0].server_port==443'
+P hy2-bandwidth - "hysteria2://pw@hy.example.com:443?up=50%20mbps&down=1gbps#BW" '.[0].up_mbps==50 and .[0].down_mbps==1000'
+P hy2-no-auth - "hysteria2://hy.example.com:443?sni=hy.example.com#NA" 'length==1' '.[0].password==null'
+P hy2-bad-obfs-dropped - "hy2://pw@hy.example.com:443?obfs=foo#BO" 'length==0'
+P hy2-bad-range-dropped - "hy2://pw@hy.example.com:6000-5000#BR" 'length==0'
+P hy2-no-utls - "hy2://pw@hy.example.com:443?fp=chrome#NU" '.[0].tls.utls==null and .[0].tls.enabled==true'
+P tuic-bad-uuid-dropped - "tuic://notauuid:pw@tu.example.com:443#TB" 'length==0'
+P tuic-unknown-cc-omitted - "tuic://$U:pw@tu.example.com:443?congestion_control=foo&udp_relay_mode=bar&allow_insecure=1#TC" \
+	'length==1' '.[0].congestion_control==null' '.[0].udp_relay_mode==null' '.[0].tls.insecure==true'
+P tuic-newreno-alias - "tuic://$U:pw@tu.example.com:443?congestion-control=newreno#TN" '.[0].congestion_control=="new_reno"'
+P ss-unknown-method-dropped - "ss://$(printf 'rc4:pp' | base64 -w0)@ss.example.com:8388#RC" 'length==0'
+P ss-2022-bad-key-dropped - "ss://2022-blake3-aes-128-gcm:short@ss.example.com:8388#BK" 'length==0'
+P ss-2022-multiuser-key - "ss://2022-blake3-aes-128-gcm:AAECAwQFBgcICQoLDA0ODw%3D%3D%3AAAECAwQFBgcICQoLDA0ODw%3D%3D@ss.example.com:8388#MU" 'length==1'
+P ss-unsupported-plugin-dropped - "ss://$(printf 'aes-256-gcm:pp' | base64 -w0)@ss.example.com:8388/?plugin=kcptun#KC" 'length==0'
+P ss-v2ray-plugin - "ss://$(printf 'aes-256-gcm:pp' | base64 -w0)@ss.example.com:8388/?plugin=v2ray-plugin%3Btls%3Bhost%3Dcdn.example.com#V2" \
+	'.[0].plugin=="v2ray-plugin"' '.[0].plugin_opts=="tls;host=cdn.example.com"'
+P ss-simple-obfs-alias - "ss://$(printf 'aes-256-gcm:pp' | base64 -w0)@ss.example.com:8388?plugin=simple-obfs%3Bobfs%3Dtls#SO" \
+	'.[0].plugin=="obfs-local"' '.[0].plugin_opts=="obfs=tls"'
+P ss-legacy-ipv6 - "ss://$(printf 'aes-128-gcm:pw2@[2001:db8::5]:8389' | base64 -w0 | tr -d =)#L6" \
+	'.[0].server=="2001:db8::5" and .[0].server_port==8389'
+P base64url-subscription-blob - \
+	"$(printf 'vless://%s@203.0.113.25:443?security=tls#BU1\nss://%s@203.0.113.26:8388#BU2\n' "$U" "$(printf 'aes-256-gcm:p??' | base64 -w0)" | base64 -w0 | tr '+/' '-_' | tr -d '=')" \
+	'map(.tag)==["BU1","BU2"]'
+P utf8-bom-and-comments - "$(printf '\357\273\277#profile-title: x\n// note\nvless://%s@203.0.113.27:443?security=tls#BOM\n' "$U")" \
+	'length==1 and .[0].tag=="BOM"'
+P unknown-schemes-dropped - "$(printf 'socks://abc\nssr://abc\nwireguard://abc\nhysteria://abc\n')" 'length==0'
+P same-node-other-name-dedup - \
+	"$(printf 'vless://%s@203.0.113.28:443?security=tls#First\nvless://%s@203.0.113.28:443?security=tls#Second\n' "$U" "$U")" \
+	'length==1' '.[0].tag=="First"'
+# reserved tags (ROADMAP 2.1): a node may never take a tag the generator defines
+P reserved-tags-renamed - \
+	"$(i=60; for t in auto proxy direct block dns-out; do i=$((i+1)); printf 'vless://%s@203.0.113.%s:443?security=tls#%s\n' "$U" "$i" "$t"; done)" \
+	'length==5' '[.[].tag] | map(select(.=="auto" or .=="proxy" or .=="direct" or .=="block" or .=="dns-out")) | length==0' \
+	'(map(.tag)|unique|length)==5' '.[0].tag=="auto #2"'
+P tag-suffix-unique-loop - \
+	"$(printf 'vless://%s@203.0.113.71:443?security=tls#A\nvless://%s@203.0.113.72:443?security=tls#A%%20%%232\nvless://%s@203.0.113.73:443?security=tls#A\nvless://%s@203.0.113.74:443?security=tls#A%%20%%232\nvless://%s@203.0.113.75:443?security=tls#A\n' "$U" "$U" "$U" "$U" "$U")" \
+	'length==5' '(map(.tag)|unique|length)==5'
+P json-outbound-reserved-tag - \
+	"{\"outbounds\":[{\"type\":\"vless\",\"tag\":\"proxy\",\"server\":\"203.0.113.76\",\"server_port\":443,\"uuid\":\"$U\"}]}" \
+	'length==1 and .[0].tag=="proxy #2"'
+
+# ---- node id (ROADMAP 2.2 groundwork): opt-in field, stable, name/order independent ----
+ID_LINKS="vless://$U@203.0.113.80:443?type=tcp&security=reality&pbk=$PBK&sid=ab12&sni=www.microsoft.com&fp=chrome#I1
+trojan://pw@tr.example.com:443?sni=tr.example.com#I2
+ss://$(printf 'aes-256-gcm:pp' | base64 -w0)@ss.example.com:8388#I3
+hy2://hypw@hy.example.com:443?sni=hy.example.com#I4
+tuic://$U:tupw@tu.example.com:443?sni=tu.example.com#I5
+vmess://$VM"
+ID_SWAPPED=$(printf '%s\n' "$ID_LINKS" | awk '{a[NR]=$0} END{for(i=NR;i>=1;i--) print a[i]}' | sed 's/#I\([0-9]\)$/#Renamed\1/; s/#VM$/#VMrenamed/')
+idmap() { printf '%s\n' "$1" | ucode "$PARSER" --with-id 2>/dev/null | jq -c 'map({k:(.type+"|"+.server), id}) | sort_by(.k)'; }
+begin "parser/id-stable-across-order-and-name"
+_a=$(idmap "$ID_LINKS"); _b=$(idmap "$ID_SWAPPED")
+expect_jq "6 ids, 12 hex chars each" "$_a" 'length==6 and all(.[]; (.id|type)=="string" and (.id|length)==12 and (.id|explode|all(. >= 48 and . <= 57 or . >= 97 and . <= 102)))'
+expect_jq "ids unique" "$_a" '(map(.id)|unique|length)==6'
+expect_jq "names of the swapped corpus really differ" "$(printf '%s\n' "$ID_SWAPPED" | ucode "$PARSER" 2>/dev/null)" 'map(.tag)|index("I1")==null'
+expect_eq "same id per node after reordering + renaming" "$_b" "$_a"
+end
+begin "parser/id-changes-with-port-and-credential"
+_p1=$(printf '%s\n' "vless://$U@203.0.113.81:443?security=tls#X" | ucode "$PARSER" --with-id 2>/dev/null | jq -r '.[0].id')
+_p2=$(printf '%s\n' "vless://$U@203.0.113.81:444?security=tls#X" | ucode "$PARSER" --with-id 2>/dev/null | jq -r '.[0].id')
+_p3=$(printf '%s\n' "vless://11111111-2222-3333-4444-555555555555@203.0.113.81:443?security=tls#X" | ucode "$PARSER" --with-id 2>/dev/null | jq -r '.[0].id')
+_p4=$(printf '%s\n' "VLESS://$(echo $U | tr a-f A-F)@203.0.113.81:443?security=tls&fp=firefox#Y" | ucode "$PARSER" --with-id 2>/dev/null | jq -r '.[0].id')
+expect_true "id present ($_p1)" [ ${#_p1} -eq 12 ]
+expect_true "port change -> other id ($_p1 vs $_p2)" [ "$_p1" != "$_p2" ]
+expect_true "uuid change -> other id ($_p1 vs $_p3)" [ "$_p1" != "$_p3" ]
+expect_eq "uuid case / fingerprint / name do not change the id" "$_p4" "$_p1"
+end
+begin "parser/id-not-in-default-output"
+_o=$(printf '%s\n' "$ID_LINKS" | ucode "$PARSER" 2>/dev/null)
+expect_jq "6 nodes parsed" "$_o" 'length==6'
+expect_jq "no id field without --with-id (sing-box rejects unknown fields)" "$_o" 'all(.[]; has("id")|not)'
+end
+begin "parser/id-none-for-awg"
+expect_jq "awg node has no id (stage 4)" "$(ucode "$PARSER" --with-id "$FX/awg/awg2.conf" 2>/dev/null)" 'length==1 and (.[0]|has("id")|not)'
+end
+
+# ---- --report: one record per input line, machine reason codes ----
+RPT_IN="#comment
+vless://$U@203.0.113.90:443?security=tls#R-ok
+vless://$U@203.0.113.90:443?security=tls#R-dup
+vless://$U@x.example.com:443?type=xhttp&security=tls#R-xhttp
+vless://$U@203.0.113.91:70000?security=tls#R-port
+tuic://bad:pw@tu.example.com:443#R-uuid
+socks://abc
+hello there
+
+vless://$U@203.0.113.92:443?security=reality&pbk=short#R-pbk
+vless://$U@203.0.113.93:443?security=reality&pbk=$PBK&sid=xyz1#R-sid
+vless://$U@203.0.113.94:443?security=tls&flow=xtls-rprx-direct#R-flow
+ss://$(printf 'rc4:pp' | base64 -w0)@ss.example.com:8388#R-method
+ss://$(printf 'aes-256-gcm:pp' | base64 -w0)@ss.example.com:8388/?plugin=kcptun#R-plugin
+hy2://pw@hy.example.com:443?obfs=foo#R-obfs
+vless://$U@q.example.com:443?type=quic#R-quic
+vless://$U@203.0.113.95:443?security=tls#direct
+vless://$U@bad^host:443#R-server
+ss://%%%#R-parse
+vless://$U@203.0.113.96:443?security=tls&encryption=mlkem#R-enc"
+begin "parser/report-reasons"
+_r=$(printf '%s\n' "$RPT_IN" | ucode "$PARSER" --report 2>/dev/null)
+expect_jq "array of 18 records (blank and # lines are not reported)" "$_r" 'type=="array" and length==18'
+expect_jq "line 2 ok with tag/type/id" "$_r" '.[0] | .line==2 and .status=="ok" and .tag=="R-ok" and .type=="vless" and (.id|length)==12'
+expect_jq "duplicate points at its twin" "$_r" '.[1] | .line==3 and .status=="skip" and .reason=="duplicate" and .dup_of=="R-ok"'
+expect_jq "reason codes in order" "$_r" '[.[2:][] | .reason // "ok"] == ["unsupported_transport","bad_port","bad_uuid","unknown_scheme","not_a_link","bad_reality_key","bad_short_id","unsupported_flow","unsupported_method","unsupported_plugin","unsupported_obfs","tls_required","ok","bad_server","parse_error","unsupported_encryption"]'
+expect_jq "line numbers follow the input (comment line 1, blank line 9 not reported)" "$_r" '[.[].line] == [2,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18,19,20]'
+expect_jq "reserved tag reported as renamed" "$_r" '.[14] | .line==17 and .status=="ok" and .tag=="direct #2" and .tag_changed==true'
+expect_jq "every record has src 0" "$_r" 'all(.[]; .src==0)'
+expect_jq "reasons are machine codes (no spaces)" "$_r" 'all(.[]; (.reason // "x") | contains(" ") | not)'
+end
+begin "parser/report-matches-normal-mode"
+_n=$(printf '%s\n' "$RPT_IN" | ucode "$PARSER" 2>/dev/null)
+expect_jq "normal mode: exactly the ok records become nodes" "$_n" "length == $(printf '%s' "$_r" | jq '[.[]|select(.status=="ok")]|length')"
+expect_jq "normal mode tags == report ok tags" "$_n" "map(.tag) == $(printf '%s' "$_r" | jq -c '[.[]|select(.status=="ok")|.tag]')"
+end
+begin "parser/report-multi-file-and-json"
+mkdir -p "$T_STATE/parser"
+printf '%s\n' "vless://$U@203.0.113.97:443?security=tls#F0" > "$T_STATE/parser/r0.txt"
+printf '{"outbounds":[{"type":"direct","tag":"direct"},{"type":"vless","tag":"F1","server":"203.0.113.98","server_port":443,"uuid":"%s"}]}' "$U" > "$T_STATE/parser/r1.json"
+printf '[{"broken": \n' > "$T_STATE/parser/r2.raw"
+_r=$(ucode "$PARSER" --report "$T_STATE/parser/r0.txt" "$T_STATE/parser/r1.json" "$T_STATE/parser/r2.raw" 2>/dev/null)
+expect_jq "file 0 line 1 ok" "$_r" 'any(.[]; .src==0 and .line==1 and .status=="ok" and .tag=="F0")'
+expect_jq "json item 1 is not a node, item 2 ok" "$_r" 'any(.[]; .src==1 and .item==1 and .reason=="not_a_node") and any(.[]; .src==1 and .item==2 and .status=="ok" and .tag=="F1")'
+expect_jq "broken json source reported, not crashed" "$_r" 'any(.[]; .src==2 and .status=="skip")'
+end
+
+# ---- every node the corpus produces must be accepted by sing-box (the engine on PATH:
+# stock 1.12 in the stand image; run with our 1.14 AWG engine via SINGBOX_BIN — see HANDOFF) ----
+CHECK_LINKS="$ID_LINKS
+vless://$U@[2001:db8::1]:443?security=tls&sni=v6.example.com&type=tcp#C-v6
+vless://$U@u.example.com:443?type=httpupgrade&security=tls&path=%2Fup&host=u.example.com#C-hu
+vless://$U@h.example.com:443?type=http&security=tls&path=%2Fh2&host=h.example.com#C-h2
+vless://$U@q.example.com:443?type=quic&security=tls&fp=chrome#C-quic
+vless://$U@ws.example.com:443?type=ws&security=tls&path=%2Fws%3Fed%3D2048#C-ed
+vless://$U@g.example.com:443?type=grpc&security=reality&pbk=$PBK&sid=01&fp=qq#C-grpc-reality
+vless://$U@t.example.com:80?type=tcp&headerType=http&host=t.example.com&path=%2F#C-tcphttp
+vless://$U@a.example.com:443?security=tls&alpn=h2%2Chttp%2F1.1&allowInsecure=1&fp=chrome_120#C-alpn
+trojan://pw@tn.example.com:80?security=none#C-tr-none
+trojan://pw@tr.example.com:443?security=reality&pbk=$PBK&sid=01&sni=www.microsoft.com#C-tr-reality
+trojan://pw@tr.example.com:443?type=ws&path=%2Ft#C-tr-ws
+vmess://$VMH2
+vmess://$VMHU
+hysteria2://hypw@hy.example.com:8443?sni=hy.example.com&obfs=salamander&obfs-password=obpw&insecure=1&up=50&down=100#C-hy
+hy2://hypw@hy.example.com:443,5000-6000/?mport=7000-7100&hop_interval=30#C-hop
+hysteria2://pw@hy.example.com:20000-30000#C-range
+tuic://$U:tupw@tu.example.com:443?congestion_control=bbr&alpn=h3&sni=tu.example.com&udp_relay_mode=native&allow_insecure=1#C-tuic
+ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpUcT5-P2I@ss.example.com:8388#C-ss-url
+ss://2022-blake3-aes-128-gcm:AAECAwQFBgcICQoLDA0ODw%3D%3D@ss.example.com:8388#C-ss22
+ss://$(printf 'aes-256-gcm:pp' | base64 -w0)@ss.example.com:8388/?plugin=obfs-local%3Bobfs%3Dhttp%3Bobfs-host%3Dcdn.example.com#C-obfs
+ss://$(printf 'aes-256-gcm:pp' | base64 -w0)@ss.example.com:8389/?plugin=v2ray-plugin%3Btls%3Bhost%3Dcdn.example.com#C-v2p
+vless://$U@203.0.113.99:443?security=tls#auto"
+begin "parser/corpus-accepted-by-sing-box-check"
+printf '%s\n' "$CHECK_LINKS" | ucode "$PARSER" 2>/dev/null > "$T_STATE/parser/check-nodes.json"
+_cn=$(jq 'length' "$T_STATE/parser/check-nodes.json" 2>/dev/null)
+expect_eq "all $(printf '%s\n' "$CHECK_LINKS" | grep -c '://') corpus links parsed" "$_cn" "$(printf '%s\n' "$CHECK_LINKS" | grep -c '://')"
+jq '{log:{level:"error"}, outbounds:(. + [{type:"direct",tag:"direct"}])}' "$T_STATE/parser/check-nodes.json" > "$T_STATE/parser/check.json"
+expect_true "sing-box $(sing-box version 2>/dev/null | head -1 | awk '{print $NF}') check accepts all $_cn nodes in one config" \
+	sing-box check -c "$T_STATE/parser/check.json"
+# positive control: the same check MUST reject a config with an unknown outbound field —
+# that is exactly why `id` is opt-in (--with-id) and never in nodes.json
+printf '%s\n' "$CHECK_LINKS" | ucode "$PARSER" --with-id 2>/dev/null \
+	| jq '{log:{level:"error"}, outbounds:(. + [{type:"direct",tag:"direct"}])}' > "$T_STATE/parser/check-id.json"
+expect_true "control: check rejects the --with-id output" sh -c '! sing-box check -c "$1"' _ "$T_STATE/parser/check-id.json"
+end
 
 # ---- AmneziaWG / WireGuard .conf ----
 PF() {   # like P, but input is a fixture file
@@ -138,7 +349,8 @@ PF wireguard-plain-conf 4.3 "$FX/awg/wg-plain.conf" \
 PF awg-multi-peer-refused 4.3 "$FX/awg/awg-multipeer.conf" 'length==0'
 mkdir -p "$T_STATE/parser"
 sed 's/^\[Interface\]/[INTERFACE]/; s/^\[Peer\]/[PEER]/' "$FX/awg/awg2.conf" > "$T_STATE/parser/upper.conf"
-PF awg-section-case-insensitive 4.3 "$T_STATE/parser/upper.conf" 'length==1 and .[0].type=="awg"'
+# [INTERFACE] / [PEER] in capitals: the .conf must still be recognised (ROADMAP 2.1a)
+PF awg-section-case-insensitive - "$T_STATE/parser/upper.conf" 'length==1 and .[0].type=="awg"'
 
 # ---- vpn:// (AmneziaVPN) vectors: awgdecode.uc -> .conf -> parser.uc ----
 # Accepts today's output (raw .conf on stdout) and the planned one (ROADMAP 4.5: JSON

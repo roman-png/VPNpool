@@ -73,7 +73,28 @@ ctl() {
 SELECT="$*"
 ctl parser-flow-broken parser fail 'parser/vless-reality-vision ;parser/vless-flow-variant-normalised ' \
 	"$LIBX/parser.uc" "ob.flow = 'xtls-rprx-vision';" "ob.flow = 'broken-flow';"
-ctl build-config-not-installed build fail 'build/clean-subscription ;build/xhttp-builds ' \
+# 2.1a: json() without try -> text that only looks like JSON aborts the parser again
+ctl parser-json-no-try parser fail 'parser/json-looking-junk-no-crash ;parser/json-looking-then-links ;parser/report-multi-file-and-json ' \
+	"$LIBX/parser.uc" 'try { data = json(raw); } catch (e) { data = null; }' 'data = json(raw);'
+# 2.1: one suffix attempt instead of a loop -> "A", "A #2", "A" collide
+ctl parser-tag-one-attempt parser fail 'parser/tag-suffix-unique-loop ' \
+	"$LIBX/parser.uc" 'while (used_tags[cand] || RESERVED_TAGS[cand]) {' 'if (used_tags[cand] || RESERVED_TAGS[cand]) {'
+# 2.1: reserved tags not reserved
+ctl parser-reserved-off parser fail 'parser/reserved-tags-renamed ;parser/json-outbound-reserved-tag ;parser/report-reasons ' \
+	"$LIBX/parser.uc" "let RESERVED_TAGS = { auto: 1, proxy: 1, direct: 1, block: 1, 'dns-out': 1 };" 'let RESERVED_TAGS = {};'
+# id: port left out of the identity
+ctl parser-id-without-port parser fail 'parser/id-changes-with-port-and-credential ' \
+	"$LIBX/parser.uc" 'port, cred,' 'cred,'
+# id depends on the display name -> renaming changes it
+ctl parser-id-uses-name parser fail 'parser/id-stable-across-order-and-name ;parser/id-changes-with-port-and-credential ' \
+	"$LIBX/parser.uc" 'port, cred,' 'port, cred, ob.tag,'
+# id leaks into the default output -> sing-box check rejects the config
+ctl parser-id-always parser fail 'parser/id-not-in-default-output ;parser/corpus-accepted-by-sing-box-check ' \
+	"$LIBX/parser.uc" 'if (WITH_ID && id) ob.id = id;' 'if (id) ob.id = id;'
+# stage 5: unknown transports accepted -> dead/poison nodes
+ctl parser-unknown-transport-kept parser fail 'parser/vless-xhttp-refused ;parser/vless-splithttp-refused ;parser/vless-kcp-refused ;parser/trojan-xhttp-refused ;parser/vmess-xhttp-refused ;parser/report-reasons ' \
+	"$LIBX/parser.uc" "	return 'unsupported_transport';" "	return { type: t };"
+ctl build-config-not-installed build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ' \
 	"$LIBX/build.sh" 'mv "$SB_CONF.new" "$SB_CONF"' 'rm -f "$SB_CONF.new"'
 ctl rpcd-add_node-no-signal rpcd fail 'rpcd/add_node/ok ' \
 	"$RPCD" 'uci add_list vpnpool.main.manual_node="$l"; uci commit vpnpool; signal_reload' \
