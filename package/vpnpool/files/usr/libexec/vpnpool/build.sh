@@ -2,17 +2,31 @@
 # vpnpool: parse all fetched source files + manual nodes into one node list,
 # generate the sing-box config, and validate it. Keeps the previous config if
 # the new one fails sing-box check.
+#
+# Files: the live config ($SB_CONF) and the node list live in RAM (/tmp/vpnpool). The
+# flash copies (/etc/vpnpool/sing-box.json, links.json) are rewritten ONLY when their
+# content changed (persist_if_changed) — a periodic rebuild of an unchanged pool costs no
+# flash write. nodes.json is replaced atomically and only when the build succeeded, so a
+# reader never sees a half-written list and the list always matches the running config.
 . /usr/libexec/vpnpool/lib.sh
 
 mkdir -p "$SB_DATA"
 SRCDIR="$SB_DATA/sources"
 NODES="$SB_DATA/nodes.json"
+NB="$SB_DATA/nodes.build.json"      # working copy; becomes $NODES only on success
+LINKS_RAM="$SB_DATA/links.json"
+LINKS_FLASH="$CONF_DIR/links.json"
+mkdir -p "$CONF_DIR"
+
+# After a reboot /tmp is empty: seed the live config from the flash copy so "keep the
+# previous config" still has something to keep when this build fails.
+[ -s "$SB_CONF" ] || { [ -s "$SB_CONF_FLASH" ] && cp "$SB_CONF_FLASH" "$SB_CONF"; }
 
 # Cache whether the installed sing-box supports AmneziaWG (the AWG fork reports it in its
 # version string / build tags). status.sh reads this so the LuCI UI hides AWG import/fields
 # on a stock sing-box that can't run AmneziaWG. Cheap to compute here (once per rebuild)
 # instead of forking `sing-box version` on every dashboard poll.
-if sing-box version 2>/dev/null | grep -qiE 'awg'; then echo true > "$SB_DATA/.awgcap"; else echo false > "$SB_DATA/.awgcap"; fi
+if sing-box version 2>/dev/null | grep -qiE 'awg'; then echo true; else echo false; fi | write_atomic "$SB_DATA/.awgcap"
 
 # manual nodes (uci: list manual_node 'vless://...') and imported nodes (uci: list
 # imported_node — links the user hand-picked from a probed source) each as their own
@@ -47,42 +61,64 @@ for f in /etc/vpnpool/awg/*.conf; do
 	[ -f "$f" ] && FILES="$FILES $f"
 done
 
+fail() { rm -f "$NB" "$NB.x" "$SB_CONF.new" "$SB_CONF.tmp"; exit 1; }
+
 # shellcheck disable=SC2086
-ucode /usr/libexec/vpnpool/parser.uc $FILES > "$NODES" 2>"$SB_DATA/build.err"
-CNT=$(jq 'length' "$NODES" 2>/dev/null || echo 0)
+ucode /usr/libexec/vpnpool/parser.uc $FILES > "$NB" 2>"$SB_DATA/build.err"
+CNT=$(jq 'length' "$NB" 2>/dev/null || echo 0)
 if [ "${CNT:-0}" -lt 1 ]; then
 	log "build: 0 nodes parsed (see $SB_DATA/build.err)"
-	exit 1
+	fail
+fi
+
+# Tag hygiene BEFORE the generator. Every tag must be unique across the whole config, so:
+#  - a node named like one of the generator's own groups/outbounds (auto, proxy, direct, …)
+#    is dropped — it would make `sing-box check` fail with "duplicate tag" on EVERY rebuild;
+#  - a tag that repeats is kept once (first occurrence) and the repeats are dropped;
+#  - a node without a tag is dropped (nothing could reference it).
+RESJSON=$(printf '%s\n' $RESERVED_TAGS | jq -R . | jq -cs .)
+jq -c --argjson r "$RESJSON" '
+	map(select((.tag|type)=="string" and (.tag|length)>0 and ((.tag) as $t | ($r|index($t))==null)))
+	| reduce .[] as $n ({s:{}, o:[]}; if .s[$n.tag] then . else (.s[$n.tag]=true | .o += [$n]) end)
+	| .o' "$NB" > "$NB.x" 2>/dev/null && mv "$NB.x" "$NB" || fail
+CNT2=$(jq 'length' "$NB" 2>/dev/null || echo 0)
+[ "$CNT2" -lt "$CNT" ] && log "build: dropped $((CNT - CNT2)) node(s) with a reserved or repeated name"
+CNT=$CNT2
+if [ "${CNT:-0}" -lt 1 ]; then
+	log "build: 0 nodes left after the name check"; fail
 fi
 
 # Persistent tag->link map for the "Save node" feature: re-parse the SAME inputs
 # with --keep-link so every displayed node's original vless:// link is recorded.
-# Kept in /etc/vpnpool (survives reboot) so a node can be saved even right before
-# the subscription expires. nodes.json itself stays link-free (links must never
-# leak into the sing-box outbounds).
+# The flash copy (/etc/vpnpool/links.json, read by rpcd/snapshot) survives a reboot so a
+# node can be saved even right before the subscription expires — and it is rewritten only
+# when the map changed. nodes.json itself stays link-free (links must never leak into the
+# sing-box outbounds).
 # shellcheck disable=SC2086
 ucode /usr/libexec/vpnpool/parser.uc --keep-link $FILES 2>/dev/null \
-	| jq -c 'map({tag, link:._link}) | map(select(.link != null and .link != ""))' \
-	> /etc/vpnpool/links.json 2>/dev/null || echo '[]' > /etc/vpnpool/links.json
+	| jq -c 'map({tag, link:._link}) | map(select(.link != null and .link != ""))' 2>/dev/null \
+	| write_atomic "$LINKS_RAM"
+jq -e 'type=="array"' "$LINKS_RAM" >/dev/null 2>&1 || echo '[]' | write_atomic "$LINKS_RAM"
+persist_if_changed "$LINKS_RAM" "$LINKS_FLASH"
 
 # User-excluded nodes (dashboard ✕ on a subscription node -> uci list excluded_node,
-# holding the node's link). Drop them from nodes.json by identity so they never reach
+# holding the node's link). Drop them from the node list by identity so they never reach
 # the config and can't return on a refetch. Matched via links.json (tag->link). Cleared
 # wholesale on del_subscription.
 EXCJSON=$(uci -q get vpnpool.main.excluded_node 2>/dev/null | tr ' ' '\n' | grep '://' | jq -R . | jq -cs . 2>/dev/null)
 if [ -n "$EXCJSON" ] && [ "$EXCJSON" != "[]" ]; then
 	jq -c --argjson exc "$EXCJSON" 'map(select(.link as $l | ($exc|index($l))!=null)) | map(.tag)' \
-		/etc/vpnpool/links.json > "$SB_DATA/.exctags.json" 2>/dev/null
+		"$LINKS_RAM" > "$SB_DATA/.exctags.json" 2>/dev/null
 	if [ -s "$SB_DATA/.exctags.json" ] && [ "$(cat "$SB_DATA/.exctags.json")" != "[]" ]; then
 		jq --slurpfile et "$SB_DATA/.exctags.json" 'map(select(.tag as $t | ($et[0]|index($t))==null))' \
-			"$NODES" > "$NODES.x" 2>/dev/null && mv "$NODES.x" "$NODES"
+			"$NB" > "$NB.x" 2>/dev/null && mv "$NB.x" "$NB"
 		log "build: excluded $(jq 'length' "$SB_DATA/.exctags.json") user-deleted node(s)"
 	fi
 	rm -f "$SB_DATA/.exctags.json"
 fi
-CNT=$(jq 'length' "$NODES" 2>/dev/null || echo 0)
+CNT=$(jq 'length' "$NB" 2>/dev/null || echo 0)
 if [ "${CNT:-0}" -lt 1 ]; then
-	log "build: 0 nodes after exclude filter"; exit 1
+	log "build: 0 nodes after exclude filter"; fail
 fi
 
 # ---- auto-pool health prefilter ----
@@ -105,7 +141,7 @@ health_prefilter() {
 	local tmpd TAB ct idx srv port batch n
 	TAB=$(printf '\t')
 	tmpd="$SB_DATA/.hp"; rm -rf "$tmpd"; mkdir -p "$tmpd"
-	jq -r 'to_entries[] | "\(.key)\t\(.value.server)\t\(.value.server_port)"' "$NODES" 2>/dev/null > "$tmpd/list"
+	jq -r 'to_entries[] | "\(.key)\t\(.value.server)\t\(.value.server_port)"' "$NB" 2>/dev/null > "$tmpd/list"
 	# BATCHED backgrounded TCP probes. Spawning one curl per node with NO cap meant a
 	# subscription of hundreds of nodes forked hundreds of curls at once — a process/socket/
 	# memory burst that can OOM-kill sing-box on a 16 MB router (same hazard that made
@@ -135,11 +171,11 @@ health_prefilter() {
 	idxjson=$(printf '%s\n' $idxs | jq -R 'tonumber' 2>/dev/null | jq -cs . 2>/dev/null)
 	[ -n "$idxjson" ] || idxjson='[]'
 	jq -c --argjson ai "$idxjson" 'to_entries | map(select(.key as $k | ($ai | index($k)) != null)) | map(.value.tag)' \
-		"$NODES" > "$ALIVE" 2>/dev/null
+		"$NB" 2>/dev/null | write_atomic "$ALIVE"
 	rm -rf "$tmpd"
 	local alive_n total_n
 	alive_n=$(jq 'length' "$ALIVE" 2>/dev/null || echo 0)
-	total_n=$(jq 'length' "$NODES" 2>/dev/null || echo 0)
+	total_n=$(jq 'length' "$NB" 2>/dev/null || echo 0)
 	log "build: health prefilter — $alive_n/$total_n nodes reachable, auto-pool limited to them"
 }
 health_prefilter
@@ -152,69 +188,88 @@ health_prefilter
 # tags back. If ALIVE is absent (unfiltered fallback) the generator already uses ALL nodes
 # incl. AWG, so nothing to do.
 if [ -s "$ALIVE" ]; then
-	WGTAGS=$(jq -c '[.[] | select(.type=="wireguard" or .type=="awg") | .tag]' "$NODES" 2>/dev/null)
+	WGTAGS=$(jq -c '[.[] | select(.type=="wireguard" or .type=="awg") | .tag]' "$NB" 2>/dev/null)
 	if [ -n "$WGTAGS" ] && [ "$WGTAGS" != "[]" ]; then
 		jq -c --argjson wg "$WGTAGS" '. + $wg | unique' "$ALIVE" > "$ALIVE.x" 2>/dev/null && mv "$ALIVE.x" "$ALIVE"
 	fi
 fi
 
-ucode /usr/libexec/vpnpool/generator.uc "$NODES" > "$SB_CONF.new" 2>>"$SB_DATA/build.err"
+# The urltest group probes the SAME URL every other "is it alive" check uses (lib.sh).
+VPNPOOL_PROBE_URL=$(primary_probe_url) ucode /usr/libexec/vpnpool/generator.uc "$NB" > "$SB_CONF.new" 2>>"$SB_DATA/build.err"
 
 # Resilient validation. A SINGLE malformed node (unsupported flow, reality without
-# uTLS, bad cipher, …) makes `sing-box check` reject the ENTIRE config — so one bad
-# entry in a big public list would otherwise take the whole VPN down. Instead, when
-# check fails on a specific outbound[N], drop just that node outbound (and its tag
-# from the urltest/selector groups) and re-check, up to a bounded number of times.
+# uTLS, bad cipher, port out of range, a repeated name, …) makes `sing-box check` reject the
+# ENTIRE config — so one bad entry in a big public list would otherwise take the whole VPN
+# down. Instead, when check names a specific node, drop just that node (and its tag from
+# the urltest/selector groups) and re-check, up to a bounded number of times.
+#   "outbounds[3].server_port: …" / "outbound[3]" / "endpoints[0]…" -> that array element
+#   "duplicate outbound/endpoint tag: T"                              -> the LAST node named T
+NODE_TYPES='["vless","vmess","trojan","shadowsocks","shadowtls","hysteria","hysteria2","tuic","wireguard","awg","socks","http","anytls"]'
 dropped=0; tries=0
 while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 	tries=$((tries + 1))
 	if [ "$tries" -gt 50 ]; then
 		log "build: >50 bad outbounds (dropped $dropped so far), giving up; keeping previous config — check subscription source quality"
-		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; rm -f "$SB_CONF.new"; exit 1
+		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; fail
 	fi
-	# sing-box >=1.13 reports a bad WireGuard/AmneziaWG node as endpoint[N] (it lives in
-	# .endpoints), everything else as outbound[N]. Drop from whichever array it came from;
-	# the urltest/selector groups (which reference the tag) always live in .outbounds.
-	arr=outbounds
-	idx=$(grep -oE 'outbound\[[0-9]+\]' "$SB_DATA/check.err" | head -1 | grep -oE '[0-9]+')
-	if [ -z "$idx" ]; then
-		idx=$(grep -oE 'endpoint\[[0-9]+\]' "$SB_DATA/check.err" | head -1 | grep -oE '[0-9]+')
-		[ -n "$idx" ] && arr=endpoints
+	arr=""; idx=""; dup=0
+	# sing-box names the offending element by its ARRAY (plural, "outbounds[3]" — decode
+	# errors) or singular ("outbound[3]" — init errors); WireGuard/AmneziaWG live in
+	# .endpoints on >=1.13. The array to prune comes from the match itself.
+	m=$(grep -oE '(outbound|endpoint)s?\[[0-9]+\]' "$SB_DATA/check.err" | head -1)
+	if [ -n "$m" ]; then
+		idx=${m##*[}; idx=${idx%]}
+		case "$m" in endpoint*) arr=endpoints ;; *) arr=outbounds ;; esac
+	else
+		dt=$(sed -n 's/.*duplicate [a-z/]* *tag: *//p' "$SB_DATA/check.err" | head -1 | tr -d '\r')
+		if [ -n "$dt" ]; then
+			loc=$(jq -r --arg t "$dt" --argjson nt "$NODE_TYPES" '
+				[ (.outbounds | to_entries[] | select(.value.tag==$t and ((.value.type) as $y | $nt|index($y))!=null) | "outbounds \(.key)"),
+				  ((.endpoints // []) | to_entries[] | select(.value.tag==$t and ((.value.type) as $y | $nt|index($y))!=null) | "endpoints \(.key)") ]
+				| last // ""' "$SB_CONF.new" 2>/dev/null)
+			if [ -n "$loc" ]; then arr=${loc% *}; idx=${loc#* }; dup=1; fi
+		fi
 	fi
 	if [ -z "$idx" ]; then
 		log "build: sing-box check failed (non-node error), keeping previous config"
-		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; rm -f "$SB_CONF.new"; exit 1
+		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; fail
 	fi
-	badtype=$(jq -r ".${arr}[$idx].type // \"\"" "$SB_CONF.new" 2>/dev/null)
-	case "$badtype" in
-		vless|vmess|trojan|shadowsocks|shadowtls|hysteria|hysteria2|tuic|wireguard|awg|socks|http) ;;
-		*)  # structural outbound (auto/proxy/direct/block) failed — don't gut the config
-			log "build: check failed on non-node ${arr}[$idx] ($badtype), keeping previous config"
-			cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; rm -f "$SB_CONF.new"; exit 1 ;;
-	esac
-	badtag=$(jq -r ".${arr}[$idx].tag // \"\"" "$SB_CONF.new" 2>/dev/null)
-	jq --arg arr "$arr" --argjson i "$idx" --arg t "$badtag" '
+	badtype=$(jq -r --arg a "$arr" --argjson i "$idx" '.[$a][$i].type // ""' "$SB_CONF.new" 2>/dev/null)
+	if ! printf '%s' "$NODE_TYPES" | jq -e --arg y "$badtype" 'index($y) != null' >/dev/null 2>&1; then
+		# structural outbound (auto/proxy/direct/block) failed — don't gut the config
+		log "build: check failed on non-node ${arr}[$idx] ($badtype), keeping previous config"
+		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; fail
+	fi
+	badtag=$(jq -r --arg a "$arr" --argjson i "$idx" '.[$a][$i].tag // ""' "$SB_CONF.new" 2>/dev/null)
+	# For a duplicate the tag still exists (its first holder stays), so the groups only lose
+	# the repeated entry; otherwise the tag leaves every group.
+	jq --arg arr "$arr" --argjson i "$idx" --arg t "$badtag" --argjson dup "$dup" '
 		del(.[$arr][$i])
 		| .outbounds |= map(
 			if (.type=="urltest" or .type=="selector") and (.outbounds|type=="array")
-			then .outbounds -= [$t] else . end)
+			then (if $dup==1 then .outbounds |= reduce .[] as $x ([]; if any(.[]; .==$x) then . else . + [$x] end)
+			      else .outbounds -= [$t] end)
+			else . end)
 	' "$SB_CONF.new" > "$SB_CONF.tmp" 2>/dev/null && mv "$SB_CONF.tmp" "$SB_CONF.new" || {
-		log "build: failed to prune bad node, keeping previous config"; rm -f "$SB_CONF.new" "$SB_CONF.tmp"; exit 1; }
+		log "build: failed to prune bad node, keeping previous config"; fail; }
+	log "build: dropped node \"$badtag\" rejected by sing-box: $(grep -m1 -oE '(FATAL|ERROR).*' "$SB_DATA/check.err" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-160)"
 	dropped=$((dropped + 1))
 done
 
 mv "$SB_CONF.new" "$SB_CONF"
+persist_if_changed "$SB_CONF" "$SB_CONF_FLASH"
 
-# Reconcile nodes.json with what actually survived into the live config, so the
+# Reconcile the node list with what actually survived into the live config, so the
 # dashboard never lists phantom nodes that sing-box check rejected and we pruned
 # (they would show up but be un-pingable / un-selectable — they aren't in sing-box).
 if [ "$dropped" -gt 0 ]; then
 	CFGTAGS=$(jq -c '[.outbounds[].tag] + [(.endpoints//[])[].tag]' "$SB_CONF" 2>/dev/null)
 	if [ -n "$CFGTAGS" ]; then
-		jq --argjson ct "$CFGTAGS" 'map(select(.tag as $x | $ct | index($x)))' "$NODES" > "$NODES.f" 2>/dev/null \
-			&& mv "$NODES.f" "$NODES"
+		jq --argjson ct "$CFGTAGS" 'map(select(.tag as $x | $ct | index($x)))' "$NB" > "$NB.x" 2>/dev/null \
+			&& mv "$NB.x" "$NB"
 	fi
 fi
+mv -f "$NB" "$NODES"
 
 if [ "$dropped" -gt 0 ]; then
 	log "build: ok ($((CNT - dropped)) nodes; dropped $dropped unsupported)"

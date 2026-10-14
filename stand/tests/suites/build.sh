@@ -103,7 +103,7 @@ run_build "$SUB" "$T_STATE/build/poison.json"
 begin "build/poison-json-source-unknown-field"
 expect_good_config
 expect_jq "bad node not in config" "$(cat /etc/vpnpool/sing-box.json 2>/dev/null)" '[.outbounds[].tag] | index("JsonUnknownField") == null'
-end 2.1
+end
 
 # a reality short_id longer than 8 bytes makes sing-box PANIC (no outbounds[N] in the message,
 # nothing for build.sh to prune) -> the parser must drop it from a JSON source too
@@ -142,4 +142,42 @@ cp "$T_DIR/fixtures/awg/awg2.conf" /etc/vpnpool/awg/test.conf
 run_with_timeout 120 sh /usr/libexec/vpnpool/build.sh > "$T_STATE/build.out" 2>&1; BRC=$?; BSECS=0
 begin "build/awg-node-on-stock-engine-deferred"
 expect_good_config
-end 4.7
+end   # was xfail 4.7: the build no longer breaks (the 2.1 endpoints[N] prune drops the node); showing it as deferred is still stage 4
+
+# ---- flash wear (2.11): the live config is in RAM; flash copies are rewritten only on change ----
+printf '%s\n' "$GOOD" > "$SUB"
+run_build "$SUB"
+touch -d '2000-01-01 00:00:00' /etc/vpnpool/sing-box.json /etc/vpnpool/links.json
+run_with_timeout 120 sh /usr/libexec/vpnpool/build.sh > "$T_STATE/build.out" 2>&1; BRC=$?
+begin "build/unchanged-pool-no-flash-write"
+expect_eq "second build exit code" "$BRC" 0
+expect_true "live config in RAM" [ -s /tmp/vpnpool/sing-box.json ]
+expect_true "live config == flash copy" cmp -s /tmp/vpnpool/sing-box.json /etc/vpnpool/sing-box.json
+expect_eq "flash sing-box.json untouched (year)" "$(date -r /etc/vpnpool/sing-box.json +%Y)" 2000
+expect_eq "flash links.json untouched (year)" "$(date -r /etc/vpnpool/links.json +%Y)" 2000
+end
+printf '%s\n%s\n' "$GOOD" "$(good 44 Good4)" > /tmp/vpnpool/sources/000.raw
+run_with_timeout 120 sh /usr/libexec/vpnpool/build.sh > "$T_STATE/build.out" 2>&1; BRC=$?
+begin "build/changed-pool-flash-updated"   # positive control for the case above
+expect_eq "third build exit code" "$BRC" 0
+expect_true "flash sing-box.json rewritten (year)" [ "$(date -r /etc/vpnpool/sing-box.json +%Y)" != 2000 ]
+expect_true "flash links.json rewritten (year)" [ "$(date -r /etc/vpnpool/links.json +%Y)" != 2000 ]
+expect_jq "flash copy has Good4" "$(cat /etc/vpnpool/sing-box.json)" '[.outbounds[].tag] | index("Good4") != null'
+end
+
+# ---- a reboot empties /tmp: a failing build still keeps the last good config (seeded from flash) ----
+rm -f /tmp/vpnpool/sing-box.json /tmp/vpnpool/nodes.json
+printf 'garbage only\n' > /tmp/vpnpool/sources/000.raw
+run_with_timeout 120 sh /usr/libexec/vpnpool/build.sh > "$T_STATE/build.out" 2>&1; BRC=$?
+begin "build/after-reboot-failed-build-keeps-flash-config"
+expect_true "build reports failure" [ "$BRC" -ne 0 ]
+expect_true "live config seeded from flash" cmp -s /tmp/vpnpool/sing-box.json /etc/vpnpool/sing-box.json
+end
+
+# ---- node-test selector (2.8): speedtest/unlock have their own selector + inbound ----
+begin "build/node-test-selector-separate-from-proxy"
+_cfg=$(cat /etc/vpnpool/sing-box.json 2>/dev/null)
+expect_jq "vpnpool-test selector lists the nodes" "$_cfg" '.outbounds[] | select(.tag=="vpnpool-test") | .type=="selector" and (.outbounds|index("Good1"))!=null'
+expect_jq "node-test-in routes to vpnpool-test only" "$_cfg" '[.route.rules[] | select(.inbound==["node-test-in"])] | length==1 and .[0].outbound=="vpnpool-test"'
+expect_jq "proxy selector does not contain the test selector" "$_cfg" '.outbounds[] | select(.tag=="proxy") | (.outbounds|index("vpnpool-test"))==null'
+end

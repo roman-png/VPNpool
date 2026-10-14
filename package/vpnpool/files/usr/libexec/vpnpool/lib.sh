@@ -4,10 +4,40 @@
 
 NAME=vpnpool
 CONF_DIR=/etc/vpnpool
-SB_CONF="$CONF_DIR/sing-box.json"
 SB_DATA=/tmp/vpnpool
+# The LIVE sing-box config is in RAM (/tmp): it is regenerated on every build, and rewriting
+# it in flash on every rebuild wore the flash for nothing. A copy is kept in flash
+# (SB_CONF_FLASH) and rewritten ONLY when the content changed (persist_if_changed).
+SB_CONF="$SB_DATA/sing-box.json"
+SB_CONF_FLASH="$CONF_DIR/sing-box.json"
 
 log() { logger -t "$NAME" "$1"; }
+
+# Atomic write: stdin -> "$1" via a temp file in the same directory + mv, so a reader
+# (status.sh, the generator, rpcd) never sees a half-written file.
+write_atomic() {   # $1=destination
+	local t="$1.tmp.$$"
+	cat > "$t" && mv -f "$t" "$1" || { rm -f "$t"; return 1; }
+}
+
+# Copy $1 over $2 ONLY when the content differs (flash wear: identical rewrites are skipped).
+# Atomic (temp file + mv). Returns 0 when $2 is up to date afterwards.
+persist_if_changed() {   # $1=source $2=destination
+	[ -f "$1" ] || return 1
+	cmp -s "$1" "$2" 2>/dev/null && return 0
+	mkdir -p "$(dirname "$2")"
+	cp "$1" "$2.tmp.$$" && mv -f "$2.tmp.$$" "$2" || { rm -f "$2.tmp.$$"; return 1; }
+}
+
+# Subscription URLs carry the access token in the path/query. Never log them in clear:
+# keep scheme + host, drop userinfo, path and query.
+mask_url() {   # $1=url -> e.g. https://sub.example.com/***
+	printf '%s' "$1" | sed -e 's#^\([A-Za-z][A-Za-z0-9+.-]*://\)\([^@/?#]*@\)\{0,1\}\([^/?#]*\).*#\1\3/***#'
+}
+
+# Node tags the generator itself uses for its groups/outbounds. A subscription node carrying
+# one of these names would collide with them (duplicate tag -> sing-box check fails forever).
+RESERVED_TAGS="auto proxy direct block vpnpool-test"
 
 # Remove a single-flight lock file if it is older than MAXAGE seconds. Call BEFORE honoring
 # a lock so a run killed by SIGKILL (e.g. OOM on a 16 MB router) — whose EXIT trap never
@@ -195,7 +225,6 @@ saved_archive_json() {
 }
 
 SUB_URL=$(uci -q get vpnpool.main.subscription_url)
-SUB_UA=$(uci -q get vpnpool.main.subscription_ua); [ -n "$SUB_UA" ] || SUB_UA="v2rayNG/1.8.5"
 TPROXY_PORT=$(uci -q get vpnpool.main.tproxy_port); [ -n "$TPROXY_PORT" ] || TPROXY_PORT=1603
 FWMARK=$(uci -q get vpnpool.main.fwmark); [ -n "$FWMARK" ] || FWMARK=0x400000
 RT_TABLE=$(uci -q get vpnpool.main.route_table); [ -n "$RT_TABLE" ] || RT_TABLE=142
@@ -258,14 +287,83 @@ check_probe_urls() {
 	done
 }
 
-# subscription_interval like "6h" / "30m" / "900s" -> seconds
-interval_seconds() {
-	local v
-	v=$(uci -q get vpnpool.main.subscription_interval); [ -n "$v" ] || v=6h
-	case "$v" in
-		*h) echo $(( ${v%h} * 3600 )) ;;
-		*m) echo $(( ${v%m} * 60 )) ;;
-		*s) echo "${v%s}" ;;
-		*)  echo "$v" ;;
+# ---- THE "is it alive" criterion (one definition for every check) ----
+# A probe of a service counts as REACHABLE iff an HTTP response arrived at all: any status
+# code (200/204/301/404/5xx) proves the request went through the node and back; "000"/empty
+# = no connection (blocked / over-quota / dead exit). This is exactly what sing-box itself
+# measures for the urltest group and for the clash delay API (both record a delay for ANY
+# response), so the curl-based probes judge a node the same way the tunnel does.
+# Users: generator.uc (urltest url = first service, same normalisation), nodecheck.sh
+# (clash delay per node, ALL services), the daemon's watchdog / tunnel_healthy
+# (probe_services ... any) and rpcd ping (clash delay, first service).
+svc_code_alive() { case "$1" in [1-5][0-9][0-9]) return 0 ;; *) return 1 ;; esac; }
+clash_delay_alive() { case "$1" in *'"delay"'*) return 0 ;; *) return 1 ;; esac; }
+
+# The URL the urltest group (active pick + failover) probes: the FIRST configured service.
+primary_probe_url() { check_probe_urls | head -n1; }
+
+# probe_services <curl --proxy URL> <all|any> — probe every check_probe_urls entry through
+# the proxy with the criterion above. all: every service must answer; any: one is enough.
+probe_services() {
+	local px="$1" mode="${2:-any}" u code n=0 okn=0
+	for u in $(check_probe_urls); do
+		n=$((n + 1))
+		code=$(curl -s -o /dev/null -m6 --proxy "$px" -w '%{http_code}' "$u" 2>/dev/null)
+		if svc_code_alive "$code"; then
+			okn=$((okn + 1)); [ "$mode" = any ] && return 0
+		else
+			[ "$mode" = all ] && return 1
+		fi
+	done
+	[ "$n" -gt 0 ] && [ "$okn" -eq "$n" ]
+}
+
+# Is the router's own uplink alive (DIRECT, not through the tunnel)? A dead node can only be
+# told from a dead WAN by this: every node/tunnel verdict is void while WAN is down.
+wan_alive() {
+	local c u
+	for u in http://cp.cloudflare.com/generate_204 http://connectivitycheck.gstatic.com/generate_204; do
+		c=$(curl -s -o /dev/null -m6 -w '%{http_code}' "$u" 2>/dev/null)
+		[ "$c" = 204 ] && return 0
+	done
+	return 1
+}
+
+# ---- routing fail-safe / kill-switch policy (pure: decides, never acts) ----
+# route_policy <killswitch 0|1> <tunnel healthy 0|1> <paused by the user 0|1> -> up|down
+#   paused (Telegram /off)  -> down: the user explicitly switched routing off
+#   killswitch=1            -> up, ALWAYS (fail-closed: a dead tunnel blocks, never leaks)
+#   killswitch=0            -> up only while the tunnel works; a dead tunnel -> down, so the
+#                              LAN falls back to DIRECT instead of a black hole (fail-safe)
+route_policy() {
+	[ "$3" = 1 ] && { echo down; return 0; }
+	[ "$1" = 1 ] && { echo up; return 0; }
+	if [ "$2" = 1 ]; then echo up; else echo down; fi
+}
+# Telegram /off sets this flag (RAM: a reboot resumes routing); the daemon applies it.
+PAUSE_FLAG="$SB_DATA/.routing_paused"
+
+# ---- subscription refresh interval ----
+INTERVAL_MIN=600   # never re-download a subscription more often than every 10 min
+# parse_interval "6h" / "30m" / "900s" / "900" -> seconds on stdout; rc 1 if malformed
+parse_interval() {
+	local n u
+	case "$1" in ''|*[!0-9hms]*) return 1 ;; esac
+	case "$1" in
+		*h) n=${1%h}; u=3600 ;;
+		*m) n=${1%m}; u=60 ;;
+		*s) n=${1%s}; u=1 ;;
+		*)  n=$1; u=1 ;;
 	esac
+	case "$n" in ''|*[!0-9]*) return 1 ;; esac
+	n=$(printf '%s' "$n" | sed 's/^0*//'); [ -n "$n" ] || n=0   # "08" is not octal here
+	echo $(( n * u ))
+}
+# subscription_interval -> seconds; malformed -> 6h, below INTERVAL_MIN -> INTERVAL_MIN
+interval_seconds() {
+	local v s
+	v=$(uci -q get vpnpool.main.subscription_interval); [ -n "$v" ] || v=6h
+	s=$(parse_interval "$v") || s=21600
+	[ "$s" -ge "$INTERVAL_MIN" ] || s=$INTERVAL_MIN
+	echo "$s"
 }
