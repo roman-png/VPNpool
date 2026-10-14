@@ -25,7 +25,9 @@ case "$1" in
   call)
     read -r input
     case "$2" in
-      board) echo '{"kernel":"5.15.0","hostname":"vpnpool-stand","system":"x86_64","model":"vpnpool stand","board_name":"stand","release":{"distribution":"OpenWrt","version":"23.05.5","revision":"stand","target":"x86/64","description":"OpenWrt 23.05.5 stand"}}' ;;
+      board) . /etc/openwrt_release 2>/dev/null
+             printf '{"kernel":"%s","hostname":"vpnpool-stand","system":"x86_64","model":"vpnpool stand","board_name":"stand","release":{"distribution":"OpenWrt","version":"%s","revision":"stand","target":"x86/64","description":"OpenWrt %s stand"}}\n' \
+               "$(uname -r)" "${DISTRIB_RELEASE:-?}" "${DISTRIB_RELEASE:-?}" ;;
       info) echo '{"localtime":0,"uptime":1000,"load":[0,0,0],"memory":{"total":536870912,"free":268435456,"shared":0,"buffered":0,"available":268435456},"swap":{"total":0,"free":0}}' ;;
       *) echo '{}' ;;
     esac ;;
