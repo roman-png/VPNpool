@@ -5,8 +5,12 @@
 # robust to subscription panels that serve different formats to different
 # clients (and to the provider changing over time).
 #
-# Output: one decoded file per source in $SB_DATA/sources/NNN.raw, cached to
-#         $CONF_DIR/sources_cache for offline fallback.
+# Output: one decoded file per source in $SB_DATA/sources/s-<key>.raw (key = hash of the
+# source URL). Cache: $CONF_DIR/sources_cache/s-<key>.raw, PER SOURCE — a source that fails
+# this time is served from ITS OWN cached copy, so one dead subscription never drops its
+# nodes while another one answers. A cached copy is rewritten only when its content
+# changed (flash wear). URLs are logged masked (they carry the access token).
+# Exit: 0 if every source has data (fresh or cached), 1 if no source produced anything.
 . /usr/libexec/vpnpool/lib.sh
 
 mkdir -p "$SB_DATA"
@@ -32,6 +36,8 @@ normalize() {   # $1 = raw body file -> decoded text on stdout
 	esac
 }
 
+src_key() { printf '%s' "$1" | md5sum | cut -c1-12; }
+
 fetch_best() {   # $1=url $2=primary(0/1) $3=outfile
 	url="$1"; primary="$2"; outfile="$3"
 	best=-1; bestua=""
@@ -45,9 +51,13 @@ fetch_best() {   # $1=url $2=primary(0/1) $3=outfile
 			best="$cnt"; bestua="$ua"; cp "$SB_DATA/n.tmp" "$outfile"
 			if [ "$primary" = "1" ]; then
 				UINFO=$(grep -i '^subscription-userinfo:' "$SB_DATA/h.tmp" 2>/dev/null | head -1); EXP=$(echo "$UINFO" | grep -o 'expire=[0-9]*' | head -1 | cut -d= -f2)
-					UP=$(echo "$UINFO" | grep -o 'upload=[0-9]*' | head -1 | cut -d= -f2); DN=$(echo "$UINFO" | grep -o 'download=[0-9]*' | head -1 | cut -d= -f2); TOT=$(echo "$UINFO" | grep -o 'total=[0-9]*' | head -1 | cut -d= -f2)
-					[ -n "$TOT" ] && [ "$TOT" -gt 0 ] 2>/dev/null && echo "${UP:-0} ${DN:-0} ${TOT}" > "$CONF_DIR/sub.usage"
-				[ -n "$EXP" ] && echo "$EXP" > "$CONF_DIR/sub.expire"
+				UP=$(echo "$UINFO" | grep -o 'upload=[0-9]*' | head -1 | cut -d= -f2); DN=$(echo "$UINFO" | grep -o 'download=[0-9]*' | head -1 | cut -d= -f2); TOT=$(echo "$UINFO" | grep -o 'total=[0-9]*' | head -1 | cut -d= -f2)
+				if [ -n "$TOT" ] && [ "$TOT" -gt 0 ] 2>/dev/null; then
+					echo "${UP:-0} ${DN:-0} ${TOT}" > "$SB_DATA/usage.tmp"; persist_if_changed "$SB_DATA/usage.tmp" "$CONF_DIR/sub.usage"
+				fi
+				if [ -n "$EXP" ]; then
+					echo "$EXP" > "$SB_DATA/expire.tmp"; persist_if_changed "$SB_DATA/expire.tmp" "$CONF_DIR/sub.expire"
+				fi
 			fi
 		fi
 		# Stop at the FIRST User-Agent that yields usable nodes — no point hammering the
@@ -56,53 +66,90 @@ fetch_best() {   # $1=url $2=primary(0/1) $3=outfile
 		# when the earlier UAs returned nothing; we keep trying until one works, then break.
 		[ "$cnt" -ge 1 ] && break
 	done
+	rm -f "$SB_DATA/h.tmp" "$SB_DATA/b.tmp" "$SB_DATA/n.tmp" "$SB_DATA/usage.tmp" "$SB_DATA/expire.tmp"
 	if [ "$best" -ge 1 ]; then
-		log "fetch: $url -> $best nodes (best UA: $bestua)"
+		log "fetch: $(mask_url "$url") -> $best nodes (best UA: $bestua)"
 		return 0
 	fi
-	log "fetch: $url -> no usable nodes from any client"
+	rm -f "$outfile"
+	log "fetch: $(mask_url "$url") -> no usable nodes from any client"
 	return 1
 }
 
-rm -rf "$SRCDIR"; mkdir -p "$SRCDIR"
-n=0; ok=0
+# One source: fresh copy on success (cached only if it changed), else its own cached copy.
+# Sets GOT (1 = this source has data now) and FRESH (1 = fetched now).
+fetch_source() {   # $1=url $2=primary(0/1)
+	local key out cached age_days mt now
+	key=$(src_key "$1"); out="$SRCDIR/s-$key.raw"; cached="$CACHEDIR/s-$key.raw"
+	GOT=0; FRESH=0
+	echo "$key" >> "$SRCDIR/.keys"
+	if fetch_best "$1" "$2" "$out"; then
+		GOT=1; FRESH=1
+		mkdir -p "$CACHEDIR"; persist_if_changed "$out" "$cached"
+		# age marker for the stale-cache warning; refreshed at most once a day (flash wear)
+		mt=$(date -r "$CACHEDIR/.ok-$key" +%s 2>/dev/null || echo 0); now=$(date +%s)
+		[ $(( now - mt )) -ge 86400 ] && touch "$CACHEDIR/.ok-$key" 2>/dev/null
+		return 0
+	fi
+	if [ -s "$cached" ]; then
+		cp "$cached" "$out"; GOT=1
+		# Warn (log + Telegram) when serving a STALE cache: nodes may be long dead and the
+		# subscription likely expired, but we keep the tunnel up on the last-known set.
+		age_days=0; now=$(date +%s)
+		mt=$(date -r "$CACHEDIR/.ok-$key" +%s 2>/dev/null || date -r "$cached" +%s 2>/dev/null)
+		[ -n "$mt" ] && age_days=$(( (now - mt) / 86400 ))
+		log "fetch: $(mask_url "$1") unreachable — using its cached copy (~${age_days}d old)"
+		if [ "$age_days" -ge 3 ]; then
+			tg_notify "⚠️ vpnpool: подписка $(mask_url "$1") недоступна, работаю на сохранённой копии (~${age_days} дн.) — узлы могут не работать"
+		fi
+	fi
+	return 1
+}
+
+rm -rf "$SRCDIR"; mkdir -p "$SRCDIR"; : > "$SRCDIR/.keys"
+nsrc=0; ngot=0; nfresh=0
 if [ -n "$SUB_URL" ]; then
-	fetch_best "$SUB_URL" 1 "$SRCDIR/$(printf '%03d' "$n").raw" && ok=1
-	n=$((n + 1))
+	fetch_source "$SUB_URL" 1
+	nsrc=$((nsrc + 1)); ngot=$((ngot + GOT)); nfresh=$((nfresh + FRESH))
 fi
 
 # Extra FULL subscriptions (uci list extra_sub): bulk-merged into the pool like the
-# primary, each into its own NNN.raw (build.sh merges every *.raw). Quota/expiry are
-# only taken from the PRIMARY subscription (primary=0 here). vless:// links have no
-# spaces, so a plain `uci get` list read is safe.
+# primary, each into its own file (build.sh merges every *.raw). Quota/expiry are
+# only taken from the PRIMARY subscription (primary=0 here). URLs have no spaces, so a
+# plain `uci get` list read is safe.
 for esub in $(uci -q get vpnpool.main.extra_sub); do
 	[ -n "$esub" ] || continue
-	fetch_best "$esub" 0 "$SRCDIR/$(printf '%03d' "$n").raw" && ok=1
-	n=$((n + 1))
+	fetch_source "$esub" 0
+	nsrc=$((nsrc + 1)); ngot=$((ngot + GOT)); nfresh=$((nfresh + FRESH))
 done
-# NOTE: extra `source` URLs are NOT bulk-merged anymore — a public list can carry
-# hundreds/thousands of nodes and flood the pool. They are now "probe-only": the
-# UI fetches a source, the user picks specific nodes, and those are stored as
-# `imported_node` links (merged in build.sh). See probe.sh / add_imported.
+# NOTE: extra `source` URLs are NOT bulk-merged — a public list can carry hundreds of
+# nodes and flood the pool. They are "probe-only": the UI fetches a source, the user picks
+# specific nodes, and those are stored as `imported_node` links (merged in build.sh).
 
-if [ "$ok" = "1" ]; then
-	rm -rf "$CACHEDIR"; cp -a "$SRCDIR" "$CACHEDIR" 2>/dev/null
-	exit 0
-fi
-
-log "fetch: all sources failed, trying cache"
+# Forget cached copies of sources that are no longer configured.
 if [ -d "$CACHEDIR" ]; then
-	rm -rf "$SRCDIR"; cp -a "$CACHEDIR" "$SRCDIR"
-	# Warn (log + Telegram) when serving a STALE cache: nodes may be long dead and the
-	# subscription likely expired, but we keep the tunnel up on the last-known set. Without
-	# this the user has no signal that they're running on a frozen, possibly-dead snapshot.
-	age_days=0
-	mt=$(date -r "$CACHEDIR" +%s 2>/dev/null); now=$(date +%s)
-	[ -n "$mt" ] && age_days=$(( (now - mt) / 86400 ))
-	if [ "$age_days" -ge 3 ]; then
-		log "fetch: serving CACHED sources (~${age_days}d old) — subscription unreachable, nodes may be dead"
-		tg_notify "⚠️ vpnpool: подписка недоступна, работаю на кэше (~${age_days} дн.) — узлы могут быть мертвы"
+	for f in "$CACHEDIR"/s-*.raw; do
+		[ -f "$f" ] || continue
+		k=${f##*/s-}; k=${k%.raw}
+		grep -qx "$k" "$SRCDIR/.keys" || rm -f "$f" "$CACHEDIR/.ok-$k"
+	done
+	# 1.x cache layout (NNN.raw, all-or-nothing): use it only when nothing else is available
+	# (first fetch after an upgrade while every source is down), drop it once we have data.
+	if [ "$ngot" -eq 0 ] && [ "$nsrc" -gt 0 ]; then
+		for f in "$CACHEDIR"/[0-9][0-9][0-9].raw; do
+			[ -f "$f" ] && cp "$f" "$SRCDIR/" && ngot=1
+		done
+		[ "$ngot" -gt 0 ] && log "fetch: every source unreachable — using the cached copy from the previous version"
+	else
+		rm -f "$CACHEDIR"/[0-9][0-9][0-9].raw
 	fi
-	exit 0
 fi
+rm -f "$SRCDIR/.keys"
+# Record the attempt (any outcome): the daemon's start-up retry loop and restarts use it to
+# avoid re-downloading the subscriptions more often than INTERVAL_MIN (panels rate-limit).
+echo "$(date +%s) $(sources_sig)" | write_atomic "$FETCH_STAMP"
+
+log "fetch: $nfresh/$nsrc source(s) fetched, $ngot with data"
+[ "$nsrc" -eq 0 ] && exit 0      # no subscriptions configured: manual/imported nodes only
+[ "$ngot" -gt 0 ] && exit 0
 exit 1

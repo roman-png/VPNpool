@@ -359,6 +359,24 @@ parse_interval() {
 	n=$(printf '%s' "$n" | sed 's/^0*//'); [ -n "$n" ] || n=0   # "08" is not octal here
 	echo $(( n * u ))
 }
+# Signature of the configured subscription set: a change (URL added/edited) makes a fetch due
+# at once regardless of the time throttle.
+sources_sig() {
+	{ uci -q get vpnpool.main.subscription_url; uci -q get vpnpool.main.extra_sub; } 2>/dev/null | md5sum | cut -c1-12
+}
+FETCH_STAMP="$SB_DATA/.last_fetch"   # "<epoch> <sources_sig>", written by fetch.sh
+# fetch_due -> 0 when the subscriptions should be downloaded now: never fetched since boot,
+# the subscription set changed, no fetched files, or the last attempt is >= INTERVAL_MIN old.
+fetch_due() {
+	local t s now
+	[ -f "$FETCH_STAMP" ] || return 0
+	read -r t s < "$FETCH_STAMP" 2>/dev/null
+	case "$t" in ''|*[!0-9]*) return 0 ;; esac
+	[ "$s" = "$(sources_sig)" ] || return 0
+	ls "$SB_DATA/sources/"*.raw >/dev/null 2>&1 || return 0
+	now=$(date +%s)
+	[ $(( now - t )) -ge "$INTERVAL_MIN" ]
+}
 # subscription_interval -> seconds; malformed -> 6h, below INTERVAL_MIN -> INTERVAL_MIN
 interval_seconds() {
 	local v s
