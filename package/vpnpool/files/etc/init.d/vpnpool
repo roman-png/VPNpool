@@ -1,6 +1,6 @@
 #!/bin/sh /etc/rc.common
-# vpnpool procd service (stage 1 skeleton).
-# Supervises the control-plane daemon. Does NOT touch podkop/zapret/routing yet.
+# vpnpool procd service: the control-plane daemon (vpnpoold — sing-box, routing, refresh)
+# and, optionally, the Telegram control bot as a second instance.
 
 USE_PROCD=1
 START=99
@@ -13,14 +13,20 @@ TGBOT=/usr/libexec/vpnpool/tgbot.sh
 # (reliable stop/restart, no orphaned long-poller, no pidfile races — see the note in
 # vpnpoold). Conditional on telegram_control=1 + token + chat. Kept independent of the
 # main `enabled` toggle so the bot can still receive a remote /on when routing is off.
+# The token/chat/via-proxy SIGNATURE is an instance parameter: when one of them changes,
+# `reload` makes procd restart the bot with the new values (the bot reads them at start).
+# Only a hash is passed — the token itself never appears in procd's instance data.
 start_tgbot_instance() {
-	local ctl tok chat
+	local ctl tok chat via sig
 	config_get_bool ctl main telegram_control 0
 	config_get tok main telegram_token
 	config_get chat main telegram_chat
+	config_get via main telegram_via_proxy 1
 	[ "$ctl" = "1" ] && [ -n "$tok" ] && [ -n "$chat" ] || return 0
+	sig=$(printf '%s|%s|%s' "$tok" "$chat" "$via" | md5sum | cut -c1-12)
 	procd_open_instance tgbot
 	procd_set_param command "$TGBOT"
+	procd_set_param env VPNPOOL_TG_SIG="$sig"
 	procd_set_param respawn 3600 5 0
 	procd_set_param stdout 1
 	procd_set_param stderr 1
@@ -49,8 +55,9 @@ start_service() {
 
 # On a config-change reload procd re-runs start_service and diffs instances: the daemon
 # instance is left running if its params are unchanged, while the tgbot instance is
-# started/stopped to match telegram_control. So toggling the bot in the UI never bounces
-# the tunnel. rpcd's set_option calls `/etc/init.d/vpnpool reload` for telegram_control.
+# started/stopped to match telegram_control and restarted when its signature changed. So
+# editing the bot settings in the UI never bounces the tunnel. rpcd's set_option calls
+# `/etc/init.d/vpnpool reload` for telegram_control / token / chat / via_proxy.
 reload_service() {
 	start_service
 }

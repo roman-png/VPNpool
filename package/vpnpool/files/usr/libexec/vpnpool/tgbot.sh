@@ -4,11 +4,18 @@
 # Long-polls getUpdates and handles a small command set so the router can be
 # managed remotely without LuCI/VPN access. Telegram traffic goes through OUR
 # tunnel (tg_curl -> socks5 127.0.0.1:<test_port>) because api.telegram.org is
-# blocked in RU; that's why /off only tears down ROUTING and keeps sing-box (and
-# thus the Telegram path) alive — otherwise /on could never arrive.
+# blocked in RU; that's why /off only pauses ROUTING and keeps sing-box (and thus
+# the Telegram path) alive — otherwise /on could never arrive. When our sing-box is
+# not running at all (service switched off), the poll goes DIRECT instead (lib.sh
+# tg_poll), so /on can still switch the service back on.
+#
+# /on and /off do not touch routing themselves: they set/clear the pause flag in /tmp
+# and send SIGHUP to the daemon, which applies its fail-safe / kill-switch policy.
 #
 # Access control: only messages from the configured telegram_chat id are obeyed.
-# Started/stopped by vpnpoold as a background child when telegram_control=1.
+# Runs as its OWN procd instance (/etc/init.d/vpnpool), also while the service is
+# disabled; procd restarts it when the token / chat / via-proxy setting changes.
+# Test hook: TGBOT_NO_MAIN=1 + `. tgbot.sh` defines the functions only.
 . /usr/libexec/vpnpool/lib.sh
 
 LIBEXEC=/usr/libexec/vpnpool
@@ -26,15 +33,22 @@ allowed_chat() { uci -q get vpnpool.main.telegram_chat; }
 # This startup sweep is belt-and-suspenders for the one case procd can't cover: an UPGRADE
 # from the old build, where the previous bot was a background child forked by vpnpoold (not
 # a procd instance) and may still be orphaned and polling after the package update. Kill any
-# OTHER tgbot poller + any leftover getUpdates curl so the procd-supervised instance is the
-# sole poller. busybox pkill -f is unreliable — iterate pgrep -f PIDs and kill explicitly
-# (see CLAUDE.md). On a steady-state procd restart this normally finds nothing.
-self="$$"
-for p in $(pgrep -f "$LIBEXEC/tgbot.sh" 2>/dev/null); do
-	[ "$p" = "$self" ] && continue
-	kill "$p" 2>/dev/null
-done
-for p in $(pgrep -f "getUpdates" 2>/dev/null); do kill "$p" 2>/dev/null; done
+# OTHER tgbot poller + a leftover getUpdates curl of OUR bot token — never another program's
+# bot (any other getUpdates on the router belongs to someone else). busybox pkill -f is
+# unreliable — iterate pgrep -f PIDs and kill explicitly.
+sweep_other_pollers() {
+	local self="$$" p tok
+	for p in $(pgrep -f "$LIBEXEC/tgbot.sh" 2>/dev/null); do
+		[ "$p" = "$self" ] && continue
+		kill "$p" 2>/dev/null
+	done
+	kill_own_getupdates
+}
+kill_own_getupdates() {
+	local p tok
+	tok=$(bot_tok); [ -n "$tok" ] || return 0
+	for p in $(pgrep -f "bot$tok/getUpdates" 2>/dev/null); do kill "$p" 2>/dev/null; done
+}
 
 # On TERM/INT (procd stop/restart), kill our in-flight getUpdates curl immediately so it
 # doesn't linger up to 60s holding the Telegram long-poll open — otherwise the freshly
@@ -43,10 +57,9 @@ for p in $(pgrep -f "getUpdates" 2>/dev/null); do kill "$p" 2>/dev/null; done
 POLL_PID=""
 cleanup() {
 	[ -n "$POLL_PID" ] && kill "$POLL_PID" 2>/dev/null
-	for c in $(pgrep -f "getUpdates" 2>/dev/null); do kill "$c" 2>/dev/null; done
+	kill_own_getupdates
 	exit 0
 }
-trap cleanup TERM INT
 
 human_bytes() {   # $1 = bytes -> e.g. "12.3 GB"
 	awk -v b="${1:-0}" 'BEGIN{
@@ -95,7 +108,7 @@ cmd_nodes() {
 
 # /switch <n|tag>: point the "proxy" selector at a node (live + persisted).
 cmd_switch() {
-	local arg tag j
+	local arg tag j code
 	arg="$1"
 	[ -n "$arg" ] || { echo "usage: /switch <number|tag>"; return; }
 	j="$($LIBEXEC/status.sh 2>/dev/null)"
@@ -107,8 +120,9 @@ cmd_switch() {
 	# verify the tag exists
 	echo "$j" | jq -e --arg t "$tag" '(.nodes // []) | map(.tag) | index($t)' >/dev/null 2>&1 || {
 		echo "unknown node: $tag"; return; }
-	curl -s -m 5 -X PUT "http://$CLASH_API/proxies/proxy" \
-		--data "{\"name\":\"$tag\"}" >/dev/null 2>&1
+	code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' -X PUT "http://$CLASH_API/proxies/proxy" \
+		--data "$(jq -nc --arg n "$tag" '{name:$n}')" 2>/dev/null)
+	[ "$code" = 204 ] || { echo "could not switch to $tag (service not answering)"; return; }
 	uci set vpnpool.main.selected_node="$tag" 2>/dev/null
 	uci commit vpnpool 2>/dev/null
 	echo "switched to: $tag"
@@ -181,24 +195,37 @@ cmd_speedtest() {
 	' /tmp/vpnpool/.speedtest-result.json 2>/dev/null || echo "speed test failed"
 }
 
-# /on /off toggle ROUTING only (keep sing-box + Telegram path alive).
+# /on /off pause / resume ROUTING (sing-box + the Telegram path stay up). The bot never
+# touches nft itself: it sets/clears the pause flag and HUPs the daemon, which decides with
+# its fail-safe / kill-switch policy (a route.sh call from here used to commit the LAN to a
+# tunnel nobody watched — or to no tunnel at all when the service was stopped).
 cmd_on() {
+	rm -f "$PAUSE_FLAG"
+	if signal_daemon HUP; then
+		echo "routing ON"
+		return
+	fi
+	# the service itself is off: switch it on (the daemon brings routing up when a node works)
 	uci set vpnpool.main.enabled=1 2>/dev/null; uci commit vpnpool 2>/dev/null
-	"$LIBEXEC/route.sh" up >/dev/null 2>&1
-	echo "routing ON"
+	/etc/init.d/vpnpool enable >/dev/null 2>&1
+	/etc/init.d/vpnpool start >/dev/null 2>&1
+	echo "starting vpnpool — routing comes up when a node works"
 }
 cmd_off() {
-	uci set vpnpool.main.enabled=0 2>/dev/null; uci commit vpnpool 2>/dev/null
-	"$LIBEXEC/route.sh" down >/dev/null 2>&1
-	echo "routing OFF (tunnel kept alive for control)"
+	mkdir -p "$SB_DATA"
+	: > "$PAUSE_FLAG"
+	if signal_daemon HUP; then
+		echo "routing OFF (tunnel kept alive for control)"
+	else
+		rm -f "$PAUSE_FLAG"
+		echo "routing is already off (service not running)"
+	fi
 }
 
 # /refresh: re-fetch subscription + rebuild (USR2 to the daemon).
 cmd_refresh() {
-	local pid
-	pid=$(pgrep -f "$LIBEXEC/vpnpoold" 2>/dev/null | head -1)
-	[ -n "$pid" ] && kill -USR2 "$pid" 2>/dev/null
-	echo "refreshing subscription…"
+	if signal_daemon USR2; then echo "refreshing subscription…"
+	else echo "service not running — nothing to refresh"; fi
 }
 
 cmd_help() {
@@ -270,7 +297,7 @@ handle_cb() {
 		help)     tg_answer_cbq "$cbq"; tg_edit_kb "$mid" "$(cmd_help)" "$(back_kb)" ;;
 		on)       txt=$(cmd_on);  tg_answer_cbq "$cbq" "$txt"; tg_edit_kb "$mid" "$(menu_text)" "$(main_menu_kb)" ;;
 		off)      txt=$(cmd_off); tg_answer_cbq "$cbq" "$txt"; tg_edit_kb "$mid" "$(menu_text)" "$(main_menu_kb)" ;;
-		refresh)  cmd_refresh >/dev/null; tg_answer_cbq "$cbq" "Обновляю подписку…" ;;
+		refresh)  txt=$(cmd_refresh); tg_answer_cbq "$cbq" "$txt" ;;
 		nodes:*)  tg_answer_cbq "$cbq"; tg_edit_kb "$mid" "Выберите узел для переключения:" "$(nodes_kb "${data#nodes:}" sw)" ;;
 		spd:sel:*) tg_answer_cbq "$cbq" "Тестирую…"
 			tg_edit_kb "$mid" "⏳ Замеряю скорость…" "$(back_kb)"
@@ -304,6 +331,10 @@ handle() {   # $1 = raw text
 	esac
 }
 
+[ "${TGBOT_NO_MAIN:-0}" = 1 ] && return 0 2>/dev/null
+
+sweep_other_pollers
+trap cleanup TERM INT
 log "tgbot starting (control via Telegram)"
 OFFSET=$(cat "$OFFSET_FILE" 2>/dev/null); [ -n "$OFFSET" ] || OFFSET=0
 
