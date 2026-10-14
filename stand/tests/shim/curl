@@ -1,0 +1,66 @@
+#!/bin/sh
+# Test double for curl (PATH-prepended by stand/tests/run.sh, also for rpcd's children).
+# Active only while $MOCK_DIR/enabled exists; otherwise defers to the real curl.
+#
+# Rules: $MOCK_DIR/rules, one per line, TAB separated:
+#   <key-glob>  <http_code>  <body-file|->  [<headers-file|->]  [<time_connect>]
+# key = "<METHOD> <url>" with "P " prepended when --proxy/-x is used, e.g.
+#   GET https://sub.example/primary*          200  /tmp/f/primary.b64  /tmp/f/h.txt
+#   P GET https://ifconfig.co/json            200  /tmp/f/ip.json
+#   PUT http://127.0.0.1:9091/proxies/proxy   204  -
+# First matching rule wins. No match => connection refused (http_code 000, exit 7): the
+# stand runs without network, so an unexpected request is a visible failure, not a leak.
+# Every call is appended to $MOCK_DIR/calls.log ("<key>\t<code>").
+MOCK_DIR=${MOCK_DIR:-/tmp/curlmock}
+REAL=/usr/bin/curl
+[ -f "$MOCK_DIR/enabled" ] || exec "$REAL" "$@"
+
+url=""; out=""; wfmt=""; hdr=""; fail=0; proxy=""; method=GET; hasdata=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+		-o|--output) out="$2"; shift ;;
+		-w|--write-out) wfmt="$2"; shift ;;
+		-D|--dump-header) hdr="$2"; shift ;;
+		-x|--proxy) proxy="$2"; shift ;;
+		-X|--request) method="$2"; shift ;;
+		-d|--data|--data-raw|--data-binary|--data-urlencode|-F|--form) hasdata=1; shift ;;
+		-A|--user-agent|-H|--header|-m|--max-time|--connect-timeout|-e|--referer|-u|--user|-b|--cookie|-c|--cookie-jar|--retry|-r|--range|--limit-rate|--resolve|--interface) shift ;;
+		-f|--fail) fail=1 ;;
+		-*) case "$1" in -*f*) case "$1" in --*) ;; *) fail=1 ;; esac ;; esac ;;   # e.g. -sfL
+		*) url="$1" ;;
+	esac
+	shift
+done
+[ "$method" = GET ] && [ "$hasdata" = 1 ] && method=POST
+key="$method $url"; [ -n "$proxy" ] && key="P $key"
+
+code=000; body=-; hfile=-; tconn=0
+TAB=$(printf '\t')
+if [ -f "$MOCK_DIR/rules" ]; then
+	while IFS="$TAB" read -r pat c b h t; do
+		[ -n "$pat" ] || continue
+		case "$pat" in \#*) continue ;; esac
+		# shellcheck disable=SC2254
+		case "$key" in
+			$pat) code="$c"; body="${b:--}"; hfile="${h:--}"; tconn="${t:-0.010}"; break ;;
+		esac
+	done < "$MOCK_DIR/rules"
+fi
+printf '%s\t%s\n' "$key" "$code" >> "$MOCK_DIR/calls.log"
+
+[ -n "$hdr" ] && {
+	if [ "$hfile" != - ] && [ -f "$hfile" ]; then cat "$hfile" > "$hdr"; else printf 'HTTP/1.1 %s\r\n\r\n' "$code" > "$hdr"; fi
+}
+emit_body() { [ "$body" != - ] && [ -f "$body" ] && cat "$body"; }
+if [ "$code" != 000 ]; then
+	if [ "$fail" = 1 ] && [ "$code" -ge 400 ]; then :; else
+		if [ -n "$out" ]; then emit_body > "$out"; else emit_body; fi
+	fi
+fi
+if [ -n "$wfmt" ]; then
+	[ "$code" = 000 ] && tc=0 || tc="$tconn"
+	printf '%s' "$wfmt" | sed -e "s/%{http_code}/$code/g" -e "s/%{time_connect}/$tc/g" -e "s/%{time_total}/$tc/g" -e 's/\\n/\n/g'
+fi
+[ "$code" = 000 ] && exit 7
+[ "$fail" = 1 ] && [ "$code" -ge 400 ] && exit 22
+exit 0
