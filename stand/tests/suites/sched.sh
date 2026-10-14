@@ -41,7 +41,7 @@ expect_eq "start job 5 7" "$(cron_count '^5 7 \* \* \* /etc/init.d/vpnpool start
 expect_eq "stop job 0 23" "$(cron_count '^0 23 \* \* \* /etc/init.d/vpnpool stop$')" 1
 expect_eq "refresh job 30 4" "$(cron_count '^30 4 \* \* \* kill -USR2')" 1
 expect_eq "user job kept" "$(cron_count userjob-before)" 1
-end 2.6
+end
 
 # ---- crontab is not corrupted across runs: a user job added between runs survives ----
 reset_state; mkdir -p /etc/crontabs
@@ -53,15 +53,37 @@ sh "$SCHED" >/dev/null 2>&1
 begin "sched/user-job-added-between-runs-survives"
 expect_eq "late user job survives the 2nd run" "$(cron_count userjob-added-later)" 1
 expect_eq "BEGIN/END balanced" "$(cron_count 'vpnpool-sched BEGIN')" "$(cron_count 'vpnpool-sched END')"
-end 2.6
+end
 
 # ---- garbage times are rejected without breaking the file ----
 reset_state; mkdir -p /etc/crontabs
 printf '0 3 * * * /bin/userjob-before\n' > "$CRON"
 sched_cfg 1 'abc' '25:99' ''
-sh "$SCHED" >/dev/null 2>&1
+sh "$SCHED" >/dev/null 2>&1; SRC=$?
 begin "sched/garbage-times-no-job-file-intact"
 expect_eq "no vpnpool job lines" "$(gcount /etc/init.d/vpnpool "$CRON")" 0
 expect_eq "user job kept" "$(cron_count userjob-before)" 1
 expect_eq "BEGIN/END balanced" "$(cron_count 'vpnpool-sched BEGIN')" "$(cron_count 'vpnpool-sched END')"
-end 3.3   # 25:99 must be rejected (set_schedule validation); the unbalanced BEGIN is 2.6
+expect_eq "sched.sh reports the bad time (rc 2)" "$SRC" 2
+end
+
+# ---- a lone BEGIN (left by the old broken version) must not swallow the jobs after it ----
+reset_state; mkdir -p /etc/crontabs
+printf '0 3 * * * /bin/userjob-before\n# vpnpool-sched BEGIN\n45 1 * * * /bin/userjob-after-lone-begin\n' > "$CRON"
+sched_cfg 1 '06:00' '' ''
+sh "$SCHED" >/dev/null 2>&1
+begin "sched/lone-begin-keeps-following-user-jobs"
+expect_eq "user job after the lone BEGIN kept" "$(cron_count userjob-after-lone-begin)" 1
+expect_eq "user job before kept" "$(cron_count userjob-before)" 1
+expect_eq "start job written" "$(cron_count '^0 6 \* \* \* /etc/init.d/vpnpool start$')" 1
+end
+
+# ---- leading zeros: 08:09 is a time, not an octal error ----
+reset_state; mkdir -p /etc/crontabs; : > "$CRON"
+sched_cfg 1 '08:09' '00:00' ''
+sh "$SCHED" >/dev/null 2>&1; SRC=$?
+begin "sched/leading-zeros"
+expect_eq "rc" "$SRC" 0
+expect_eq "start 9 8" "$(cron_count '^9 8 \* \* \* /etc/init.d/vpnpool start$')" 1
+expect_eq "stop 0 0" "$(cron_count '^0 0 \* \* \* /etc/init.d/vpnpool stop$')" 1
+end
