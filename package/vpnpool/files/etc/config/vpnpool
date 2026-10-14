@@ -1,6 +1,5 @@
 # vpnpool - control-plane over sing-box (analog of v2RayTun / Happ)
 # Coexists with podkop (separate sing-box instance). Editable via uci / LuCI.
-# NOTE: stage 1 skeleton - the daemon does not route any traffic yet.
 
 config vpnpool 'main'
 	option enabled '0'
@@ -9,7 +8,7 @@ config vpnpool 'main'
 	# Extra FULL subscriptions, bulk-merged into the pool like the primary one
 	# (quota/expiry are read only from the primary). Managed via the UI.
 	# list extra_sub 'https://...'
-	option subscription_ua 'v2rayNG/1.8.5'
+	# Subscription refresh period (e.g. 30m, 6h). Minimum 10m: panels rate-limit faster polling.
 	option subscription_interval '6h'
 	# Fallback liveness URL for sing-box urltest when check_services is empty.
 	option health_url 'http://cp.cloudflare.com/generate_204'
@@ -28,9 +27,11 @@ config vpnpool 'main'
 	option selected_node ''
 	# preferred node: soft pin with switch-back (empty = pure auto/urltest)
 	option preferred_node ''
-	# IPv6 policy: block (fail-closed) | off | proxy
+	# IPv6 policy: block (fail-closed: LAN IPv6 to the internet is rejected) | off
 	option ipv6 'block'
-	# Kill-switch: fail-closed for IPv4 in full-tunnel (exclude) mode (opt-in)
+	# Kill-switch (opt-in): routing is NEVER taken down when the tunnel dies (fail-closed:
+	# the LAN is blocked, not leaked); in full-tunnel (exclude) mode every LAN port is
+	# marked. Off: a dead tunnel takes routing down and the LAN falls back to direct.
 	option killswitch '0'
 	# DNS-leak guard: route LAN DNS through the tunnel (opt-in)
 	option dns_protect '0'
@@ -98,8 +99,9 @@ config vpnpool 'main'
 	option route_priority '106'
 	option tproxy_port '1603'
 	option test_port '1605'
+	# per-node speed / unlock tests (own selector, never the LAN's)
+	option node_test_port '1606'
 	option clash_api '127.0.0.1:9091'
-	option singbox_config '/etc/vpnpool/sing-box.json'
 	option log_level 'warn'
 	# lan_if empty = auto-detect (portable). coexist: auto|on|off — yield traffic
 	# already marked by podkop/other proxies so we don't double-intercept it.
@@ -113,8 +115,3 @@ config routing 'routing'
 	# auto_domain: domains auto-detected as blocked-for-direct by adaptive routing
 	# (always routed through the proxy when adaptive_routing=1). Managed via the UI.
 	# list auto_domain 'example.com'
-
-# Manual VLESS nodes (in addition to the subscription). Example:
-# config node
-#	option link 'vless://...#name'
-#	option enabled '1'
