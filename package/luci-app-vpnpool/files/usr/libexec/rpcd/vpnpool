@@ -148,15 +148,14 @@ call)
 		;;
 	set_enabled)
 		en=$(echo "$input" | jq -r '.enabled')
+		# power.sh: ONE on/off for LuCI, the schedule and Telegram. "off" stops only the daemon
+		# (routes removed) and keeps the Telegram bot; "on" ends a Telegram pause and starts
+		# the daemon if needed — a running one is not restarted (no routing gap).
 		if [ "$en" = "true" ] || [ "$en" = "1" ]; then
-			uci set vpnpool.main.enabled='1'; uci commit vpnpool
-			rm -f "$PAUSE_FLAG"   # switching on from the UI also ends a Telegram /off pause
-			/etc/init.d/vpnpool enable; /etc/init.d/vpnpool restart
+			/usr/libexec/vpnpool/power.sh on >/dev/null 2>&1; reply true on
 		else
-			uci set vpnpool.main.enabled='0'; uci commit vpnpool
-			/etc/init.d/vpnpool stop; /etc/init.d/vpnpool disable
+			/usr/libexec/vpnpool/power.sh off >/dev/null 2>&1; reply true off
 		fi
-		echo '{"ok":true}'
 		;;
 	select)
 		tag=$(echo "$input" | jq -r '.tag // ""')

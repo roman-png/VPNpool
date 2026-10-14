@@ -115,7 +115,10 @@ M speedtest_result '{}' - - c_idle - -
 # ---------------- write methods ----------------
 c_set_enabled() {
 	expect_eq "uci enabled" "$(uci -q get vpnpool.main.enabled)" 0
-	expect_true "service stopped" grep -q '^vpnpool stop' "$INITD_LOG"
+	# "off" = enabled=0 + reload (procd stops only the daemon; the Telegram bot stays) — never
+	# stop/disable, which would also kill the bot (and keep it off after a reboot)
+	expect_true "daemon stopped via reload" grep -q '^vpnpool reload' "$INITD_LOG"
+	expect_eq "no stop / disable (the bot must survive)" "$(gcount -e '^vpnpool stop' -e '^vpnpool disable' "$INITD_LOG")" 0
 }
 s_set_enabled() { : > "$INITD_LOG"; uci set vpnpool.main.enabled=1; uci commit vpnpool; }
 M set_enabled '{"enabled":false}' - - c_set_enabled '{"enabled":"maybe"}' 3.3
@@ -221,7 +224,7 @@ M del_sub '{"url":"https://extra.example.com/x"}' USR2 - c_del_sub '{"url":"http
 s_set_schedule() { mkdir -p /etc/crontabs; : > /etc/crontabs/root; }
 c_set_schedule() {
 	expect_eq "sched_on" "$(uci -q get vpnpool.main.sched_on)" '07:00'
-	expect_eq "crontab start job" "$(gcount '^0 7 \* \* \* /etc/init.d/vpnpool start$' /etc/crontabs/root)" 1
+	expect_eq "crontab start job" "$(gcount '^0 7 \* \* \* /usr/libexec/vpnpool/power.sh on$' /etc/crontabs/root)" 1
 }
 M set_schedule '{"enabled":true,"on":"07:00","off":"23:30","refresh":""}' - - c_set_schedule '{"enabled":true,"on":"25:99","off":"","refresh":""}' -
 
@@ -363,6 +366,15 @@ rcall set_schedule '{"enabled":true,"on":"7:61","off":"","refresh":""}'
 begin "rpcd/set_schedule/bad-minute-not-stored"
 expect_jq "ok:false bad_time" "$R" '.ok==false and .code=="bad_time"'
 expect_eq "uci sched_on untouched" "$(uci -q get vpnpool.main.sched_on)" ''
+end
+
+reset_state; daemon_start; : > "$INITD_LOG"; : > /tmp/vpnpool/.routing_paused
+rcall set_enabled '{"enabled":true}'
+begin "rpcd/set_enabled/on-with-daemon-running-no-restart"
+expect_jq "ok" "$R" '.ok==true'
+expect_true "daemon re-checks routing (HUP)" [ "$(signals_seen HUP)" -ge 1 ]
+expect_eq "no restart / start of a running service" "$(gcount -e restart -e '^vpnpool start' "$INITD_LOG")" 0
+expect_true "Telegram pause ended" [ ! -f /tmp/vpnpool/.routing_paused ]
 end
 
 # ---------------- coverage: ACL <-> rpcd list <-> this suite ----------------

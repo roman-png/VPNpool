@@ -206,9 +206,7 @@ cmd_on() {
 		return
 	fi
 	# the service itself is off: switch it on (the daemon brings routing up when a node works)
-	uci set vpnpool.main.enabled=1 2>/dev/null; uci commit vpnpool 2>/dev/null
-	/etc/init.d/vpnpool enable >/dev/null 2>&1
-	/etc/init.d/vpnpool start >/dev/null 2>&1
+	"$LIBEXEC/power.sh" on >/dev/null 2>&1
 	echo "starting vpnpool — routing comes up when a node works"
 }
 cmd_off() {

@@ -123,3 +123,40 @@ expect_true "token change changes the instance params" [ "$(printf '%s\n' "$P1" 
 expect_eq "token never in the instance params" "$(printf '%s\n%s\n' "$P1" "$P2" | gcount '111:')" 0
 expect_eq "no bot when telegram_control=0" "$(printf '%s\n' "$P3" | gcount '^open tgbot$')" 0
 end
+
+# ---- init.d through the REAL rc.common: what procd is actually sent (ubus stubbed) ----
+mkdir -p "$TB/ubusshim"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> %s/ubus.calls\nexit 0\n' "$TB" > "$TB/ubusshim/ubus"; chmod +x "$TB/ubusshim/ubus"
+initd_real() {   # <rc.common command> -> the JSON of the "ubus call service set|add" request
+	: > "$TB/ubus.calls"
+	PATH="$TB/ubusshim:$PATH" sh /etc/rc.common "$REPO/package/vpnpool/files/etc/init.d/vpnpool" "$1" >/dev/null 2>&1
+	grep '^call service \(set\|add\) ' "$TB/ubus.calls" | head -1 | sed 's/^call service [a-z]* //'
+}
+reset_state
+uci set vpnpool.main.enabled=0; uci set vpnpool.main.telegram_control=1
+uci set vpnpool.main.telegram_token='111:A'; uci set vpnpool.main.telegram_chat=42; uci commit vpnpool
+J0=$(initd_real reload)
+uci set vpnpool.main.enabled=1; uci commit vpnpool
+J1=$(initd_real reload)
+begin "tgbot/initd-reload-really-reaches-procd"
+expect_jq "reload sends the instance set (enabled=0)" "$J0" '.instances|type=="object"'
+expect_jq "enabled=0: bot instance only" "$J0" '(.instances|has("tgbot")) and ((.instances|has("vpnpoold"))|not)'
+expect_jq "enabled=1: daemon + bot" "$J1" '(.instances|has("tgbot")) and (.instances|has("vpnpoold"))'
+expect_jq "daemon TERM window > 5 s" "$J1" '.instances.vpnpoold.term_timeout >= 15'
+end
+
+# ---- power.sh: the user's off keeps the bot, on starts / re-checks ----
+reset_state; stub_initd; daemon_stop; uci set vpnpool.main.enabled=1; uci commit vpnpool
+sh /usr/libexec/vpnpool/power.sh off >/dev/null 2>&1
+begin "tgbot/power-off-keeps-bot"
+expect_eq "enabled=0" "$(uci -q get vpnpool.main.enabled)" 0
+expect_eq "init.d: boot hook kept + reload (procd stops only the daemon)" "$(tr '\n' ';' < "$TINIT")" "vpnpool enable;vpnpool reload;"
+end
+reset_state; stub_initd; daemon_start; : > "$PAUSE"
+sh /usr/libexec/vpnpool/power.sh on >/dev/null 2>&1
+begin "tgbot/power-on-running-daemon-hup-only"
+expect_eq "enabled=1" "$(uci -q get vpnpool.main.enabled)" 1
+expect_true "daemon got HUP" [ "$(signals_seen HUP)" -ge 1 ]
+expect_eq "no start of a running service" "$(gcount '^vpnpool start' "$TINIT")" 0
+expect_true "pause ended" [ ! -f "$PAUSE" ]
+end
