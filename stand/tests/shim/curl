@@ -59,7 +59,10 @@ if [ "$code" != 000 ]; then
 fi
 if [ -n "$wfmt" ]; then
 	[ "$code" = 000 ] && tc=0 || tc="$tconn"
-	printf '%s' "$wfmt" | sed -e "s/%{http_code}/$code/g" -e "s/%{time_connect}/$tc/g" -e "s/%{time_total}/$tc/g" -e 's/\\n/\n/g'
+	# size_download = body bytes; speed_download = the same number (as if it took 1 s)
+	sz=0; [ "$code" != 000 ] && [ "$body" != - ] && [ -f "$body" ] && sz=$(wc -c < "$body" | tr -d ' ')
+	printf '%s' "$wfmt" | sed -e "s/%{http_code}/$code/g" -e "s/%{time_connect}/$tc/g" -e "s/%{time_total}/$tc/g" \
+		-e "s/%{size_download}/$sz/g" -e "s/%{speed_download}/$sz/g" -e 's/\\n/\n/g'
 fi
 [ "$code" = 000 ] && exit 7
 [ "$fail" = 1 ] && [ "$code" -ge 400 ] && exit 22
