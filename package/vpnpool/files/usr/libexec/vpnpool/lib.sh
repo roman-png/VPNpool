@@ -105,12 +105,16 @@ tg_curl() {
 # press / command until it expires (the bot "answers after a long time"). Proxy-only keeps
 # polling responsive: a transient proxy failure returns empty fast and the caller retries
 # the proxy after a short sleep. Honors telegram_via_proxy=0 (then it polls direct).
+# Exception: when the proxy port itself refuses the connection (curl rc 7 — our sing-box is
+# not running, e.g. the service is switched off), poll DIRECT: that is the only way a /on can
+# still arrive. A proxy that is up but slow/failing upstream keeps the proxy-only rule.
 tg_poll() {
+	local out rc
 	if [ "$TG_VIA_PROXY" = "1" ]; then
-		curl -s --proxy "socks5h://127.0.0.1:$TG_TEST_PORT" "$@"
-	else
-		curl -s "$@"
+		out=$(curl -s --proxy "socks5h://127.0.0.1:$TG_TEST_PORT" "$@"); rc=$?
+		if [ "$rc" -ne 7 ]; then printf '%s' "$out"; return "$rc"; fi
 	fi
+	curl -s "$@"
 }
 
 # Low-level Telegram send (ignores the enable toggle). Needs token+chat.
