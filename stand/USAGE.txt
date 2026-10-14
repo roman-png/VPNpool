@@ -32,7 +32,14 @@ Automated tests (offline: --network none; every HTTP call hits the curl test dou
 
   Suites: parser (links, AWG .conf, vpn:// vectors) | build (poison subscriptions) |
           rpcd (every ACL method: ok / bad input / no daemon) | sched | adaptive | fetch |
-          status (300 nodes: time + processes per poll) | uitext (UI text guard)
+          status (300 nodes: time + processes per poll) |
+          daemon (fail-safe / kill-switch, reload order, watchdog, pause, reload queue, preferred
+                  pin, nodecheck WAN guard, node tests, route.sh on real nft) |
+          tgbot (/on /off, direct poll fallback, own-token sweep, init.d bot instance) |
+          uitext (UI text guard)
+  The container gets --cap-add NET_ADMIN (its own network namespace only): the daemon suite
+  applies the real nft table / ip rule there. vpnpoold and tgbot.sh are sourced with
+  VPNPOOLD_NO_MAIN=1 / TGBOT_NO_MAIN=1 (functions only) and driven with stubbed probes.
 
   Each suite must run at least the number of cases in stand/tests/min-cases.txt (raise it when
   you add cases). Invariants (rc 0, reply is an object, time bound) are separate plain cases,
