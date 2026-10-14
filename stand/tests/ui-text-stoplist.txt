@@ -1,0 +1,32 @@
+# Stop-list for stand/tests/ui-text-guard.uc — technical words that must not reach a human
+# through the UI (ROADMAP-2.0 §2/§10: no uci option names, urltest, Clash API, fwmark…).
+# One POSIX ERE per line, matched case-insensitively against every human-visible string.
+# <word> = whole word (expanded to a non-alnum boundary; ucode's regex has no \b).
+# Format: <name><TAB><regex>
+urltest	urltest
+clash	clash
+fwmark	fwmark
+tproxy	tproxy
+rpcd	rpcd
+ubus	<ubus>
+nft	<nft(ables)?>
+srs	<srs>
+generate_204	generate_204
+uci	<uci>
+selector	<selector>
+outbound	<outbounds?>
+inbound	<inbounds?>
+endpoint-array	<endpoints\[
+procd	<procd>
+initd	init\.d
+fs-path	(/etc/|/tmp/|/usr/|/var/)
+socks	<socks5h?>
+ruleset	<rule[-_ ]?sets?>
+geodb	<geo(site|ip)>
+pid	<pid>
+stdio	<std(err|out)>
+crontab	<crontab>
+watchdog	<watchdog>
+prefilter	<prefilter>
+mtime	<mtime>
+snake_case	<[a-z][a-z0-9]*(_[a-z0-9]+)+>

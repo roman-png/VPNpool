@@ -1,0 +1,3 @@
+{
+	"admin/services/bad": { "title": "ubus monitor", "order": 1 }
+}
