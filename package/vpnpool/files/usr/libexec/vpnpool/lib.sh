@@ -365,8 +365,14 @@ node_test_select() {   # $1=tag -> 0 only if sing-box switched the test selector
 
 # ---- routing fail-safe / kill-switch policy (pure: decides, never acts) ----
 # route_policy <killswitch 0|1> <tunnel healthy 0|1> <paused by the user 0|1> -> up|down
-#   paused (Telegram /off)  -> down: the user explicitly switched routing off
-#   killswitch=1            -> up, ALWAYS (fail-closed: a dead tunnel blocks, never leaks)
+#   paused (Telegram /off)  -> down: the user explicitly switched routing off. The kill-switch
+#                              protects against FAILURES, not against the user's own explicit
+#                              "turn the VPN off" — the same holds for LuCI "off" and the
+#                              schedule's "off" (enabled=0, the daemon stops and removes the
+#                              routes). INTEGRATOR'S ASSUMPTION (14.10.2026), not an owner's
+#                              decision — to be confirmed by the owner.
+#   killswitch=1            -> up on every failure (fail-closed: a dead tunnel / failed build /
+#                              restart blocks the LAN, never leaks)
 #   killswitch=0            -> up only while the tunnel works; a dead tunnel -> down, so the
 #                              LAN falls back to DIRECT instead of a black hole (fail-safe)
 route_policy() {

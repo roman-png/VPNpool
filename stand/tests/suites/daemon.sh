@@ -12,12 +12,15 @@ mkdir -p "$FL"
 cat > "$FL/route.sh" <<EOF
 #!/bin/sh
 echo "route \$1" >> "$RLOG"
+# a signal arriving WHILE the routes are being applied (USR1 from nodecheck / adaptive / UI)
+if [ "\$1" = up ] && [ -f "$DS/sig_on_up" ]; then rm -f "$DS/sig_on_up"; kill -USR1 "\$(cat "$DS/pid")"; fi
 exit \${ROUTE_RC:-0}
 EOF
 cat > "$FL/build.sh" <<EOF
 #!/bin/sh
 echo build >> "$RLOG"
 [ -f "$DS/build_fail" ] && exit 1
+[ -f "$DS/build_fail_once" ] && { rm -f "$DS/build_fail_once"; exit 1; }
 mkdir -p /tmp/vpnpool; echo "{\"gen\":\$\$}" > /tmp/vpnpool/sing-box.json
 exit 0
 EOF
@@ -117,6 +120,54 @@ expect_eq "call sequence" "$(calls)" "route up;"
 expect_eq "ROUTED" "$(routed)" 1
 end
 
+# before the FIRST build (a crash restart, a build that keeps failing): kill-switch blocks at
+# once, otherwise a table left by the crashed run is removed — before any build runs
+sc_guard() { ROUTED=0; startup_guard; initial_build; }
+ds_reset 0 down; : > "$DS/build_fail_once"; in_daemon sc_guard
+begin "daemon/startup-guard-clears-stale-table-before-first-build"
+expect_eq "first action" "$(calls | cut -d';' -f1)" "route down"
+expect_eq "builds retried until one works" "$(gcount '^build' "$RLOG")" 2
+expect_eq "silent (no notification)" "$(gcount '^notify' "$RLOG")" 0
+end
+ds_reset 1 down; : > "$DS/build_fail_once"; in_daemon sc_guard
+begin "daemon/startup-guard-killswitch-blocks-before-first-build"
+expect_eq "first action" "$(calls | cut -d';' -f1)" "route up"
+expect_eq "ROUTED" "$(routed)" 1
+end
+
+# stop (TERM): routes down FIRST; a hanging Telegram send must not hold the stop
+sc_cleanup() {
+	tg_notify() { echo "notify $1" >> "$RLOG"; /bin/sleep 30; }
+	ROUTED=1; cleanup
+}
+ds_reset 1 down
+_t0=$(date +%s); in_daemon sc_cleanup; _dt=$(( $(date +%s) - _t0 ))
+sleep 1
+begin "daemon/stop-routes-down-first-notify-in-background"
+expect_eq "first action" "$(grep -E '^(route|kill|notify)' "$RLOG" | head -1)" "route down"
+expect_le "stop took seconds, not the 30 s of the hanging send" "$_dt" 5
+expect_eq "sing-box stopped after the routes" "$(grep -E '^(route|kill)' "$RLOG" | tr '\n' ';')" "route down;kill;"
+end
+for p in $(pgrep -f '/bin/sleep 30'); do kill "$p" 2>/dev/null; done
+
+# a USR1 that arrives while the main loop applies the routes is QUEUED, not run inside the
+# trap: the reload runs afterwards and its verdict is the last word (ROUTED == the table)
+sc_sig() {
+	install_traps
+	sh -c 'echo $PPID' > "$DS/pid"
+	: > "$DS/sig_on_up"
+	ROUTED=0
+	apply_routing 1          # the loop saw the tunnel alive; meanwhile it died (tunnel=down)
+	echo "$ROUTED" > "$DS/r_after_up"
+	serve_pending            # the main loop serves the queued reload
+}
+ds_reset 0 down; in_daemon sc_sig
+begin "daemon/signal-during-route-up-no-desync"
+expect_eq "routes were up before the queued reload ran" "$(cat "$DS/r_after_up")" 1
+expect_eq "call sequence: up, then the reload, which takes them down" "$(calls)" "route up;build;start;route down;"
+expect_eq "ROUTED matches the last action (down)" "$(routed)" 0
+end
+
 # ---- watchdog ----
 sc_wd() {   # three supervise ticks with an old start time
 	ROUTED=1; SB_STARTED=0
@@ -152,8 +203,8 @@ end
 # ---- pause flag (Telegram /off /on): wins over the kill-switch, sing-box stays ----
 sc_pause() {
 	ROUTED=1
-	: > "$PAUSE_FLAG"; on_hup; echo "$ROUTED" > "$DS/r_paused"
-	rm -f "$PAUSE_FLAG"; on_hup
+	: > "$PAUSE_FLAG"; on_hup; serve_pending; echo "$ROUTED" > "$DS/r_paused"
+	rm -f "$PAUSE_FLAG"; on_hup; serve_pending
 }
 ds_reset 1 down; in_daemon sc_pause
 begin "daemon/pause-flag-down-then-up"
@@ -166,15 +217,16 @@ end
 # ---- reload requests are queued, never nested ----
 sc_queue() {
 	do_reload() {
-		echo "do $1 depth=$RELOADING" >> "$RLOG"
+		echo "do $1" >> "$RLOG"
 		[ -f "$DS/reload_running_seen" ] || { [ -f "$SB_DATA/.reload_running" ] && : > "$DS/reload_running_seen"; }
-		if [ ! -f "$DS/injected" ]; then : > "$DS/injected"; request_reload refetch; request_reload reload; fi
+		# two signals arrive while this reload runs (the handlers only queue)
+		if [ ! -f "$DS/injected" ]; then : > "$DS/injected"; on_usr2; on_usr1; fi
 	}
 	request_reload reload
 }
 ds_reset 0 up; rm -f "$DS/injected" "$DS/reload_running_seen"; in_daemon sc_queue
 begin "daemon/reload-queued-not-nested"
-expect_eq "two sequential runs, the refetch wins the queue" "$(grep '^do' "$RLOG" | tr '\n' ';')" "do reload depth=1;do refetch depth=1;"
+expect_eq "two sequential runs, the refetch wins the queue" "$(grep '^do' "$RLOG" | tr '\n' ';')" "do reload;do refetch;"
 expect_true "busy flag visible during the reload" [ -f "$DS/reload_running_seen" ]
 expect_true "busy flag removed afterwards" [ ! -f /tmp/vpnpool/.reload_running ]
 end
@@ -264,6 +316,8 @@ expect_eq "second up rc" "$r2" 0
 expect_true "table present" nft list table inet vpnpool
 expect_eq "exactly one ip rule" "$(ip rule show | gcount 'fwmark 0x400000/0x400000 lookup 142')" 1
 expect_eq "no separate 'delete table' before re-applying" "$(gcount 'nft delete table' "$DS/nft.calls")" 0
+expect_eq "IPv6 guard in the same transaction: one 'nft -f' per up" "$(gcount '^nft -f' "$DS/nft.calls")" 2
+expect_true "v6filter chain present (ipv6=block)" nft list chain inet vpnpool v6filter
 end
 uci set vpnpool.main.killswitch=1; uci set vpnpool.main.mode=exclude; uci commit vpnpool
 sh /usr/libexec/vpnpool/route.sh up >/dev/null 2>&1
@@ -300,4 +354,32 @@ sh /usr/libexec/vpnpool/speedtest.sh Gone >/dev/null 2>&1
 begin "daemon/node-test-refused-selector-no-download"
 expect_true "honest failure" jq -e '.ok==false' /tmp/vpnpool/.speedtest-result.json
 expect_eq "no download through a selector that did not switch" "$(mock_calls 'speed.cloudflare.com')" 0
+end
+
+# ---- route.sh: refused new rules never remove the working ones (fail-closed) ----
+uci set vpnpool.main.killswitch=1; uci set vpnpool.main.mode=exclude; uci -q delete vpnpool.main.client; uci add_list vpnpool.main.client='192.168.1.50'; uci commit vpnpool
+sh /usr/libexec/vpnpool/route.sh up >/dev/null 2>&1
+uci add_list vpnpool.main.client='999.1.1.1'; uci commit vpnpool   # nft refuses this address
+sh /usr/libexec/vpnpool/route.sh up >/dev/null 2>&1; rf=$?
+begin "daemon/route-refused-reapply-keeps-old-table"
+expect_eq "route.sh reports the failure" "$rf" 1
+expect_true "the working table is still there" nft list chain inet vpnpool prerouting
+expect_true "it is the OLD table (its client set), not a fallback" sh -c 'nft list set inet vpnpool clients | grep -q 192.168.1.50'
+expect_true "with its kill-switch marking" sh -c 'nft list chain inet vpnpool prerouting | grep -q "iifname \"br-lan\" meta l4proto tcp meta mark set"'
+expect_eq "ip rule kept" "$(ip rule show | gcount 'fwmark 0x400000/0x400000 lookup 142')" 1
+end
+sh /usr/libexec/vpnpool/route.sh down >/dev/null 2>&1
+sh /usr/libexec/vpnpool/route.sh up >/dev/null 2>&1; rf=$?
+begin "daemon/route-refused-no-table-killswitch-blocks"
+expect_eq "route.sh reports the failure" "$rf" 1
+expect_true "blocking table installed anyway" sh -c 'nft list chain inet vpnpool prerouting | grep -q "tproxy"'
+expect_true "without the refused client set" sh -c '! nft list set inet vpnpool clients'
+expect_true "IPv6 guard there too" nft list chain inet vpnpool v6filter
+end
+sh /usr/libexec/vpnpool/route.sh down >/dev/null 2>&1
+uci set vpnpool.main.killswitch=0; uci commit vpnpool
+sh /usr/libexec/vpnpool/route.sh up >/dev/null 2>&1; rf=$?
+begin "daemon/route-refused-no-table-no-killswitch-direct"   # control: no block without the kill-switch
+expect_eq "route.sh reports the failure" "$rf" 1
+expect_true "no table (LAN direct, honest failure)" sh -c '! nft list table inet vpnpool'
 end

@@ -116,13 +116,13 @@ jq -r '.[].tag' "$N" 2>/dev/null | while IFS= read -r t; do
 		a=0
 		while [ "$a" -lt "$TRIES" ]; do
 			r=$(curl -s -m 8 "http://$CL/proxies/$enc/delay?url=$eu&timeout=5000" 2>/dev/null)
-			# THE node criterion (lib.sh clash_delay_alive): a delay = the service answered
-			case "$r" in *'"delay"'*)
+			# THE node criterion — the shared lib.sh function (a shell function, no fork)
+			if clash_delay_alive "$r"; then
 				pass=$((pass + 1))
 				# extract the numeric delay from {"delay":N...} (no jq per probe)
 				d=${r#*\"delay\":}; d=${d%%[!0-9]*}; [ -n "$d" ] && lastdelay=$d
-				break ;;
-			esac
+				break
+			fi
 			a=$((a + 1))
 		done
 	done

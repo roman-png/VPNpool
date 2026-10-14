@@ -9,16 +9,20 @@
 # Routing fail-safe / kill-switch — ONE decision (route_policy in lib.sh), ONE actor
 # (apply_routing below), used by start-up, every reload/refresh, the watchdog and the
 # Telegram pause:
-#   killswitch=1 -> routes stay up ALWAYS (fail-closed: a dead tunnel blocks, never leaks);
+#   killswitch=1 -> on every FAILURE routes stay up (fail-closed: a dead tunnel, a failed
+#                   build, a crash/restart block the LAN, never leak) — from the first second
+#                   of start-up (startup_guard);
 #   killswitch=0 -> routes up only while the tunnel works; a confirmed-dead tunnel takes
 #                   them down so the LAN falls back to DIRECT (never a black hole);
-#   paused (Telegram /off, flag in /tmp) -> routes down, sing-box stays up for the bot.
+#   an EXPLICIT "off" by the user (Telegram /off = pause flag; LuCI "off" / schedule "off" =
+#   enabled=0 -> the daemon is stopped) takes routes down even with the kill-switch —
+#   integrator's assumption (14.10.2026), see route_policy in lib.sh.
 # A reload keeps the current routes while sing-box restarts, then checks the tunnel and
-# re-applies the policy.
+# re-applies the policy. Stop (TERM): routes down first, everything slow after.
 #
 # Signals: USR1 = rebuild from cache + hot-reload; USR2 = re-fetch + rebuild + hot-reload;
-# HUP = re-evaluate routing now (pause flag changed). A signal that arrives while a reload
-# is running is queued and served right after it (no overlapping reloads).
+# HUP = re-evaluate routing now (pause flag changed). The handlers only queue the request;
+# the main loop serves it (serve_pending) — no work inside a trap, no overlapping reloads.
 #
 # Test hook: VPNPOOLD_NO_MAIN=1 + `. vpnpoold` defines the functions and returns without
 # starting anything (stand tests drive the decisions with stubbed probes / route.sh).
@@ -217,7 +221,7 @@ routing_up() {
 	return 1
 }
 
-# apply_routing <tunnel healthy 0|1> [reapply]
+# apply_routing <tunnel healthy 0|1> [reapply|startup|guard]
 # Decide with route_policy (lib.sh) and act; "reapply" re-installs the rules even when the
 # state doesn't change (a reload may have changed clients/ipv6/mode). Notifies on changes.
 apply_routing() {
@@ -229,7 +233,7 @@ apply_routing() {
 		if [ "$ROUTED" != 1 ] || [ "${2:-}" = reapply ]; then
 			if routing_up; then ROUTED=1; else ROUTED=0; fi
 		fi
-		if [ "$was" != 1 ] && [ "$ROUTED" = 1 ]; then
+		if [ "$was" != 1 ] && [ "$ROUTED" = 1 ] && [ "${2:-}" != guard ]; then
 			if [ "$1" = 1 ]; then tg_notify "🟢 vpnpool: routing is up"
 			else log "kill-switch on: routing kept up although no node works (LAN traffic is blocked, not leaked)"
 			     tg_notify "🔒 vpnpool: no working node — kill-switch blocks the LAN until a node works"; fi
@@ -314,19 +318,35 @@ watchdog_check() {
 }
 
 cleanup() {
-	log "stopping: removing routing and sing-box"
-	tg_notify "🔴 vpnpool: stopped"
+	# Inside procd's TERM window (init.d term_timeout): routing comes down FIRST, then sing-box;
+	# the notification goes last and in the background — a Telegram send through a dead
+	# tunnel can take tens of seconds and must never keep the LAN routed into it (procd
+	# SIGKILLs us when the window is over).
 	"$LIBEXEC/route.sh" down
+	ROUTED=0
+	log "stopping: routing removed, stopping sing-box"
 	kill_singbox
 	rm -f "$SB_DATA/.reload_running"
+	( tg_notify "🔴 vpnpool: stopped" ) </dev/null >/dev/null 2>&1 &
 	log "stopped cleanly"
 	exit 0
 }
 
-# ---- reload / refetch (serialised) ----
-RELOADING=0
-PENDING=""        # queued while a reload runs: "" | reload | refetch
-PENDING_ROUTE=0   # HUP arrived during a reload
+# ---- signals: the handlers ONLY record the request, the main loop does the work ----
+# An ash trap runs between two commands of whatever the main loop is doing at that moment —
+# a reload done INSIDE the handler, in the middle of the loop's own apply_routing, once left
+# ROUTED=1 with the table removed. So: flags here, work in serve_pending.
+PENDING=""        # "" | reload | refetch (a refetch includes the reload)
+PENDING_ROUTE=0   # HUP: re-decide routing now (the pause flag changed)
+on_usr1() { [ "$PENDING" = refetch ] || PENDING=reload; }
+on_usr2() { PENDING=refetch; }
+on_hup()  { PENDING_ROUTE=1; }
+install_traps() {
+	trap cleanup TERM INT
+	trap on_usr1 USR1
+	trap on_usr2 USR2
+	trap on_hup HUP
+}
 
 # do_reload <reload|refetch>: [fetch] -> build -> restart sing-box (routes untouched) ->
 # check the tunnel -> re-apply routing by the policy.
@@ -349,31 +369,52 @@ do_reload() {
 	log "reload complete"
 }
 
-# request_reload <reload|refetch> — the entry point for signals and the periodic refresh.
-request_reload() {
-	if [ "$RELOADING" = 1 ]; then
-		if [ "$1" = refetch ]; then PENDING=refetch; else [ -n "$PENDING" ] || PENDING=reload; fi
-		log "reload already running — queued ($1)"
-		return 0
+# serve_pending: run the queued requests one after another (a signal that arrives during a
+# reload just queues the next run). Called from the main loop only (and request_reload).
+serve_pending() {
+	local what
+	if [ -n "$PENDING" ]; then
+		: > "$SB_DATA/.reload_running"
+		while [ -n "$PENDING" ]; do
+			what=$PENDING; PENDING=""
+			do_reload "$what"
+		done
+		rm -f "$SB_DATA/.reload_running"
 	fi
-	RELOADING=1; : > "$SB_DATA/.reload_running"
-	local what="$1"
-	while :; do
-		PENDING=""; PENDING_ROUTE=0
-		do_reload "$what"
-		[ -n "$PENDING" ] || break
-		what=$PENDING
-	done
-	RELOADING=0; rm -f "$SB_DATA/.reload_running"
-	[ "$PENDING_ROUTE" = 1 ] && on_hup
+	if [ "$PENDING_ROUTE" = 1 ]; then
+		PENDING_ROUTE=0
+		RE_ROUNDS=3 routing_eval
+	fi
 	return 0
 }
+# request_reload <reload|refetch>: queue it and serve the queue now (periodic refresh)
+request_reload() {
+	if [ "$1" = refetch ]; then on_usr2; else on_usr1; fi
+	serve_pending
+}
 
-# HUP: the pause flag changed (Telegram /on /off) — re-decide routing now.
-on_hup() {
-	if [ "$RELOADING" = 1 ]; then PENDING_ROUTE=1; return 0; fi
-	PENDING_ROUTE=0
-	RE_ROUNDS=3 routing_eval
+# startup_guard: BEFORE the first build (which can take minutes, or keep failing), apply the
+# policy as if no node worked: kill-switch on -> blocking routes from the first second
+# (fail-closed); kill-switch off or paused -> remove a table a crashed run left behind, so
+# the LAN is never in a black hole while we build. Silent (no notifications).
+startup_guard() {
+	apply_routing 0 guard
+}
+
+# initial_build: the first config, retried until it works (e.g. WAN not ready at boot) —
+# never give up, so the service self-heals once connectivity appears. The subscriptions are
+# downloaded only when due (lib.sh fetch_due: not more often than every 10 min, unless the
+# subscription set changed); the retries in between rebuild from what was already fetched/
+# cached, so a crash-looping start never hammers the provider's panel.
+initial_build() {
+	while : ; do
+		if fetch_due; then
+			"$LIBEXEC/fetch.sh" || log "fetch failed (will use cache if present)"
+		fi
+		"$LIBEXEC/build.sh" && return 0
+		log "initial build failed (no nodes/cache yet), retrying in 15s"
+		sleep 15 & wait $!
+	done
 }
 
 # periodic refresh: through the same reload pipeline (and so the same fail-safe)
@@ -425,43 +466,23 @@ node_quality_check() {
 [ "${VPNPOOLD_NO_MAIN:-0}" = 1 ] && return 0 2>/dev/null
 
 # ======================= main =======================
-# Traps first (an untrapped USR1/USR2/HUP would KILL the daemon). Until start-up is done,
-# RELOADING=1 makes the handlers only queue the request.
-RELOADING=1
-trap cleanup TERM INT
-trap 'request_reload reload' USR1
-trap 'request_reload refetch' USR2
-trap on_hup HUP
+# Traps first (an untrapped USR1/USR2/HUP would KILL the daemon); they only queue requests,
+# which are served once start-up is done.
+install_traps
 
 mkdir -p "$SB_DATA"
 log "vpnpoold starting (whole-LAN selective, coexist with podkop)"
+startup_guard  # kill-switch: block now; otherwise: no stale table during the first build
 kill_singbox   # clear any orphaned sing-box left by a previously crashed daemon
-
-# Initial config, retried until it works (e.g. WAN not ready at boot) — never give up, so
-# the service self-heals once connectivity appears. The subscriptions are downloaded only
-# when due (lib.sh fetch_due: not more often than every 10 min, unless the subscription set
-# changed); the retries in between rebuild from what was already fetched/cached, so a
-# crash-looping start never hammers the provider's panel.
-while : ; do
-	if fetch_due; then
-		"$LIBEXEC/fetch.sh" || log "fetch failed (will use cache if present)"
-	fi
-	if "$LIBEXEC/build.sh"; then
-		break
-	fi
-	log "initial build failed (no nodes/cache yet), retrying in 15s"
-	sleep 15 & wait $!
-done
+initial_build
 
 start_singbox
 sleep 3
-# Kill-switch: up at once (fail-closed). Otherwise wait (bounded) for a working node BEFORE
+# Kill-switch: already up (fail-closed). Otherwise wait (bounded) for a working node BEFORE
 # committing the LAN; with none, the LAN stays on DIRECT and the supervise loop routes as
 # soon as a node works.
 RE_ROUNDS=12 routing_eval startup
-
-RELOADING=0
-if [ -n "$PENDING" ]; then _p=$PENDING; PENDING=""; request_reload "$_p"; fi
+serve_pending
 
 REFRESH=$(interval_seconds)
 LAST=$(date +%s)
@@ -475,6 +496,7 @@ ADAPT_EVERY=600   # adaptive-routing scan at most every 10 min (self-guards on t
 # main supervise/refresh loop. sleep in bg + wait so signals are handled promptly.
 while : ; do
 	sleep 15 & wait $!
+	serve_pending   # signals queued work (reload / refetch / routing re-check)
 	cap_log
 
 	if ! singbox_alive; then

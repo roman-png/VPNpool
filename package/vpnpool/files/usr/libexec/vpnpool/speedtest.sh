@@ -26,7 +26,8 @@ fi
 
 # The test selector is shared by speedtest and unlock: one test at a time.
 node_test_lock || { jq -nc --arg t "$TAG" '{ok:false, tag:$t, error:"another node test is running"}' > "$OUT"; exit 0; }
-trap node_test_unlock EXIT INT TERM
+trap node_test_unlock EXIT
+trap 'exit 1' INT TERM   # a killed test must stop, not carry on after releasing the lock
 
 if ! node_test_select "$TAG"; then
 	jq -nc --arg t "$TAG" '{ok:false, tag:$t, error:"node not available in the running config"}' > "$OUT"; exit 0
