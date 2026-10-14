@@ -45,6 +45,12 @@ if (length(check_services)) {
 	if (first)
 		probe_url = (index(first, '://') >= 0) ? first : ('http://' + first + '/generate_204');
 }
+// build.sh passes the URL computed by lib.sh (primary_probe_url — THE single "is it alive"
+// definition shared with nodecheck / watchdog / ping) in VPNPOOL_PROBE_URL; the local
+// computation above is only the fallback for a direct invocation.
+let env_probe = getenv('VPNPOOL_PROBE_URL');
+if (env_probe != null && length(env_probe))
+	probe_url = env_probe;
 let fo_interval = opt('main', 'failover_interval', '60');
 let fo_tol      = int(opt('main', 'failover_tolerance', 50));
 let log_level   = opt('main', 'log_level', 'warn');
@@ -211,6 +217,18 @@ push(outbounds, {
 	interrupt_exist_connections: true
 });
 
+// Per-node test selector: speedtest.sh / unlock.sh point THIS selector (never the shared
+// 'proxy' one) at the node under test and send their requests through the node-test-in
+// inbound below — so a test never moves the LAN's traffic onto the tested node.
+if (length(node_tags))
+	push(outbounds, {
+		type: 'selector',
+		tag: 'vpnpool-test',
+		outbounds: node_tags,
+		default: node_tags[0],
+		interrupt_exist_connections: false
+	});
+
 // the actual node outbounds (anti-DPI is applied as a route rule action below,
 // not as an outbound field — sing-box only exposes tls_fragment via route-options).
 // sing-box >=1.13: WireGuard/AmneziaWG is an ENDPOINT (top-level "endpoints" array),
@@ -258,6 +276,8 @@ else if (antidpi == '1' || antidpi == 'on')
 // the local test/SOCKS inbound always egresses through the proxy (for the
 // "test exit via VPN" diagnostic and as a handy local proxy port)
 push(rules, { inbound: [ 'test-mixed-in' ], outbound: 'proxy' });
+if (length(node_tags))
+	push(rules, { inbound: [ 'node-test-in' ], outbound: 'vpnpool-test' });
 if (length(comm_tags))
 	push(rules, { rule_set: comm_tags, outbound: listed_ob });
 if (length(domains))
@@ -287,6 +307,7 @@ if (length(rule_sets))
 // NOTE: omit "network" so tproxy listens on BOTH tcp and udp. The field is a
 // single enum ("tcp"|"udp"); "tcp,udp" is invalid and fails sing-box check.
 let test_port = int(opt('main', 'test_port', 1605));
+let node_test_port = int(opt('main', 'node_test_port', 1606));
 let inbounds = [
 	{
 		type: 'tproxy',
@@ -301,6 +322,13 @@ let inbounds = [
 		tag: 'test-mixed-in',
 		listen: '127.0.0.1',
 		listen_port: test_port
+	},
+	{
+		// per-node tests (speedtest / unlock): egress via the 'vpnpool-test' selector only
+		type: 'mixed',
+		tag: 'node-test-in',
+		listen: '127.0.0.1',
+		listen_port: node_test_port
 	}
 ];
 
