@@ -142,13 +142,11 @@ ctl fetch-cache-always-rewritten fetch fail 'fetch/unchanged-source-cache-not-re
 ctl fetch-no-throttle fetch fail 'fetch/fetch-due-throttle ' \
 	"$LIBX/lib.sh" '[ $(( now - t )) -ge "$INTERVAL_MIN" ]' 'true'
 # stage 2 (2.1 / 2.11): build
-ctl build-singular-regex-only build fail 'build/poison-port-70000 ;build/not-frozen-new-node-arrives-despite-poison ;build/awg-node-on-stock-engine-deferred ' \
+ctl build-singular-regex-only build fail 'build/poison-json-source-unknown-field ;build/awg-node-on-stock-engine-deferred ' \
 	"$LIBX/build.sh" "grep -oE '(outbound|endpoint)s?\[[0-9]+\]'" "grep -oE '(outbound|endpoint)\[[0-9]+\]'"
-# name hygiene off AND the duplicate-tag fallback off -> reserved / repeated names freeze the build
-ctl build-names-unguarded build fail 'build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ' \
-	"$LIBX/build.sh" '((.tag) as $t | ($r|index($t))==null)' 'true' \
-	"$LIBX/build.sh" 'if .s[$n.tag] then . else' 'if false then . else' \
-	"$LIBX/build.sh" "s/.*duplicate [a-z/]* *tag: *//p" "s/.*duplicateX [a-z/]* *tag: *//p"
+# one owner of the reserved names: a generator tag missing from parser.uc's list is caught
+ctl parser-reserved-misses-generator-tag build fail 'build/generator-tags-reserved-in-parser ' \
+	"$LIBX/parser.uc" "'dns-out': 1, 'vpnpool-test': 1 };" "'dns-out': 1 };"
 ctl build-flash-always-written build fail 'build/unchanged-pool-no-flash-write ' \
 	"$LIBX/build.sh" 'persist_if_changed "$SB_CONF" "$SB_CONF_FLASH"' 'cp "$SB_CONF" "$SB_CONF_FLASH"'
 # stage 2 (2.3 / 2.4 / 2.8 / 2.10): daemon

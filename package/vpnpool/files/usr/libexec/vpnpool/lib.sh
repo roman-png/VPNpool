@@ -35,10 +35,6 @@ mask_url() {   # $1=url -> e.g. https://sub.example.com/***
 	printf '%s' "$1" | sed -e 's#^\([A-Za-z][A-Za-z0-9+.-]*://\)\([^@/?#]*@\)\{0,1\}\([^/?#]*\).*#\1\3/***#'
 }
 
-# Node tags the generator itself uses for its groups/outbounds. A subscription node carrying
-# one of these names would collide with them (duplicate tag -> sing-box check fails forever).
-RESERVED_TAGS="auto proxy direct block vpnpool-test"
-
 # Remove a single-flight lock file if it is older than MAXAGE seconds. Call BEFORE honoring
 # a lock so a run killed by SIGKILL (e.g. OOM on a 16 MB router) — whose EXIT trap never
 # fired — can't block every future run forever. No-op if the lock is fresh or absent.

@@ -181,3 +181,15 @@ expect_jq "vpnpool-test selector lists the nodes" "$_cfg" '.outbounds[] | select
 expect_jq "node-test-in routes to vpnpool-test only" "$_cfg" '[.route.rules[] | select(.inbound==["node-test-in"])] | length==1 and .[0].outbound=="vpnpool-test"'
 expect_jq "proxy selector does not contain the test selector" "$_cfg" '.outbounds[] | select(.tag=="proxy") | (.outbounds|index("vpnpool-test"))==null'
 end
+
+# ---- ONE list of reserved names: parser.uc's RESERVED_TAGS must cover every outbound tag the
+# generator adds itself (build.sh keeps no copy of the rule) ----
+sed -n "s/^let RESERVED_TAGS = {\(.*\)};.*/\1/p" /usr/libexec/vpnpool/parser.uc | tr ',' '\n' \
+	| sed "s/:.*//; s/[' ]//g" | grep -v '^$' | sort -u > "$T_STATE/build/reserved"
+printf '%s' "$_cfg" | jq -r '.outbounds[] | select(.type=="urltest" or .type=="selector" or .type=="direct" or .type=="block") | .tag' \
+	| sort -u > "$T_STATE/build/gen-tags"
+begin "build/generator-tags-reserved-in-parser"
+expect_true "parser list read (positive control: has auto)" grep -qx auto "$T_STATE/build/reserved"
+expect_true "generator tags read (positive control: has proxy)" grep -qx proxy "$T_STATE/build/gen-tags"
+expect_eq "generator tags missing from parser RESERVED_TAGS" "$(grep -vxF -f "$T_STATE/build/reserved" "$T_STATE/build/gen-tags" | tr '\n' ' ')" ''
+end
