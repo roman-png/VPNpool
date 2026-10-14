@@ -12,6 +12,8 @@ on:
     branches: [ main ]
     paths:
       - 'package/**'
+      - 'stand/**'
+      - 'scripts/deploy.sh'
       - '.github/workflows/build.yml'
   pull_request:
   release:
@@ -22,8 +24,55 @@ permissions:
   contents: write
 
 jobs:
+  # Stand tests (stand/tests): the package scripts run on a real OpenWrt rootfs (uci/ubus/
+  # rpcd/ucode/jq + stock sing-box) in an offline container. Packages are built only if the
+  # runner's summary line reports failed=0 and xpass=0 (an xfail that started passing must
+  # have its mark removed in the same change).
+  tests:
+    name: stand tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40   # full run ~7 min; a hang outside the runner's own time bounds must not hold the runner 6 h
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build stand image (OpenWrt 24.10.4 + sing-box 1.12.x)
+        run: docker build -f stand/Dockerfile -t vpnpool-stand .
+
+      - name: Run stand tests
+        run: |
+          set -o pipefail
+          sh stand/tests/run-in-docker.sh 2>&1 | tee stand-tests.log
+          # verdict from the summary line, never from the absence of the word "FAIL"
+          grep -E '^TESTS: passed=[0-9]+ failed=0 xfail=[0-9]+ total=[1-9][0-9]* xpass=0$' stand-tests.log
+
+      - name: Deploy archive check (busybox tar keeps / and existing dirs intact)
+        run: |
+          set -o pipefail
+          sh stand/tests/deploy-tar-test.sh 2>&1 | tee deploy-tar.log
+          grep -E '^DEPLOY-TAR: passed=[1-9][0-9]* failed=0$' deploy-tar.log
+
+      - name: Build LuCI stand image + UI smoke (login, vpnpool page, ubus status)
+        run: |
+          docker build -f stand/Dockerfile.ui -t vpnpool-stand-ui .
+          set -o pipefail
+          sh stand/tests/ui-smoke.sh 2>&1 | tee ui-smoke.log
+          grep -E '^UI-SMOKE: passed=[1-9][0-9]* failed=0$' ui-smoke.log
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stand-tests-log
+          path: |
+            stand-tests.log
+            ui-smoke.log
+            deploy-tar.log
+          if-no-files-found: ignore
+
   build:
     name: ${{ matrix.arch }}
+    needs: tests
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
