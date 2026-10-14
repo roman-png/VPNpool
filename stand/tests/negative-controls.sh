@@ -103,6 +103,9 @@ ctl parser-json-unguarded parser fail 'parser/json-source-guards ' \
 	"$LIBX/parser.uc" 'let bad = check_json_node(o);' 'let bad = null;'
 ctl build-json-unguarded build fail 'build/json-source-long-short-id-no-panic ' \
 	"$LIBX/parser.uc" 'let bad = check_json_node(o);' 'let bad = null;'
+# fp=none treated as an unknown fingerprint -> chrome uTLS where the link asked for none
+ctl parser-fp-none-ignored parser fail 'parser/vless-fp-none-no-utls ' \
+	"$LIBX/parser.uc" "if (fp == 'none') fp = '';" "if (fp == 'none-x') fp = '';"
 # hysteria2: the single port is not part of the hop set
 ctl parser-hy2-port-not-hopped parser fail 'parser/hy2-port-hopping ' \
 	"$LIBX/parser.uc" "if (port != null) unshift(ranges, port + ':' + port);" 'if (port != null) ;'

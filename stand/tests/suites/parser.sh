@@ -131,6 +131,8 @@ P vless-quic-no-utls - "vless://$U@q.example.com:443?type=quic&security=tls&fp=c
 	'.[0].transport.type=="quic"' '.[0].tls.utls==null'
 P vless-quic-reality-refused - "vless://$U@q.example.com:443?type=quic&security=reality&pbk=$PBK#QR" 'length==0'
 P vless-unknown-fp-chrome - "vless://$U@203.0.113.46:443?security=tls&fp=chrome_120#FP" '.[0].tls.utls.fingerprint=="chrome"'
+P vless-fp-none-no-utls - "vless://$U@203.0.113.49:443?security=tls&fp=none#FN" '.[0].tls.enabled==true and .[0].tls.utls==null'
+P vless-reality-fp-none-chrome - "vless://$U@203.0.113.49:443?security=reality&pbk=$PBK&fp=none#FNR" '.[0].tls.utls.fingerprint=="chrome"'
 P vless-fp-lowercased - "vless://$U@203.0.113.47:443?security=tls&fp=Firefox#FF" '.[0].tls.utls.fingerprint=="firefox"'
 P vless-ws-ed-params - "vless://$U@ws.example.com:443?type=ws&security=tls&path=%2Fws2&ed=1024&eh=X-ED#ED2" \
 	'.[0].transport.path=="/ws2"' '.[0].transport.max_early_data==1024' '.[0].transport.early_data_header_name=="X-ED"'
