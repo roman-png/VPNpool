@@ -262,3 +262,29 @@ begin "daemon/route-down-removes-everything"
 expect_true "table gone" sh -c '! nft list table inet vpnpool'
 expect_eq "rule gone" "$(ip rule show | gcount 'fwmark 0x400000/0x400000')" 0
 end
+
+# ---- per-node tests never touch the LAN selector (2.8) ----
+reset_state
+uci set vpnpool.main.speedtest_min_mem_kb=1; uci commit vpnpool
+head -c 5000 /dev/zero > "$DS/blob"
+mock_on
+mock_rule 'PUT http://127.0.0.1:9091/proxies/vpnpool-test' 204
+mock_rule 'P GET https://speed.cloudflare.com/*' 200 "$DS/blob"
+mock_rule 'P GET https://www.youtube.com/' 200 "$DS/blob"
+sh /usr/libexec/vpnpool/speedtest.sh Node1 >/dev/null 2>&1
+sh /usr/libexec/vpnpool/unlock.sh Node1 >/dev/null 2>&1
+begin "daemon/node-tests-use-test-selector-only"
+expect_eq "test selector switched (speedtest + unlock)" "$(mock_calls 'PUT http://127.0.0.1:9091/proxies/vpnpool-test')" 2
+expect_eq "LAN selector never touched" "$(mock_calls 'proxies/proxy')" 0
+expect_true "speedtest measured through the test path" jq -e '.ok==true and .bytes>0' /tmp/vpnpool/.speedtest-result.json
+expect_true "unlock result" jq -e '.ok==true and .results.youtube==true and .results.google==false' /tmp/vpnpool/.unlock-result.json
+expect_true "lock released" [ ! -d /tmp/vpnpool/.nodetest.lock ]
+end
+rm -f /tmp/curlmock/calls.log; mock_on
+mock_rule 'PUT http://127.0.0.1:9091/proxies/vpnpool-test' 404
+mock_rule 'P GET https://speed.cloudflare.com/*' 200 "$DS/blob"
+sh /usr/libexec/vpnpool/speedtest.sh Gone >/dev/null 2>&1
+begin "daemon/node-test-refused-selector-no-download"
+expect_true "honest failure" jq -e '.ok==false' /tmp/vpnpool/.speedtest-result.json
+expect_eq "no download through a selector that did not switch" "$(mock_calls 'speed.cloudflare.com')" 0
+end

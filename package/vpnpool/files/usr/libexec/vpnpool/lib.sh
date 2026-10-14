@@ -333,6 +333,36 @@ wan_alive() {
 	return 1
 }
 
+# ---- per-node tests (speedtest.sh, unlock.sh) ----
+# They point the dedicated 'vpnpool-test' selector (generator.uc) at the node under test
+# and send their requests through the node-test-in inbound (uci node_test_port, 1606) —
+# never through the LAN's 'proxy' selector. One test at a time (shared selector): a mkdir
+# lock, freed at once if its owner died.
+NODE_TEST_LOCK="$SB_DATA/.nodetest.lock"
+node_test_lock() {   # waits up to ~60 s
+	local i=0 p now mt
+	mkdir -p "$SB_DATA"
+	while ! mkdir "$NODE_TEST_LOCK" 2>/dev/null; do
+		p=$(cat "$NODE_TEST_LOCK/pid" 2>/dev/null)
+		if [ -n "$p" ]; then
+			kill -0 "$p" 2>/dev/null || { rm -rf "$NODE_TEST_LOCK"; continue; }
+		else
+			now=$(date +%s); mt=$(date -r "$NODE_TEST_LOCK" +%s 2>/dev/null || echo "$now")
+			[ $(( now - mt )) -ge 120 ] && { rm -rf "$NODE_TEST_LOCK"; continue; }
+		fi
+		i=$((i + 1)); [ "$i" -ge 60 ] && return 1
+		sleep 1
+	done
+	echo $$ > "$NODE_TEST_LOCK/pid"
+}
+node_test_unlock() { rm -rf "$NODE_TEST_LOCK"; }
+node_test_select() {   # $1=tag -> 0 only if sing-box switched the test selector (HTTP 204)
+	local c
+	c=$(curl -s -m5 -o /dev/null -w '%{http_code}' -X PUT "http://$CLASH_API/proxies/vpnpool-test" \
+		--data "$(jq -nc --arg n "$1" '{name:$n}')" 2>/dev/null)
+	[ "$c" = 204 ]
+}
+
 # ---- routing fail-safe / kill-switch policy (pure: decides, never acts) ----
 # route_policy <killswitch 0|1> <tunnel healthy 0|1> <paused by the user 0|1> -> up|down
 #   paused (Telegram /off)  -> down: the user explicitly switched routing off

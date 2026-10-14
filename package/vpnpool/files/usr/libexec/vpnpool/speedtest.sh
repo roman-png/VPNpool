@@ -1,17 +1,15 @@
 #!/bin/sh
 # vpnpool: on-demand REAL throughput test for one node (ping != speed).
-# Temporarily points the 'proxy' selector at the node, downloads a sized file
-# through the local mixed proxy (which egresses via 'proxy'), measures the
-# download speed, then restores the previous selection. Writes a JSON result.
-#
-# NOTE: while the test runs (~seconds) the router's proxied traffic flows through
-# the node under test — that's why this is on-demand only, never in the background.
+# Points the dedicated 'vpnpool-test' selector (generator.uc) at the node and downloads a
+# sized file through the node-test-in inbound, which egresses ONLY via that selector. The
+# shared 'proxy' selector — the LAN's traffic — is never touched, so a test can't move the
+# LAN onto the node under test or leave it there if the test is killed. Writes a JSON result.
 . /usr/libexec/vpnpool/lib.sh
 
 TAG="$1"
 OUT=/tmp/vpnpool/.speedtest-result.json
 mkdir -p /tmp/vpnpool
-TP=$(uci -q get vpnpool.main.test_port); [ -n "$TP" ] || TP=1605
+NTP=$(uci -q get vpnpool.main.node_test_port); [ -n "$NTP" ] || NTP=1606
 URL=$(uci -q get vpnpool.main.speedtest_url)
 [ -n "$URL" ] || URL="https://speed.cloudflare.com/__down?bytes=10000000"
 
@@ -26,17 +24,16 @@ if [ -n "$AVAIL" ] && [ "$AVAIL" -lt "$MINKB" ]; then
 	echo "{\"ok\":false,\"lowmem\":true,\"avail_kb\":${AVAIL:-0},\"need_kb\":$MINKB}" > "$OUT"; exit 0
 fi
 
-# remember the current live selection so we can put it back
-PREV=$(curl -s -m3 "http://$CLASH_API/proxies/proxy" 2>/dev/null | jq -r '.now // ""' 2>/dev/null)
+# The test selector is shared by speedtest and unlock: one test at a time.
+node_test_lock || { jq -nc --arg t "$TAG" '{ok:false, tag:$t, error:"another node test is running"}' > "$OUT"; exit 0; }
+trap node_test_unlock EXIT INT TERM
 
-curl -s -m5 -X PUT "http://$CLASH_API/proxies/proxy" --data "{\"name\":\"$TAG\"}" >/dev/null 2>&1
-sleep 1
+if ! node_test_select "$TAG"; then
+	jq -nc --arg t "$TAG" '{ok:false, tag:$t, error:"node not available in the running config"}' > "$OUT"; exit 0
+fi
 
-RES=$(curl -s -m 25 --proxy "socks5h://127.0.0.1:$TP" -o /dev/null \
+RES=$(curl -s -m 25 --proxy "socks5h://127.0.0.1:$NTP" -o /dev/null \
 	-w '%{speed_download} %{size_download}' "$URL" 2>/dev/null)
-
-# restore the previous selection
-[ -n "$PREV" ] && curl -s -m5 -X PUT "http://$CLASH_API/proxies/proxy" --data "{\"name\":\"$PREV\"}" >/dev/null 2>&1
 
 BPS=$(echo "$RES" | awk '{print $1+0}')
 SZ=$(echo "$RES"  | awk '{print $2+0}')
