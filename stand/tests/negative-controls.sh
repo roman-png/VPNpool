@@ -112,21 +112,82 @@ ctl parser-hy2-port-not-hopped parser fail 'parser/hy2-port-hopping ' \
 # stage 5: unknown transports accepted -> dead/poison nodes
 ctl parser-unknown-transport-kept parser fail 'parser/vless-xhttp-refused ;parser/vless-splithttp-refused ;parser/vless-kcp-refused ;parser/trojan-xhttp-refused ;parser/vmess-xhttp-refused ;parser/report-reasons ' \
 	"$LIBX/parser.uc" "	return 'unsupported_transport';" "	return { type: t };"
-ctl build-config-not-installed build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/json-source-long-short-id-no-panic ' \
+# every case that inspects the installed config goes red
+ctl build-config-not-installed build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/json-source-long-short-id-no-panic ;build/awg-node-on-stock-engine-deferred ;build/unchanged-pool-no-flash-write ;build/changed-pool-flash-updated ;build/after-reboot-failed-build-keeps-flash-config ;build/node-test-selector-separate-from-proxy ;build/poison-json-source-unknown-field ' \
 	"$LIBX/build.sh" 'mv "$SB_CONF.new" "$SB_CONF"' 'rm -f "$SB_CONF.new"'
 ctl rpcd-add_node-no-signal rpcd fail 'rpcd/add_node/ok ' \
 	"$RPCD" 'uci add_list vpnpool.main.manual_node="$l"; uci commit vpnpool; signal_reload' \
 	'uci add_list vpnpool.main.manual_node="$l"; uci commit vpnpool'
 ctl sched-old-block-kept sched fail 'sched/disabled-removes-block-keeps-user-jobs ' \
-	"$LIBX/sched.sh" '/vpnpool-sched BEGIN/,/vpnpool-sched END/d' '/vpnpool-schedX BEGIN/,/vpnpool-schedX END/d'
-ctl sched-fix sched xpass 'sched/enabled-writes-jobs ;sched/user-job-added-between-runs-survives ' \
-	"$LIBX/sched.sh" 'echo "$((10#$m)) $((10#$h)) * * * $2"' 'echo "${m#0} ${h#0} * * * $2"'
+	"$LIBX/sched.sh" 'inblk && $0 == e { inblk = 0; n = 0; next }' 'inblk && $0 == e { inblk = 0; for (i = 1; i <= n; i++) print buf[i]; print; n = 0; next }'
+# stage 2 (2.6): the old busybox-invalid 10# arithmetic back -> no job is ever written
+ctl sched-octal-regression sched fail 'sched/enabled-writes-jobs ;sched/lone-begin-keeps-following-user-jobs ;sched/leading-zeros ' \
+	"$LIBX/sched.sh" 'echo "$m $h"' 'echo "$((10#$m)) $((10#$h))"'
 ctl adaptive-ignores-toggle adaptive fail 'adaptive/disabled-does-nothing ' \
 	"$LIBX/adaptive.sh" '= "1" ] || exit 0' '= "1" ] || :'
-ctl adaptive-fix adaptive xpass 'adaptive/blocked-direct-routed-via-proxy ' \
-	"$LIBX/adaptive.sh" '(test("^[0-9.]+$") | not)' '((explode | map(select((. < 48 or . > 57) and . != 46)) | length) > 0)'
+# stage 2 (2.7): jq regex back -> the host filter dies on OpenWrt's jq, nothing is tested
+ctl adaptive-regex-regression adaptive fail 'adaptive/blocked-direct-routed-via-proxy ;adaptive/public-suffix-base-domain ;adaptive/verdict-cache-ttl ' \
+	"$LIBX/adaptive.sh" '((explode | map(select((. < 48 or . > 57) and . != 46)) | length) > 0)' '(test("^[0-9.]+$") | not)'
+ctl adaptive-ttl-ignored adaptive fail 'adaptive/verdict-cache-ttl ' \
+	"$LIBX/adaptive.sh" 'if type=="object" and ((.t // 0) + $ttl) > $now then "y"' 'if type=="object" then "y"'
 ctl fetch-userinfo-lost fetch fail 'fetch/all-sources-ok ' \
 	"$LIBX/fetch.sh" "grep -o 'expire=[0-9]*'" "grep -o 'expireX=[0-9]*'"
+# stage 2 (2.5 / 2.11): fetch
+ctl fetch-no-per-source-cache fetch fail 'fetch/primary-fails-extra-ok-keeps-primary-nodes ;fetch/all-fail-serves-cache ;fetch/removed-source-dropped-from-cache ;fetch/fetch-due-throttle ' \
+	"$LIBX/fetch.sh" 'if [ -s "$cached" ]; then' 'if false; then'
+ctl fetch-url-in-clear fetch fail 'fetch/token-masked-in-log ' \
+	"$LIBX/fetch.sh" 'log "fetch: $(mask_url "$url") -> $best nodes' 'log "fetch: $url -> $best nodes'
+ctl fetch-cache-always-rewritten fetch fail 'fetch/unchanged-source-cache-not-rewritten ;fetch/changed-source-cache-rewritten ' \
+	"$LIBX/fetch.sh" 'mkdir -p "$CACHEDIR"; persist_if_changed "$out" "$cached"' 'mkdir -p "$CACHEDIR"; cp "$out" "$cached"'
+ctl fetch-no-throttle fetch fail 'fetch/fetch-due-throttle ' \
+	"$LIBX/lib.sh" '[ $(( now - t )) -ge "$INTERVAL_MIN" ]' 'true'
+# stage 2 (2.1 / 2.11): build
+ctl build-singular-regex-only build fail 'build/poison-port-70000 ;build/not-frozen-new-node-arrives-despite-poison ;build/awg-node-on-stock-engine-deferred ' \
+	"$LIBX/build.sh" "grep -oE '(outbound|endpoint)s?\[[0-9]+\]'" "grep -oE '(outbound|endpoint)\[[0-9]+\]'"
+# name hygiene off AND the duplicate-tag fallback off -> reserved / repeated names freeze the build
+ctl build-names-unguarded build fail 'build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ' \
+	"$LIBX/build.sh" '((.tag) as $t | ($r|index($t))==null)' 'true' \
+	"$LIBX/build.sh" 'if .s[$n.tag] then . else' 'if false then . else' \
+	"$LIBX/build.sh" "s/.*duplicate [a-z/]* *tag: *//p" "s/.*duplicateX [a-z/]* *tag: *//p"
+ctl build-flash-always-written build fail 'build/unchanged-pool-no-flash-write ' \
+	"$LIBX/build.sh" 'persist_if_changed "$SB_CONF" "$SB_CONF_FLASH"' 'cp "$SB_CONF" "$SB_CONF_FLASH"'
+# stage 2 (2.3 / 2.4 / 2.8 / 2.10): daemon
+ctl daemon-killswitch-ignored daemon fail 'daemon/route-policy-table ;daemon/reload-killswitch-dead-tunnel-keeps-routes ;daemon/startup-killswitch-routes-at-once ;daemon/pause-flag-down-then-up ' \
+	"$LIBX/lib.sh" '[ "$1" = 1 ] && { echo up; return 0; }' '[ "$1" = 1 ] && { echo down; return 0; }'
+ctl daemon-reload-drops-routes-first daemon fail 'daemon/reload-killswitch-dead-tunnel-keeps-routes ;daemon/reload-healthy-keeps-routes ;daemon/reload-dead-tunnel-failsafe-down ;daemon/periodic-refresh-through-failsafe ' \
+	"$LIBX/vpnpoold" '		start_singbox   # routes stay as they are while it restarts' '		"$LIBEXEC/route.sh" down; start_singbox'
+ctl daemon-startup-keeps-stale-table daemon fail 'daemon/startup-dead-tunnel-clears-stale-routes ' \
+	"$LIBX/vpnpoold" 'if [ "$ROUTED" != 0 ] || [ -n "${2:-}" ]; then' 'if [ "$ROUTED" != 0 ] || [ "${2:-}" = reapply ]; then'
+ctl daemon-watchdog-no-failsafe daemon fail 'daemon/watchdog-dead-tunnel-takes-routes-down ' \
+	"$LIBX/vpnpoold" '			apply_routing 0' '			:'
+ctl daemon-reload-nested daemon fail 'daemon/reload-queued-not-nested ' \
+	"$LIBX/vpnpoold" 'if [ "$RELOADING" = 1 ]; then' 'if false; then'
+ctl daemon-dead-set-erases-pin daemon fail 'daemon/preferred-in-dead-set-hands-to-auto-keeps-pin ;daemon/preferred-recovered-switches-back ' \
+	"$LIBX/vpnpoold" 'PREF_DEAD_LOGGED=$pref' 'PREF_DEAD_LOGGED=$pref; uci -q delete vpnpool.main.preferred_node; uci commit vpnpool'
+ctl nodecheck-judges-without-wan daemon fail 'daemon/nodecheck-wan-down-judges-nothing ' \
+	"$LIBX/nodecheck.sh" 'if ! wan_alive; then' 'if false; then'
+ctl route-delete-then-add daemon fail 'daemon/route-up-atomic-idempotent ' \
+	"$LIBX/route.sh" '	if ! nft -f - <<NFT' '	nft delete table inet vpnpool 2>/dev/null; if ! nft -f - <<NFT'
+ctl alive-criterion-000-alive daemon fail 'daemon/alive-criterion ;daemon/probe-services-any-vs-all ' \
+	"$LIBX/lib.sh" 'svc_code_alive() { case "$1" in [1-5][0-9][0-9])' 'svc_code_alive() { case "$1" in [0-9][0-9][0-9])'
+ctl node-test-uses-lan-selector daemon fail 'daemon/node-tests-use-test-selector-only ' \
+	"$LIBX/lib.sh" 'proxies/vpnpool-test" \' 'proxies/proxy" \'
+# stage 2 (2.9): Telegram bot
+ctl tgbot-off-runs-route-sh tgbot fail 'tgbot/off-sets-pause-and-signals-daemon ' \
+	"$LIBX/tgbot.sh" '	: > "$PAUSE_FLAG"' '	"$LIBEXEC/route.sh" down >/dev/null 2>&1'
+ctl tgbot-kills-foreign-pollers tgbot fail 'tgbot/sweep-only-own-token ' \
+	"$LIBX/tgbot.sh" 'pgrep -f "bot$tok/getUpdates"' 'pgrep -f "getUpdates"'
+ctl tgbot-no-direct-fallback tgbot fail 'tgbot/poll-direct-when-proxy-refused ' \
+	"$LIBX/lib.sh" 'if [ "$rc" -ne 7 ]; then' 'if true; then'
+ctl initd-no-bot-signature tgbot fail 'tgbot/initd-bot-instance ' \
+	package/vpnpool/files/etc/init.d/vpnpool 'procd_set_param env VPNPOOL_TG_SIG="$sig"' ':'
+# stage 2: rpcd methods touched here
+ctl rpcd-refresh-wrong-signal rpcd fail 'rpcd/refresh/ok ' \
+	"$RPCD" 'd=$(signal_word USR2)' 'd=$(signal_word USR1)'
+ctl rpcd-interval-unchecked rpcd fail 'rpcd/set_option/interval-below-10m-rejected ;rpcd/set_option/interval-malformed-rejected ' \
+	"$RPCD" '[ "$s" -ge "$INTERVAL_MIN" ] || {' 'true || {'
+ctl rpcd-telegram-no-reload rpcd fail 'rpcd/set_option/telegram-token-change-reloads-bot ;rpcd/set_option/telegram_chat-change-reloads-bot ;rpcd/set_option/telegram_via_proxy-change-reloads-bot ' \
+	"$RPCD" '[ "$old" = "$v" ] || /etc/init.d/vpnpool reload' '[ "$old" = "$v" ] || :'
 ctl status-delay-lost status fail 'status/300-nodes-daemon-up-valid ' \
 	"$LIBX/status.sh" 'map(select(. != null and . > 0))' 'map(select(. != null and . > 100000))'
 ctl uitext-new-technical-string uitext fail 'uitext/real-app-no-new-violations ;uitext/baseline-gates-new-violations ;uitext/stale-baseline-line-fails ' \
@@ -134,7 +195,7 @@ ctl uitext-new-technical-string uitext fail 'uitext/real-app-no-new-violations ;
 ctl ui-smoke-status-broken ui-smoke fail 'ubus vpnpool.status via /ubus' \
 	"$RPCD" '		/usr/libexec/vpnpool/status.sh' '		echo not-json'
 # runner: a suite that silently stops early must fail the run (min-cases.txt), not shrink total
-ctl suite-stops-early sched fail 'runner/sched-ran-at-least-4-cases' \
+ctl suite-stops-early sched fail 'runner/sched-ran-at-least-6-cases' \
 	stand/tests/suites/sched.sh '# ---- garbage times are rejected' 'return 0   # ---- garbage times are rejected'
 # deploy.sh: a "./" member is refused before anything is sent
 ctl deploy-dot-member-refused deploy-tar fail 'deploy.sh refused' \
