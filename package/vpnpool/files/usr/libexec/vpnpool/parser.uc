@@ -32,7 +32,8 @@ let used_tags = {};
 // Tags the generator itself defines (urltest "auto", selector "proxy", "direct"; "block" and
 // "dns-out" are the conventional names of the other built-ins). A node may never take one:
 // two outbounds with one tag make `sing-box check` reject the whole config.
-let RESERVED_TAGS = { auto: 1, proxy: 1, direct: 1, block: 1, 'dns-out': 1 };
+// "vpnpool-test" is the selector of the test route (speedtest/unlock, ROADMAP 2.8).
+let RESERVED_TAGS = { auto: 1, proxy: 1, direct: 1, block: 1, 'dns-out': 1, 'vpnpool-test': 1 };
 let KEEP_LINK = false;
 let WITH_ID = false;
 let REPORT = false;
@@ -89,6 +90,12 @@ function b64_any(s) {
 	if (r == 1) return null;
 	if (r) s += substr('==', 0, 4 - r);
 	return b64dec(s);
+}
+
+// a real UUID is case-insensitive -> lower-case it (one node, one id); any other string is
+// kept verbatim (vless/vmess map it to a UUIDv5, where case matters)
+function norm_uuid(s) {
+	return match(s, /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/) ? lc(s) : s;
 }
 
 function vport(s) {
@@ -164,6 +171,7 @@ function build_tls(p, mode) {
 		tls.insecure = true;
 	if (mode != 'quic') {
 		let fp = lc(qv(p, 'fp', 'fingerprint') ?? '');
+		if (fp == 'none') fp = '';          // "no uTLS" (reality still gets chrome below)
 		if (length(fp))
 			tls.utls = { enabled: true, fingerprint: UTLS_FP[fp] ? fp : 'chrome' };
 		else if (mode == 'reality')
@@ -266,7 +274,7 @@ function parse_vless(line) {
 	if (!u) return 'parse_error';
 	let e = check_endpoint(u);
 	if (e) return e;
-	let uuid = url_decode(u.user ?? '');
+	let uuid = norm_uuid(url_decode(u.user ?? ''));
 	if (!length(uuid) || match(uuid, /[\s:]/)) return 'bad_uuid';
 	let p = u.query;
 	// newer xray "encryption" (ML-KEM etc.) has no sing-box counterpart
@@ -344,7 +352,7 @@ function parse_vmess(line) {
 	if (bad_host(server)) return 'bad_server';
 	let port = vport((v.port != null) ? trim('' + v.port) : null);
 	if (port == null) return 'bad_port';
-	let uuid = (v.id != null) ? trim('' + v.id) : '';
+	let uuid = (v.id != null) ? norm_uuid(trim('' + v.id)) : '';
 	if (!length(uuid)) return 'bad_uuid';
 	// the vmess server accepts whatever cipher the client picks: an unknown one -> auto
 	let scy = lc(v.scy ?? '');
@@ -489,6 +497,9 @@ function parse_hy2(line, skip) {
 	};
 	if (port != null) ob.server_port = port;
 	if (length(ranges)) {
+		// sing-box ignores server_port once server_ports is set: keep the single port in the
+		// hop set too, as hysteria2 clients do
+		if (port != null) unshift(ranges, port + ':' + port);
 		ob.server_ports = ranges;
 		let hi = qv(p, 'hop_interval', 'hopInterval', 'hop-interval');
 		if (length(hi) && match(hi, /^[0-9]+$/)) ob.hop_interval = hi + 's';
@@ -517,7 +528,7 @@ function parse_tuic(line) {
 	if (e) return e;
 	let cred = url_decode(u.user ?? '');
 	let c = index(cred, ':');
-	let uuid = (c >= 0) ? substr(cred, 0, c) : cred;
+	let uuid = norm_uuid((c >= 0) ? substr(cred, 0, c) : cred);
 	// TUIC v5 needs a real UUID (sing-box refuses anything else at start-up)
 	if (!match(uuid, /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/))
 		return 'bad_uuid';
@@ -605,17 +616,40 @@ function parse_awg_conf(raw) {
 	return ep;
 }
 
-// ---- node identity (ROADMAP 2.2) ----
-// id = short stable hash of the fields that make two outbounds the SAME server account,
-// independent of the display name (tag) and of input order:
-//   type | server (lower-case, no IPv6 brackets) | server_port (hysteria2 without one:
-//   its port ranges) | credential (uuid lower-case / password; shadowsocks: method +
-//   password) | TLS server_name | reality short_id | transport type + path/service_name +
-//   host.
-// Client-side knobs that do not change WHICH server/account it is (uTLS fingerprint, alpn,
-// insecure, flow, up/down, obfs, plugin) are deliberately NOT part of it.
-// Hash: two independent 32-bit FNV-1a passes -> 12 hex chars (same length as the planned
-// AWG id sha256(PrivateKey)[:12]). AWG/WireGuard nodes get no id here (stage 4).
+// ---- canonical form, node identity (ROADMAP 2.2) ----
+// canon(v): JSON text with object keys sorted (recursively), so the same config written with
+// another key order (a sing-box JSON source) is the same string.
+function canon(v) {
+	if (type(v) == 'object') {
+		let ks = sort(keys(v), (a, b) => (a < b) ? -1 : ((a > b) ? 1 : 0));
+		let parts = [];
+		for (let k in ks)
+			push(parts, sprintf('%J', k) + ':' + canon(v[k]));
+		return '{' + join(',', parts) + '}';
+	}
+	if (type(v) == 'array') {
+		let parts = [];
+		for (let x in v) push(parts, canon(x));
+		return '[' + join(',', parts) + ']';
+	}
+	return sprintf('%J', v);
+}
+
+// the node's sing-box config without the display/bookkeeping fields
+function bare(ob) {
+	let c = {};
+	for (let k in ob)
+		if (k != 'tag' && k != 'id' && k != '_link') c[k] = ob[k];
+	return c;
+}
+
+// id = first 12 hex of two independent 32-bit FNV-1a passes over canon(outbound WITHOUT tag).
+// So every field that ends up in the sing-box outbound (server, port, credential, TLS incl.
+// fingerprint, reality, transport, obfs password, ss plugin, ...) is part of the identity; the
+// display name, the input order and the JSON key order are not. The parser normalises what is
+// case-insensitive (UUIDs, fingerprint, ss method) before this, so the same node written
+// differently gets one id. Two nodes with the same config and different names share an id
+// (merging them is ROADMAP 2.2). AWG/WireGuard nodes get no id here (stage 4).
 function fnv1a(s, h) {
 	for (let i = 0; i < length(s); i++)
 		h = ((h ^ ord(s, i)) * 16777619) & 0xffffffff;
@@ -623,16 +657,7 @@ function fnv1a(s, h) {
 }
 
 function node_id(ob) {
-	let t = ob.transport ?? {};
-	let thost = (type(t.host) == 'array') ? join(',', t.host) : (t.host ?? (t.headers?.Host ?? ''));
-	let cred = (ob.type == 'shadowsocks') ? (ob.method + ':' + ob.password)
-		: (ob.uuid != null ? lc(ob.uuid) : (ob.password ?? ''));
-	let port = (ob.server_port != null) ? ('' + ob.server_port) : join(',', ob.server_ports ?? []);
-	let key = join('\x1f', [
-		ob.type, lc(ob.server ?? ''), port, cred,
-		ob.tls?.server_name ?? '', ob.tls?.reality?.short_id ?? '',
-		t.type ?? '', t.path ?? (t.service_name ?? ''), thost
-	]);
+	let key = canon(bare(ob));
 	let a = fnv1a(key, 0x811c9dc5), b = fnv1a(key, 0x9747b28c);
 	return substr(sprintf('%08x%08x', a, b), 0, 12);
 }
@@ -648,27 +673,25 @@ function unique_tag(base) {
 	return cand;
 }
 
-// dedup key: the node's whole config minus its tag — the same server/account/settings
-// under a different name is still one node
-function config_key(ob) {
-	let c = {};
-	for (let k in ob)
-		if (k != 'tag') c[k] = ob[k];
-	return sprintf('%J', c);
+// dedup key: display name + the node's whole config (key order irrelevant). The same config
+// under ANOTHER name stays a separate node (a user's own copy of a subscription node must not
+// vanish); merging those is ROADMAP 2.2 together with the id-keyed stores.
+function config_key(base, ob) {
+	return base + '\x1f' + canon(bare(ob));
 }
 
 // -> report fields { status, tag?, type?, id?, reason?, dup_of?, tag_changed? }
 function add_node(ob, dedupkey, link) {
 	if (!ob || type(ob) != 'object') return { status: 'skip', reason: 'parse_error' };
 	let is_awg = (ob.type == 'awg' || ob.type == 'wireguard');
-	if (dedupkey == null) dedupkey = config_key(ob);
-	if (seen[dedupkey] != null)
-		return { status: 'skip', reason: 'duplicate', type: ob.type, dup_of: seen[dedupkey] };
 	let base = length(ob.tag) ? trim('' + ob.tag) : ((ob.server ?? 'node') + ':' + (ob.server_port ?? 0));
 	if (!length(base)) base = 'node';
+	if (dedupkey == null) dedupkey = config_key(base, ob);
+	if (seen[dedupkey] != null)
+		return { status: 'skip', reason: 'duplicate', type: ob.type, dup_of: seen[dedupkey] };
 	ob.tag = unique_tag(base);
 	seen[dedupkey] = ob.tag;
-	let id = is_awg ? null : node_id(ob);
+	let id = (is_awg || !(WITH_ID || REPORT)) ? null : node_id(ob);
 	if (WITH_ID && id) ob.id = id;
 	if (KEEP_LINK && type(link) == 'string')
 		ob._link = link;
@@ -697,6 +720,82 @@ let PROXY_TYPES = {
 	hysteria: 1, hysteria2: 1, tuic: 1, wireguard: 1, awg: 1, ssh: 1
 };
 
+let JSON_TRANSPORTS = { ws: 1, grpc: 1, http: 1, httpupgrade: 1, quic: 1 };
+
+// The same guards the link parsers apply, for an outbound taken verbatim from a sing-box JSON
+// source: ONE bad outbound there would make `sing-box check` reject the whole config (or, with
+// a long reality short_id, PANIC — no "outbounds[N]" for build.sh to prune). Normalises what the
+// link parsers normalise (fingerprint, vision flow variants, vmess cipher, tuic knobs).
+// -> reason string, or null if the outbound may go into the config
+function check_json_node(o) {
+	let t = o.type;
+	if (t == 'wireguard' || t == 'awg') return null;          // AWG/WG: stage 4
+	if (o.server != null && (type(o.server) != 'string' || bad_host(o.server))) return 'bad_server';
+	if (o.server_port != null && (type(o.server_port) != 'int' || vport(o.server_port) == null))
+		return 'bad_port';
+	if (o.server_ports != null) {
+		if (type(o.server_ports) != 'array') return 'bad_port';
+		for (let r in o.server_ports) {
+			let m = (type(r) == 'string') ? match(r, /^([0-9]+):([0-9]+)$/) : null;
+			if (!m || vport(m[1]) == null || vport(m[2]) == null || int(m[1]) > int(m[2])) return 'bad_port';
+		}
+	}
+	if ((t == 'vless' || t == 'vmess') && (type(o.uuid) != 'string' || !length(o.uuid))) return 'bad_uuid';
+	if (t == 'tuic' && (type(o.uuid) != 'string' ||
+	    !match(o.uuid, /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)))
+		return 'bad_uuid';
+	let tls = o.tls;
+	if (tls != null && type(tls) != 'object') return 'parse_error';
+	if (tls?.utls != null) {
+		if (type(tls.utls) != 'object') return 'parse_error';
+		let fp = lc('' + (tls.utls.fingerprint ?? ''));
+		if (length(fp)) tls.utls.fingerprint = UTLS_FP[fp] ? fp : 'chrome';
+	}
+	if (tls?.reality != null && tls.reality.enabled !== false) {
+		let rl = tls.reality;
+		if (type(rl) != 'object' || type(rl.public_key) != 'string' ||
+		    !match(rl.public_key, /^[A-Za-z0-9_\/+-]{43,44}={0,1}$/))
+			return 'bad_reality_key';
+		if (rl.short_id != null && (type(rl.short_id) != 'string' ||
+		    (length(rl.short_id) && !match(rl.short_id, /^([0-9a-fA-F][0-9a-fA-F]){1,8}$/))))
+			return 'bad_short_id';
+		if (type(tls.utls) != 'object' || tls.utls.enabled !== true)   // reality REQUIRES uTLS
+			tls.utls = { enabled: true, fingerprint: 'chrome' };
+	}
+	let tls_on = (type(tls) == 'object' && tls.enabled === true);
+	if ((t == 'hysteria2' || t == 'tuic' || t == 'hysteria') && !tls_on) return 'tls_required';
+	if (o.transport != null) {
+		if (type(o.transport) != 'object' || !JSON_TRANSPORTS[o.transport.type]) return 'unsupported_transport';
+		if (o.transport.type == 'quic' && !tls_on) return 'tls_required';
+	}
+	if (t == 'vless' && length(o.flow)) {
+		if (substr(o.flow, 0, 16) == 'xtls-rprx-vision') o.flow = 'xtls-rprx-vision';
+		else return 'unsupported_flow';
+	}
+	if (t == 'vmess' && o.security != null && !VMESS_SECURITY[lc('' + o.security)]) o.security = 'auto';
+	if (t == 'shadowsocks') {
+		let method = lc('' + (o.method ?? ''));
+		if (!SS_METHODS[method]) return 'unsupported_method';
+		o.method = method;
+		if (substr(method, 0, 5) == '2022-') {
+			let need = (index(method, 'aes-128') >= 0) ? 16 : 32;
+			for (let part in split('' + (o.password ?? ''), ':')) {
+				let k = b64_any(part);
+				if (!k || length(k) != need) return 'bad_key';
+			}
+		}
+		if (length(o.plugin) && o.plugin != 'obfs-local' && o.plugin != 'v2ray-plugin') return 'unsupported_plugin';
+	}
+	if (t == 'hysteria2' && o.obfs != null &&
+	    (type(o.obfs) != 'object' || (length(o.obfs.type) && o.obfs.type != 'salamander')))
+		return 'unsupported_obfs';
+	if (t == 'tuic') {
+		if (o.congestion_control != null && !TUIC_CC[o.congestion_control]) delete o.congestion_control;
+		if (o.udp_relay_mode != null && o.udp_relay_mode != 'native' && o.udp_relay_mode != 'quic') delete o.udp_relay_mode;
+	}
+	return null;
+}
+
 function process_json(data) {
 	let obs = null;
 	if (type(data) == 'array')
@@ -711,6 +810,11 @@ function process_json(data) {
 		i++;
 		if (type(o) != 'object' || !PROXY_TYPES[o.type]) {   // skip selector/urltest/direct/block/dns
 			rec({ item: i, status: 'skip', reason: 'not_a_node' });
+			continue;
+		}
+		let bad = check_json_node(o);
+		if (bad) {
+			rec({ item: i, status: 'skip', reason: bad, type: o.type });
 			continue;
 		}
 		let r = add_node(o, null, null);
