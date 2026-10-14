@@ -15,6 +15,17 @@ signal_refetch() {
 	signal_daemon USR2
 }
 
+# Unified reply (ROADMAP §6.1): {ok, code, message?, daemon}. code is machine-readable
+# (the UI maps it to a human text); daemon = signalled | not_running | n/a.
+reply() {   # $1=true|false $2=code [$3=daemon word] [$4=message]
+	jq -nc --argjson ok "$1" --arg code "$2" --arg d "${3:-n/a}" --arg m "${4:-}" \
+		'{ok:$ok, code:$code, daemon:$d} + (if $m != "" then {message:$m} else {} end)'
+}
+# Signal the daemon and say how it went, as the "daemon" word of reply().
+signal_word() {   # $1=USR1|USR2|HUP
+	if signal_daemon "$1"; then echo signalled; else echo not_running; fi
+}
+
 # Drop a tag from the dashboard's node list (nodes.json) RIGHT NOW. signal_reload only
 # rebuilds asynchronously (USR1), and a full rebuild of a big pool takes several seconds —
 # long enough that the 3 s dashboard poll catches the not-yet-rebuilt list and the node looks
@@ -79,7 +90,7 @@ _delete_one_tag() {   # $1=tag
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "add_source": { "url": "x" }, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x" }, "delete_nodes": { "tags": [] }, "restore_node": { "tag": "x" }, "refilter_node": { "tag": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
+{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x" }, "delete_nodes": { "tags": [] }, "restore_node": { "tag": "x" }, "refilter_node": { "tag": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {} }
 L
 	;;
 call)
@@ -139,6 +150,7 @@ call)
 		en=$(echo "$input" | jq -r '.enabled')
 		if [ "$en" = "true" ] || [ "$en" = "1" ]; then
 			uci set vpnpool.main.enabled='1'; uci commit vpnpool
+			rm -f "$PAUSE_FLAG"   # switching on from the UI also ends a Telegram /off pause
 			/etc/init.d/vpnpool enable; /etc/init.d/vpnpool restart
 		else
 			uci set vpnpool.main.enabled='0'; uci commit vpnpool
@@ -147,7 +159,22 @@ call)
 		echo '{"ok":true}'
 		;;
 	select)
-		tag=$(echo "$input" | jq -r '.tag')
+		tag=$(echo "$input" | jq -r '.tag // ""')
+		[ -n "$tag" ] || { reply false no_tag; exit 0; }
+		# Switch the live selector first and check sing-box's answer (204 = switched). A tag
+		# sing-box doesn't know is refused, not stored. If sing-box is not running (no
+		# answer) the pick is stored for the next start when the node exists in the list.
+		code=$(curl -s -m5 -o /dev/null -w '%{http_code}' -X PUT "http://$CLASH/proxies/proxy" \
+			--data "$(jq -nc --arg n "$tag" '{name:$n}')" 2>/dev/null)
+		case "$code" in
+			204) res=applied ;;
+			''|000)
+				if [ "$tag" != auto ] && ! jq -e --arg t "$tag" 'map(.tag) | index($t) != null' /tmp/vpnpool/nodes.json >/dev/null 2>&1; then
+					reply false not_found; exit 0
+				fi
+				res=saved_not_applied ;;
+			*) reply false clash_error n/a "http $code"; exit 0 ;;
+		esac
 		# persist the pick so it survives reload / subscription updates ('auto' clears it)
 		if [ "$tag" = "auto" ]; then
 			uci set vpnpool.main.selected_node=''
@@ -155,34 +182,28 @@ call)
 			uci set vpnpool.main.selected_node="$tag"
 		fi
 		uci commit vpnpool
-		code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "http://$CLASH/proxies/proxy" \
-			--data "$(jq -n --arg n "$tag" '{name:$n}')")
-		echo "{\"ok\":true,\"http\":\"$code\"}"
+		reply true "$res"
 		;;
 	refresh)
-		if [ "$(uci -q get vpnpool.main.enabled)" = "1" ]; then
-			/etc/init.d/vpnpool restart
-		fi
-		echo '{"ok":true}'
+		# Re-fetch every subscription + rebuild + hot-reload: USR2 to the running daemon
+		# (it keeps routing per the fail-safe while it reloads). Never a full service
+		# restart — that tore routing down and bounced the Telegram bot for nothing.
+		d=$(signal_word USR2)
+		if [ "$d" = signalled ]; then reply true started "$d"; else reply false daemon_not_running "$d"; fi
 		;;
 	ping)
-		# Dashboard ping reflects the PRIMARY check service, so the shown delay means
-		# "this node actually reaches the wanted service" — not just some CDN.
-		HU=$(check_probe_urls 2>/dev/null | head -n1); [ -n "$HU" ] || HU=http://cp.cloudflare.com/generate_204
-		ENCU=$(jq -rn --arg s "$HU" '$s|@uri')
-		jq -r '.[].tag' /tmp/vpnpool/nodes.json 2>/dev/null | while read -r tag; do
-			[ -n "$tag" ] || continue
-			enc=$(jq -rn --arg s "$tag" '$s|@uri')
-			curl -s -m 7 "http://$CLASH/proxies/$enc/delay?url=$ENCU&timeout=5000" >/dev/null 2>&1 &
-		done
-		wait
-		# Fold the dead-node e2e filter into the ping: kick off a SEQUENTIAL quality
-		# sweep in the background (self-guarded against concurrent runs). It updates
-		# .dead_tags.json and signals the daemon (USR1) to rebuild ONLY if the dead set
-		# changed — so no rebuild/bounce unless a node actually went dead/recovered.
-		[ "$(uci -q get vpnpool.main.dead_filter)" != "0" ] && \
-			setsid sh -c '/usr/libexec/vpnpool/nodecheck.sh' >/dev/null 2>&1 &
-		echo '{"ok":true}'
+		# Ping every node (clash delay against the PRIMARY check service, so the shown delay
+		# means "this node reaches the wanted service") in BATCHES of prefilter_concurrency,
+		# in the background — the UI follows /tmp/vpnpool/.ping-progress.json
+		# {running,done,total}. ping.sh then starts the dead-node filter sweep.
+		mkdir -p /tmp/vpnpool
+		clear_stale_lock /tmp/vpnpool/.ping-running 600
+		if [ -f /tmp/vpnpool/.ping-running ]; then reply true already_running; exit 0; fi
+		[ -s /tmp/vpnpool/nodes.json ] || { reply false no_nodes; exit 0; }
+		: > /tmp/vpnpool/.ping-running
+		setsid sh -c '/usr/libexec/vpnpool/ping.sh; rm -f /tmp/vpnpool/.ping-running' >/dev/null 2>&1 &
+		echo $! > /tmp/vpnpool/.ping-running   # worker PID -> clear_stale_lock frees it if it dies
+		reply true started
 		;;
 	set_url)
 		u=$(echo "$input" | jq -r '.url // ""')
@@ -216,14 +237,6 @@ call)
 		signal_refetch
 		promoted=$(uci -q get vpnpool.main.active_saved 2>/dev/null | tr ' ' '\n' | grep -c '://')
 		jq -n --argjson p "${promoted:-0}" '{ok:true, promoted:$p}'
-		;;
-	add_source)
-		u=$(echo "$input" | jq -r '.url // ""')
-		# dedup: a double-click / repeat must not add the same source twice (URLs have no spaces)
-		if [ -n "$u" ] && ! uci -q get vpnpool.main.source | tr ' ' '\n' | grep -Fxq "$u"; then
-			uci add_list vpnpool.main.source="$u"; uci commit vpnpool
-		fi
-		echo '{"ok":true}'
 		;;
 	probe_source)
 		# Fetch + parse + ICMP-ping one URL. On a slow (mips) router this can exceed
@@ -357,7 +370,7 @@ call)
 		k=$(echo "$input" | jq -r '.name // ""')
 		v=$(echo "$input" | jq -r '.value // ""')
 		case "$k" in
-		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|check_services|subscription_ua|telegram_enabled|telegram_token|telegram_chat|telegram_control|telegram_via_proxy|ipv6|killswitch|dns_protect|preferred_node|auto_snapshot|auto_snapshot_max|antidpi|adaptive_routing|adaptive_max_per_run|dead_filter|dead_filter_strikes|dead_filter_tries)
+		failover_interval|failover_tolerance|subscription_interval|auto_switch|mode|health_url|check_services|telegram_enabled|telegram_token|telegram_chat|telegram_control|telegram_via_proxy|ipv6|killswitch|dns_protect|preferred_node|auto_snapshot|auto_snapshot_max|antidpi|adaptive_routing|adaptive_max_per_run|dead_filter|dead_filter_strikes|dead_filter_tries)
 			# Server-side clamp for numeric options: never store a non-numeric/out-of-range
 			# value (the UI also surfaces this, but the backend must not trust the client).
 			case "$k" in
@@ -369,22 +382,31 @@ call)
 			antidpi)              case "$v" in off|on|aggressive) ;; 0) v=off ;; 1) v=on ;; *) v=off ;; esac ;;   # 3-way + legacy 0/1
 			auto_snapshot_max)    case "$v" in (''|*[!0-9]*) v=20 ;; esac; [ "$v" -lt 1 ] && v=1; [ "$v" -gt 1000 ] && v=1000 ;;
 			adaptive_max_per_run) case "$v" in (''|*[!0-9]*) v=8 ;; esac;  [ "$v" -lt 1 ] && v=1; [ "$v" -gt 50 ] && v=50 ;;
+			subscription_interval)
+				# REJECTED (not clamped) when malformed or below 10 min: re-downloading a
+				# subscription more often gets the router rate-limited by the panel.
+				s=$(parse_interval "$v") || { reply false bad_value n/a "expected e.g. 30m, 6h"; exit 0; }
+				[ "$s" -ge "$INTERVAL_MIN" ] || { reply false too_small n/a "minimum 10m"; exit 0; } ;;
 			esac
+			old=$(uci -q get vpnpool.main."$k")
 			uci set vpnpool.main."$k"="$v"; uci commit vpnpool
 			# check_services changes the urltest probe URL -> needs a rebuild (falls into
 			# the default signal_reload below). dead_filter* are read live by nodecheck.sh.
+			d=n/a
 			case "$k" in
-				telegram_control)
-					# starts/stops the tgbot procd instance. `reload` re-runs start_service
-					# and procd diffs instances, so the tunnel daemon is NOT bounced.
-					/etc/init.d/vpnpool reload >/dev/null 2>&1 ;;
-				subscription_interval|telegram_*|preferred_node|auto_snapshot|auto_snapshot_max|adaptive_max_per_run|dead_filter|dead_filter_strikes|dead_filter_tries) : ;;   # read live by the daemon, no reload
-				*) signal_reload ;;
+				telegram_control|telegram_token|telegram_chat|telegram_via_proxy)
+					# The bot is its own procd instance: `reload` re-runs start_service, which
+					# starts/stops it (telegram_control) and RESTARTS it when token/chat/
+					# via_proxy changed (init.d passes their signature as an instance param, so
+					# procd sees the change). The tunnel daemon is NOT bounced.
+					[ "$old" = "$v" ] || /etc/init.d/vpnpool reload >/dev/null 2>&1 ;;
+				subscription_interval|telegram_enabled|preferred_node|auto_snapshot|auto_snapshot_max|adaptive_max_per_run|dead_filter|dead_filter_strikes|dead_filter_tries) : ;;   # read live by the daemon, no reload
+				*) d=$(signal_word USR1) ;;
 			esac
-			echo '{"ok":true}'
+			reply true saved "$d"
 			;;
 		*)
-			echo '{"error":"unknown option"}'
+			reply false unknown_option
 			;;
 		esac
 		;;
@@ -435,8 +457,8 @@ call)
 				;;
 		esac
 		# AmneziaWG / WireGuard .conf: multi-line INI, no single-line link — store the whole
-		# config as its own file under /etc/vpnpool/awg/ (build.sh globs them). vpn:// links
-		# are decoded to a .conf in the browser before reaching here (ucode has no zlib).
+		# config as its own file under /etc/vpnpool/awg/ (build.sh globs them). A vpn:// link
+		# was already decoded to such a .conf above (awgdecode.uc, on the router).
 		# Validate it parses to an 'awg' endpoint before saving so junk isn't kept.
 		if printf '%s' "$txt" | grep -qF '[Interface]'; then
 			if ucode /usr/libexec/vpnpool/parser.uc "$RAW" 2>/dev/null | jq -e '.[0].type=="awg"' >/dev/null 2>&1; then
@@ -660,13 +682,20 @@ call)
 		on=$(echo "$input" | jq -r '.on // ""')
 		off=$(echo "$input" | jq -r '.off // ""')
 		ref=$(echo "$input" | jq -r '.refresh // ""')
+		# reject a non-time BEFORE storing it (HH:MM, 00:00..23:59; empty = no job)
+		for t in "$on" "$off" "$ref"; do
+			[ -z "$t" ] && continue
+			case "$t" in [0-9]:[0-9][0-9]|[01][0-9]:[0-5][0-9]|2[0-3]:[0-5][0-9]) ;;
+				*) reply false bad_time n/a "$t"; exit 0 ;; esac
+			mm=${t#*:}; case "$mm" in [0-5][0-9]) ;; *) reply false bad_time n/a "$t"; exit 0 ;; esac
+		done
 		if [ "$en" = "true" ] || [ "$en" = "1" ]; then uci set vpnpool.main.sched_enabled='1'; else uci set vpnpool.main.sched_enabled='0'; fi
 		uci set vpnpool.main.sched_on="$on"
 		uci set vpnpool.main.sched_off="$off"
 		uci set vpnpool.main.sched_refresh="$ref"
 		uci commit vpnpool
-		/usr/libexec/vpnpool/sched.sh apply >/dev/null 2>&1
-		echo '{"ok":true}'
+		/usr/libexec/vpnpool/sched.sh >/dev/null 2>&1; src=$?
+		if [ "$src" -eq 0 ]; then reply true applied; else reply false sched_failed n/a "sched.sh exit $src"; fi
 		;;
 	unlock)
 		# per-node service-unblock test — background (flips egress briefly), poll unlock_result.

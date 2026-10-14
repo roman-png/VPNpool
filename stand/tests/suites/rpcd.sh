@@ -37,6 +37,8 @@ fx_saved() { jq -nc --arg a "$L1" '{Node1:$a}' > /etc/vpnpool/saved.map.json; }
 # Invariants ("ubus rc 0", "reply is an object") never sit inside an xfail case: when the
 # semantic case is xfail they get their own plain case "<kind>-reply", so a regression there
 # is a FAIL, not hidden as XFAIL.
+# methods already answering in the section 6.1 shape {ok, code, daemon} (stage 2 touched them)
+DAEMON_HONEST="refresh set_option"
 base_checks() { expect_eq "ubus rc" "$RC" 0; expect_jq "reply is an object" "$R" 'type=="object"'; }
 reply_case() {   # <case-id> — invariants as a separate non-xfail case
 	begin "$1"; base_checks; end
@@ -74,7 +76,7 @@ M() {
 	if [ "$_sig" != - ]; then
 		begin "rpcd/$_m/no-daemon-reported"
 		expect_jq "reply reports the daemon is not running" "$R" '.daemon=="not_running"'
-		end 3.1
+		case " $DAEMON_HONEST " in *" $_m "*) end ;; *) end 3.1 ;; esac
 	fi
 }
 
@@ -121,18 +123,23 @@ M set_enabled '{"enabled":false}' - - c_set_enabled '{"enabled":"maybe"}' 3.3
 s_select() { fx_nodes; mock_on; mock_rule 'PUT http://127.0.0.1:9091/proxies/proxy' 204; }
 b_select() { mock_on; mock_rule 'PUT http://127.0.0.1:9091/proxies/proxy' 404; }
 c_select() { expect_eq "selected_node" "$(uci -q get vpnpool.main.selected_node)" Node1; }
-M select '{"tag":"Node1"}' - - c_select '{"tag":"Nope"}' 2.8
+M select '{"tag":"Node1"}' - - c_select '{"tag":"Nope"}' -
 
 s_refresh() { : > "$INITD_LOG"; uci set vpnpool.main.enabled=1; uci commit vpnpool; }
 c_refresh() { expect_eq "no full service restart" "$(gcount restart "$INITD_LOG")" 0; }
-M refresh '{}' USR2 2.5 c_refresh - -
+M refresh '{}' USR2 - c_refresh - -
 
 s_ping() {
 	fx_nodes; uci set vpnpool.main.dead_filter=0; uci commit vpnpool
 	mock_on; echo '{"delay":123}' > "$FXR/delay.json"
 	mock_rule 'GET http://127.0.0.1:9091/proxies/*/delay*' 200 "$FXR/delay.json"
 }
-c_ping() { expect_eq "one delay probe per node" "$(mock_calls '/delay?')" 2; }
+c_ping() {
+	expect_jq "started" "$R" '.ok==true and .code=="started"'
+	_i=0; while [ $_i -lt 20 ]; do jq -e '.running==false' /tmp/vpnpool/.ping-progress.json >/dev/null 2>&1 && break; sleep 1; _i=$((_i+1)); done
+	expect_jq "progress file: finished, 2 of 2, both answered" "$(cat /tmp/vpnpool/.ping-progress.json 2>/dev/null)" '.running==false and .done==2 and .total==2 and .alive==2'
+	expect_eq "one delay probe per node" "$(mock_calls '/delay?')" 2
+}
 M ping '{}' - - c_ping - -
 
 c_set_url() { expect_eq "subscription_url" "$(uci -q get vpnpool.main.subscription_url)" 'https://sub.example.com/s'; }
@@ -142,8 +149,6 @@ s_del_subscription() { uci set vpnpool.main.subscription_url='https://sub.exampl
 c_del_subscription() { expect_eq "subscription_url cleared" "$(uci -q get vpnpool.main.subscription_url)" ''; expect_jq "promoted" "$R" '.promoted==0'; }
 M del_subscription '{}' USR2 - c_del_subscription - -
 
-c_add_source() { expect_eq "source listed" "$(ulist vpnpool.main.source)" 'https://src.example.com/l'; }
-M add_source '{"url":"https://src.example.com/l"}' - - c_add_source '{"url":""}' 3.1
 
 s_del_source() { uci add_list vpnpool.main.source='https://src.example.com/l'; uci commit vpnpool; }
 c_del_source() { expect_eq "source removed" "$(ulist vpnpool.main.source)" ''; }
@@ -218,7 +223,7 @@ c_set_schedule() {
 	expect_eq "sched_on" "$(uci -q get vpnpool.main.sched_on)" '07:00'
 	expect_eq "crontab start job" "$(gcount '^0 7 \* \* \* /etc/init.d/vpnpool start$' /etc/crontabs/root)" 1
 }
-M set_schedule '{"enabled":true,"on":"07:00","off":"23:30","refresh":""}' - 2.6 c_set_schedule '{"enabled":true,"on":"25:99","off":"","refresh":""}' 2.6
+M set_schedule '{"enabled":true,"on":"07:00","off":"23:30","refresh":""}' - - c_set_schedule '{"enabled":true,"on":"25:99","off":"","refresh":""}' -
 
 s_unlock() { fx_nodes; }
 c_started() { expect_jq "started in background" "$R" '.started==true'; }
@@ -242,7 +247,7 @@ c_set_communities() { expect_eq "communities" "$(ulist vpnpool.routing.community
 M set_communities '{"communities":["telegram"]}' USR1 - c_set_communities '{"communities":["no_such_list"]}' 3.3
 
 c_set_option() { expect_eq "failover_interval" "$(uci -q get vpnpool.main.failover_interval)" 120; }
-M set_option '{"name":"failover_interval","value":"120"}' USR1 - c_set_option '{"name":"no_such_option","value":"1"}' 3.1
+M set_option '{"name":"failover_interval","value":"120"}' USR1 - c_set_option '{"name":"no_such_option","value":"1"}' -
 
 c_set_clients() {
 	expect_eq "client_mode" "$(uci -q get vpnpool.main.client_mode)" include
@@ -309,6 +314,56 @@ end
 begin "rpcd/import/garbage-rejected"
 expect_jq "ok:false" "$R" '.ok==false'
 end 3.6
+
+# ---------------- stage 2: set_option subscription_interval / telegram reload / refresh ----------------
+reset_state; daemon_start
+rcall set_option '{"name":"subscription_interval","value":"30m"}'
+begin "rpcd/set_option/interval-30m-accepted"   # positive control for the two cases below
+expect_jq "ok" "$R" '.ok==true and .code=="saved"'
+expect_eq "stored" "$(uci -q get vpnpool.main.subscription_interval)" 30m
+end
+rcall set_option '{"name":"subscription_interval","value":"5m"}'
+begin "rpcd/set_option/interval-below-10m-rejected"
+expect_jq "ok:false too_small" "$R" '.ok==false and .code=="too_small"'
+expect_eq "uci keeps 30m" "$(uci -q get vpnpool.main.subscription_interval)" 30m
+end
+rcall set_option '{"name":"subscription_interval","value":"6x"}'
+begin "rpcd/set_option/interval-malformed-rejected"
+expect_jq "ok:false bad_value" "$R" '.ok==false and .code=="bad_value"'
+expect_eq "uci keeps 30m" "$(uci -q get vpnpool.main.subscription_interval)" 30m
+end
+rcall set_option '{"name":"subscription_ua","value":"x"}'
+begin "rpcd/set_option/subscription_ua-removed"
+expect_jq "unknown option" "$R" '.ok==false and .code=="unknown_option"'
+end
+
+reset_state; daemon_start; : > "$INITD_LOG"
+rcall set_option '{"name":"telegram_token","value":"111:NEW"}'
+begin "rpcd/set_option/telegram-token-change-reloads-bot"
+expect_jq "ok" "$R" '.ok==true'
+expect_eq "init.d reload asked once" "$(gcount '^vpnpool reload' "$INITD_LOG")" 1
+expect_eq "no restart" "$(gcount restart "$INITD_LOG")" 0
+end
+: > "$INITD_LOG"
+rcall set_option '{"name":"telegram_token","value":"111:NEW"}'
+begin "rpcd/set_option/telegram-token-same-value-no-reload"
+expect_jq "ok" "$R" '.ok==true'
+expect_eq "no reload for an unchanged value" "$(gcount '^vpnpool reload' "$INITD_LOG")" 0
+end
+for k in telegram_chat telegram_via_proxy; do
+	: > "$INITD_LOG"
+	rcall set_option "$(jq -nc --arg k "$k" '{name:$k,value:"0"}')"
+	begin "rpcd/set_option/$k-change-reloads-bot"
+	expect_eq "init.d reload asked" "$(gcount '^vpnpool reload' "$INITD_LOG")" 1
+	end
+done
+
+reset_state
+rcall set_schedule '{"enabled":true,"on":"7:61","off":"","refresh":""}'
+begin "rpcd/set_schedule/bad-minute-not-stored"
+expect_jq "ok:false bad_time" "$R" '.ok==false and .code=="bad_time"'
+expect_eq "uci sched_on untouched" "$(uci -q get vpnpool.main.sched_on)" ''
+end
 
 # ---------------- coverage: ACL <-> rpcd list <-> this suite ----------------
 begin "rpcd/coverage-acl-methods"
