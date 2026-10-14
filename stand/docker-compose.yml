@@ -1,20 +1,41 @@
-# vpnpool debug stand. Core service runs everything on loopback (offline => independent of
-# the host WireGuard). Shipped package files are mounted READ-ONLY at their real paths so
-# the stand exercises the genuine scripts and can't "fix" them in place.
+# vpnpool debug stand (full how-to: stand/USAGE.txt). Run from the stand/ directory.
+#
+#   Build (context = repo root):
+#     docker build -f stand/Dockerfile    -t vpnpool-stand .        # OpenWrt 24.10.4 + stock sing-box 1.12.x
+#     docker build -f stand/Dockerfile.ui -t vpnpool-stand-ui .     # + LuCI/uhttpd
+#     OpenWrt 25.12 (apk):  --build-arg OPENWRT_VER=25.12.4 -t vpnpool-stand:25.12
+#     Other sing-box:       --build-arg SINGBOX_VER=1.12.25 | --build-arg SINGBOX_URL=<tar.gz>
+#   Automated tests (no network, throw-away container):
+#     stand/tests/run-in-docker.sh [parser build rpcd sched adaptive fetch status uitext]
+#     stand/tests/ui-smoke.sh        # LuCI login + admin/services/vpnpool + ubus status over HTTP
+#   Interactive:
+#     docker compose up -d stand && docker exec -it vpnpool-stand sh
+#     docker compose --profile ui up -d stand-ui   ->  http://localhost:8080/  (root / vpnpool)
+#       port taken? STAND_UI_PORT=18080 docker compose --profile ui up -d stand-ui
+#     docker compose down            # stop + remove when done (shared machine)
+#
+# Core service runs everything on loopback (offline => independent of the host WireGuard).
+# Shipped package files are mounted READ-ONLY at their real paths so the stand exercises the
+# genuine scripts and can't "fix" them in place. Engine override at run time: mount a binary
+# and set SINGBOX_BIN (e.g. our AWG build), see entrypoint.sh.
 services:
   stand:
     build:
       context: ..
       dockerfile: stand/Dockerfile
       args:
+        OPENWRT_VER: "24.10.4"
         SINGBOX_VER: "1.12.25"
     image: vpnpool-stand
     container_name: vpnpool-stand
     working_dir: /work
+    environment:
+      SINGBOX_BIN: ""          # e.g. /opt/engine/sing-box with a volume ./engine:/opt/engine:ro
     volumes:
       - ../package/vpnpool/files/usr/libexec/vpnpool:/usr/libexec/vpnpool:ro
       - ../package/luci-app-vpnpool/files/usr/libexec/rpcd:/stage/rpcd:ro
       - ./:/work:ro
+      - ../:/repo:ro
       - vpnpool-etc:/etc/vpnpool
       - vpnpool-tmp:/tmp/vpnpool
     tty: true
@@ -30,10 +51,15 @@ services:
     privileged: true
     cap_add: ["NET_ADMIN", "NET_RAW"]
 
-  # Web-UI variant: real LuCI dashboard over HTTP for user-interaction tests. Build first:
-  #   docker build -f stand/Dockerfile.ui -t vpnpool-stand-ui ..
+  # Web-UI variant: real LuCI dashboard over HTTP. Build vpnpool-stand first, then:
+  #   docker build -f stand/Dockerfile.ui -t vpnpool-stand-ui .
   #   docker compose --profile ui up -d stand-ui   ->  http://localhost:8080/ (root/vpnpool)
   stand-ui:
+    build:
+      context: ..
+      dockerfile: stand/Dockerfile.ui
+      args:
+        BASE_IMAGE: "vpnpool-stand:latest"
     image: vpnpool-stand-ui
     container_name: vpnpool-stand-ui
     profiles: ["ui"]
@@ -49,7 +75,7 @@ services:
       - vpnpool-etc:/etc/vpnpool
       - vpnpool-tmp:/tmp/vpnpool
     ports:
-      - "8080:80"
+      - "${STAND_UI_PORT:-8080}:80"   # STAND_UI_PORT=18080 docker compose ... if 8080 is taken
     tty: true
     stdin_open: true
     command: ["sleep", "infinity"]

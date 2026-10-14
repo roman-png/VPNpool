@@ -1,0 +1,62 @@
+vpnpool stand — how to run it
+=============================
+(README.md files are git-ignored in this repo, so the instructions live here.)
+
+What it is
+  An OpenWrt rootfs container (default 24.10.4, opkg) with the real uci / ubus / rpcd /
+  ucode / jq userland, stock upstream sing-box 1.12.x overlaid on /usr/bin/sing-box, and the
+  package scripts mounted READ-ONLY at their real paths. Variant: 25.12.4 (apk).
+
+Build (from the repo root; one heavy docker task at a time on the shared machine)
+  docker build -f stand/Dockerfile    -t vpnpool-stand .
+  docker build -f stand/Dockerfile.ui -t vpnpool-stand-ui .
+  OpenWrt 25.12.4:
+    docker build -f stand/Dockerfile --build-arg OPENWRT_VER=25.12.4 -t vpnpool-stand:25.12 .
+    docker build -f stand/Dockerfile.ui --build-arg BASE_IMAGE=vpnpool-stand:25.12 -t vpnpool-stand-ui:25.12 .
+  Another sing-box build:
+    --build-arg SINGBOX_VER=1.12.25            (upstream release tag)
+    --build-arg SINGBOX_URL=https://.../x.tar.gz (any linux-amd64 tarball with a sing-box binary)
+  Or swap the engine at run time without rebuilding (e.g. our AWG build):
+    docker run ... -v /path/to/dir:/opt/engine:ro -e SINGBOX_BIN=/opt/engine/sing-box vpnpool-stand
+
+Automated tests (offline: --network none; every HTTP call hits the curl test double)
+  stand/tests/run-in-docker.sh                      all suites
+  stand/tests/run-in-docker.sh parser build         selected suites
+  T_VERBOSE=1 stand/tests/run-in-docker.sh rpcd     show PASS lines and XFAIL reasons
+  IMAGE=vpnpool-stand:25.12 stand/tests/run-in-docker.sh
+  REPO_DIR=/path/to/a/copy stand/tests/run-in-docker.sh   run against a COPY (negative controls)
+  Result line (the only thing to read):  TESTS: passed=N failed=M xfail=K total=T xpass=X
+  Exit code is non-zero if failed>0 or xpass>0.
+  XFAIL <case> [2.1] = a KNOWN defect, the id is the item of ROADMAP-2.0. When the fix lands the
+  case turns XPASS and fails the run: remove the mark in the same change.
+
+  Suites: parser (links, AWG .conf, vpn:// vectors) | build (poison subscriptions) |
+          rpcd (every ACL method: ok / bad input / no daemon) | sched | adaptive | fetch |
+          status (300 nodes: time + processes per poll) | uitext (UI text guard)
+
+  Each suite must run at least the number of cases in stand/tests/min-cases.txt (raise it when
+  you add cases). Invariants (rc 0, reply is an object, time bound) are separate plain cases,
+  never inside an xfail case.
+  stand/tests/negative-controls.sh   break/fix a COPY; exactly the expected cases must flip
+  stand/tests/deploy-tar-test.sh     scripts/deploy.sh archive vs real busybox tar (keeps / intact)
+
+UI text guard
+  stand/tests/ui-text-guard.sh                     check against stand/tests/ui-text-baseline.txt
+                                                   (fails on NEW lines AND on stale baseline lines)
+  stand/tests/ui-text-guard.sh --update-baseline   after FIXING strings (refuses to grow the baseline)
+  Stop-list: stand/tests/ui-text-stoplist.txt
+
+LuCI stand
+  stand/tests/ui-smoke.sh       starts vpnpool-stand-ui on 127.0.0.1:18080, logs in, opens
+                                admin/services/vpnpool, calls vpnpool.status through /ubus, stops.
+  Interactive (from stand/):
+    docker compose --profile ui up -d stand-ui     -> http://localhost:8080/  login root / vpnpool
+    (8080 busy: STAND_UI_PORT=18080 docker compose --profile ui up -d stand-ui)
+    docker compose --profile ui down
+
+Interactive shell (from stand/)
+  docker compose up -d stand
+  docker exec -it vpnpool-stand sh
+    sh /work/bin/stand-build-config.sh             real build.sh on the uci fixture
+    /work/bin/stand-rpcd-call.sh status            rpcd method, direct + via ubus
+  docker compose down                              always stop + remove your containers
