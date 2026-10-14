@@ -104,6 +104,19 @@ expect_eq "call sequence" "$(calls)" "fetch;build;start;route down;"
 expect_eq "ROUTED" "$(routed)" 0
 end
 
+# start-up with no working node: a table left by a crashed run must be cleared (fail-safe)
+sc_startup() { ROUTED=0; RE_ROUNDS=1 routing_eval startup; }
+ds_reset 0 down; in_daemon sc_startup
+begin "daemon/startup-dead-tunnel-clears-stale-routes"
+expect_eq "call sequence" "$(calls)" "route down;"
+expect_eq "ROUTED" "$(routed)" 0
+end
+ds_reset 1 down; in_daemon sc_startup
+begin "daemon/startup-killswitch-routes-at-once"
+expect_eq "call sequence" "$(calls)" "route up;"
+expect_eq "ROUTED" "$(routed)" 1
+end
+
 # ---- watchdog ----
 sc_wd() {   # three supervise ticks with an old start time
 	ROUTED=1; SB_STARTED=0

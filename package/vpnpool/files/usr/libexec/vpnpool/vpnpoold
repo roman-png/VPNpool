@@ -235,7 +235,7 @@ apply_routing() {
 			     tg_notify "🔒 vpnpool: no working node — kill-switch blocks the LAN until a node works"; fi
 		fi
 	else
-		if [ "$ROUTED" != 0 ] || [ "${2:-}" = reapply ]; then
+		if [ "$ROUTED" != 0 ] || [ -n "${2:-}" ]; then   # reapply|startup: also clears a table left by a crash
 			"$LIBEXEC/route.sh" down
 			ROUTED=0
 		fi
