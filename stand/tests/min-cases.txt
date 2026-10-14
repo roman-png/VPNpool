@@ -8,5 +8,5 @@ adaptive 4
 fetch 9
 status 6
 uitext 6
-daemon 23
+daemon 25
 tgbot 10
