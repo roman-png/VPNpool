@@ -60,6 +60,14 @@ STRIKES=$(uci -q get vpnpool.main.dead_filter_strikes); case "$STRIKES" in (''|*
 TRIES=$(uci -q get vpnpool.main.dead_filter_tries); case "$TRIES" in (''|*[!0-9]*) TRIES=3 ;; esac
 [ "${TRIES:-0}" -ge 1 ] || TRIES=3
 
+# A node can only be judged while the router's own uplink works: with WAN down EVERY node
+# fails every probe, and counting that would strike the whole pool. No verdicts this
+# cycle — the strikes stay as they are.
+if ! wan_alive; then
+	log "nodecheck: WAN is down — skipping this sweep (no node is judged)"
+	exit 0
+fi
+
 TAB=$(printf '\t')
 [ -f "$STRK" ] || : > "$STRK"
 tmpd=/tmp/vpnpool/.nc; rm -rf "$tmpd"; mkdir -p "$tmpd"
@@ -108,6 +116,7 @@ jq -r '.[].tag' "$N" 2>/dev/null | while IFS= read -r t; do
 		a=0
 		while [ "$a" -lt "$TRIES" ]; do
 			r=$(curl -s -m 8 "http://$CL/proxies/$enc/delay?url=$eu&timeout=5000" 2>/dev/null)
+			# THE node criterion (lib.sh clash_delay_alive): a delay = the service answered
 			case "$r" in *'"delay"'*)
 				pass=$((pass + 1))
 				# extract the numeric delay from {"delay":N...} (no jq per probe)
@@ -126,19 +135,21 @@ jq -r '.[].tag' "$N" 2>/dev/null | while IFS= read -r t; do
 	printf '%s%s%s\n' "$t" "$TAB" "$cur" >> "$newstrk"
 	[ "$cur" -ge "$STRIKES" ] && printf '%s\n' "$t" >> "$deadlist"
 done
-mv "$newstrk" "$STRK"
+# atomic replacements (tmp + mv): status.sh / generator.uc / rpcd may read these any time
+mv -f "$newstrk" "$STRK"
 
 new=$(jq -R . "$deadlist" 2>/dev/null | jq -cs 'map(select(length>0))' 2>/dev/null); [ -n "$new" ] || new='[]'
 old=$(cat "$DEAD" 2>/dev/null); [ -n "$old" ] || old='[]'
-printf '%s\n' "$new" > "$DEAD"
+printf '%s\n' "$new" | write_atomic "$DEAD"
 
 # Publish tag->delay map for the dashboard ping fallback (built once from the accumulated
 # tab-separated file; tags can contain spaces/emoji so split on the literal TAB only).
 if [ -s "$ndelayf" ]; then
 	jq -Rn --arg tab "$TAB" '[inputs | split($tab) | select(length==2) | {(.[0]): (.[1]|tonumber?)}] | add // {}' \
-		< "$ndelayf" > "$DELAYMAP" 2>/dev/null || echo '{}' > "$DELAYMAP"
+		< "$ndelayf" 2>/dev/null | write_atomic "$DELAYMAP"
+	jq -e 'type=="object"' "$DELAYMAP" >/dev/null 2>&1 || echo '{}' | write_atomic "$DELAYMAP"
 else
-	echo '{}' > "$DELAYMAP"
+	echo '{}' | write_atomic "$DELAYMAP"
 fi
 rm -rf "$tmpd"
 

@@ -1,14 +1,32 @@
 #!/bin/sh
-# vpnpool control-plane daemon (real).
-# Orchestrates: fetch subscription -> build sing-box config -> run sing-box ->
-# bring routing up (whole-LAN selective, coexists with podkop). Then supervises
-# sing-box and periodically refreshes the subscription. On TERM it tears routing
-# down and stops sing-box. Auto-ping + failover between nodes is done by the
-# sing-box "urltest" outbound; this daemon supervises and refreshes.
+# vpnpool control-plane daemon.
+# Orchestrates: fetch subscriptions -> build sing-box config -> run sing-box -> bring
+# routing up (whole-LAN selective, coexists with podkop). Then supervises sing-box,
+# watches the tunnel end-to-end and periodically refreshes the subscriptions. On TERM it
+# tears routing down and stops sing-box. Auto-ping + failover between nodes is done by the
+# sing-box "urltest" outbound.
+#
+# Routing fail-safe / kill-switch — ONE decision (route_policy in lib.sh), ONE actor
+# (apply_routing below), used by start-up, every reload/refresh, the watchdog and the
+# Telegram pause:
+#   killswitch=1 -> routes stay up ALWAYS (fail-closed: a dead tunnel blocks, never leaks);
+#   killswitch=0 -> routes up only while the tunnel works; a confirmed-dead tunnel takes
+#                   them down so the LAN falls back to DIRECT (never a black hole);
+#   paused (Telegram /off, flag in /tmp) -> routes down, sing-box stays up for the bot.
+# A reload keeps the current routes while sing-box restarts, then checks the tunnel and
+# re-applies the policy.
+#
+# Signals: USR1 = rebuild from cache + hot-reload; USR2 = re-fetch + rebuild + hot-reload;
+# HUP = re-evaluate routing now (pause flag changed). A signal that arrives while a reload
+# is running is queued and served right after it (no overlapping reloads).
+#
+# Test hook: VPNPOOLD_NO_MAIN=1 + `. vpnpoold` defines the functions and returns without
+# starting anything (stand tests drive the decisions with stubbed probes / route.sh).
 . /usr/libexec/vpnpool/lib.sh
 
 SB_PIDFILE=/var/run/vpnpool-singbox.pid
 LIBEXEC=/usr/libexec/vpnpool
+[ "${VPNPOOLD_NO_MAIN:-0}" = 1 ] && [ -n "${VPNPOOL_LIBEXEC:-}" ] && LIBEXEC=$VPNPOOL_LIBEXEC
 
 SB_LOG="$SB_DATA/sing-box.log"
 LOG_CAP=524288   # 512 KiB — keep the volatile /tmp log bounded
@@ -22,8 +40,11 @@ cap_log() {
 # did `kill; sleep 1; start` — if the old process hadn't released tproxy :1603 and the
 # cache.db lock within 1s, the NEW instance died with "address already in use" /
 # "initialize cache-file: timeout", the supervisor restarted it, and it crash-looped.
-# Match OUR sing-box only (by pidfile and by our own -c config path) so we never touch
-# podkop's sing-box.
+# Match OUR sing-box only (by our own -c config path — the RAM one, and the flash one a
+# 1.x instance still runs with right after an upgrade) so we never touch podkop's sing-box.
+our_singbox_pids() {
+	{ pgrep -f "sing-box run -c $SB_CONF" 2>/dev/null; pgrep -f "sing-box run -c $SB_CONF_FLASH" 2>/dev/null; } | sort -u
+}
 kill_singbox() {
 	# NOTE: busybox `pkill -f` did NOT reliably match the full cmdline here (it left
 	# instances alive -> orphans piled up, held :1603, and the crash loop / "imports
@@ -32,7 +53,7 @@ kill_singbox() {
 	local p i pids
 	i=0
 	while :; do
-		pids=$(pgrep -f "sing-box run -c $SB_CONF" 2>/dev/null)
+		pids=$(our_singbox_pids)
 		[ -z "$pids" ] && break
 		i=$((i + 1))
 		for p in $pids; do
@@ -55,11 +76,10 @@ _do_start_singbox() {
 	echo $! > "$SB_PIDFILE"
 }
 
-# Serialise restarts with a lock: the USR1/USR2 signal handlers and the main
-# supervise loop can both call start_singbox; without a lock two of them raced and
-# spawned overlapping sing-box instances that fought over :1603 -> crash loop.
-# timestamp of the last sing-box (re)start — the watchdog uses it for its warm-up
-# grace window so it never restarts a tunnel that is merely still picking a node.
+# Serialise restarts with a lock: the signal handlers and the main supervise loop can
+# both call start_singbox; without a lock two of them raced and spawned overlapping
+# sing-box instances that fought over :1603 -> crash loop.
+# SB_STARTED = time of the last (re)start — the watchdog's warm-up grace window.
 SB_STARTED=0
 start_singbox() {
 	if command -v flock >/dev/null 2>&1; then
@@ -89,23 +109,29 @@ current_node() {
 	fi
 }
 
+# Point a clash selector at a tag; success only on HTTP 204 (the tag exists and was picked).
+clash_select() {   # $1=selector $2=tag
+	local c
+	c=$(curl -s -m5 -o /dev/null -w '%{http_code}' -X PUT "http://$CLASH_API/proxies/$(jq -rn --arg s "$1" '$s|@uri')" \
+		--data "$(jq -nc --arg n "$2" '{name:$n}')" 2>/dev/null)
+	[ "$c" = 204 ] || { log "clash: could not switch $1 to $2 (http ${c:-000})"; return 1; }
+}
+
 # ---- two-way Telegram control bot ----
-# The bot (tgbot.sh) is NOT forked/supervised here any more. It runs as its OWN procd
-# instance (see /etc/init.d/vpnpool), so procd is its single supervisor: it reliably
-# kills the bot on stop/restart and respawns it on crash. The old fork-as-background-child
-# model orphaned the bot whenever this daemon was SIGKILLed (OOM, or procd's
-# SIGTERM->SIGKILL on restart) — the orphan kept long-polling getUpdates while the next
-# daemon spawned a second one, and Telegram's one-poller-per-bot rule made the two race
-# (409 Conflict) so the bot "answered every other message". Moving it under procd removes
-# that failure class at the root.
+# The bot (tgbot.sh) is NOT forked/supervised here. It runs as its OWN procd instance
+# (see /etc/init.d/vpnpool), so procd is its single supervisor. /on and /off reach this
+# daemon as the pause flag ($PAUSE_FLAG) + SIGHUP; routing stays this daemon's decision.
 
 # ---- preferred-node soft pin with switch-back ----
 # If preferred_node is set (and the user hasn't manually pinned a node and
 # auto_switch is on): stick to the preferred node while it's reachable; when it
 # dies, hand control to urltest "auto"; when it recovers, switch back. A small
-# bad-streak counter avoids flapping.
+# bad-streak counter avoids flapping. The pin itself is the USER's choice: the dead-node
+# filter only hands traffic to auto while the node is in the dead set — it never erases
+# the preference (the node is picked again as soon as it leaves the dead set).
 PREF_BAD=0
 PREF_GONE=0
+PREF_DEAD_LOGGED=""
 preferred_check() {
 	local pref sel asw p delay nowsel
 	pref=$(uci -q get vpnpool.main.preferred_node)
@@ -128,102 +154,155 @@ preferred_check() {
 		return 0
 	fi
 	PREF_GONE=0
-	delay=$(echo "$p" | jq -r --arg t "$pref" '(.proxies[$t].history // []) | last | .delay // 0' 2>/dev/null)
-	# Respect the service-accuracy dead-filter: NEVER pin a node it demoted (one that "pings"
-	# but fails the user's services — e.g. a Reality node that connects but carries no data).
-	# If the preferred node is in the dead set, treat it as down: hand over to auto and don't
-	# re-pin (even if its clash-delay history flaps positive) until it leaves the dead set.
-	if [ "$(uci -q get vpnpool.main.dead_filter)" != "0" ] && [ -f /tmp/vpnpool/.dead_tags.json ] \
-	   && grep -Fq "\"$pref\"" /tmp/vpnpool/.dead_tags.json 2>/dev/null; then
-		# A node demoted to the dead set is a SUSTAINED failure (failed the service check
-		# dead_filter_strikes times in a row), not a transient blip — so don't just hand the
-		# selector to auto, CLEAR the pin entirely (the 📌 goes away). A brief outage that
-		# hasn't reached the dead set still keeps the pin + switches back on recovery (below).
-		[ "$nowsel" = "$pref" ] && curl -s -m5 -X PUT "http://$CLASH_API/proxies/proxy" --data '{"name":"auto"}' >/dev/null 2>&1
-		uci -q delete vpnpool.main.preferred_node; uci commit vpnpool
-		PREF_BAD=0
-		log "preferred node $pref is in the dead set -> unpinned and handed over to auto"
+	# In the service-accuracy dead set: NEVER keep traffic on it (it "pings" but fails the
+	# user's services), but keep the preference — it comes back when the node recovers.
+	if [ "$(uci -q get vpnpool.main.dead_filter)" != "0" ] && [ -f "$SB_DATA/.dead_tags.json" ] \
+	   && jq -e --arg t "$pref" 'index($t) != null' "$SB_DATA/.dead_tags.json" >/dev/null 2>&1; then
+		[ "$nowsel" = "$pref" ] && clash_select proxy auto
+		[ "$PREF_DEAD_LOGGED" = "$pref" ] || log "preferred node $pref fails the service check -> auto until it recovers (preference kept)"
+		PREF_DEAD_LOGGED=$pref
 		return 0
 	fi
+	PREF_DEAD_LOGGED=""
+	delay=$(echo "$p" | jq -r --arg t "$pref" '(.proxies[$t].history // []) | last | .delay // 0' 2>/dev/null)
 	if [ -n "$delay" ] && [ "$delay" -gt 0 ] 2>/dev/null; then
 		PREF_BAD=0
 		if [ "$nowsel" != "$pref" ]; then
-			curl -s -m5 -X PUT "http://$CLASH_API/proxies/proxy" --data "{\"name\":\"$pref\"}" >/dev/null 2>&1
-			log "preferred node healthy -> switch back to $pref"
+			clash_select proxy "$pref" && log "preferred node healthy -> switch back to $pref"
 		fi
 	else
 		PREF_BAD=$((PREF_BAD + 1))
 		if [ "$PREF_BAD" -ge 2 ] && [ "$nowsel" = "$pref" ]; then
-			curl -s -m5 -X PUT "http://$CLASH_API/proxies/proxy" --data '{"name":"auto"}' >/dev/null 2>&1
-			log "preferred node $pref down -> hand over to auto"
+			clash_select proxy auto && log "preferred node $pref down -> hand over to auto"
 		fi
 	fi
 }
 
-# ---- tunnel self-heal watchdog ----
-# Catches the rare state where sing-box is ALIVE by pid but its urltest is stuck —
-# every probe timing out for a long time while WAN is fine, recoverable only by a
-# process restart. The supervisor's pid check alone never notices that.
-#
-# CRITICAL TUNING LESSON (2026-06-11): the first cut fired far too eagerly and created
-# a restart LOOP — after every (re)start urltest needs ~60s to pick a working node, so
-# the e2e probe fails during warm-up; counting those failures tripped a restart, which
-# reset the warm-up, which failed again... Each restart also wipes the urltest delay
-# history, so the dashboard showed "0 pings" and traffic blipped every few minutes on a
-# tunnel that was actually FINE. The cure is: (1) a GRACE period after each start during
-# which the watchdog never counts a strike; (2) treat the tunnel as alive if ANY of
-# several probe attempts/URLs succeeds (intermittent flap != dead); (3) require a long
-# run of confirmed-dead checks and a long cooldown so we only ever act on a genuine,
-# sustained outage — never on warm-up or a flaky-but-working pool.
-WD_BAD=0
-WD_LIMIT=8        # confirmed-dead checks (each does 3 attempts) before acting
-WD_COOLDOWN=1800  # >= 30 min between self-heals — the real bug was hours-long, not flaps
-WD_GRACE=180      # after a (re)start, give urltest this long to warm up before judging
-WD_LAST=0
-
-# one tunnel probe through the test-mixed inbound (which egresses via the active node).
-# The self-heal now keys on the SAME user-configured services as the node-quality filter
-# (check_probe_urls): the tunnel is "alive" if the active node can actually REACH any of
-# them. A reachable host answers with SOME HTTP code (200/204/301/404 — the path is just
-# /generate_204); an over-quota / service-blocked exit can't connect at all (curl yields
-# 000), which is exactly the "pings but the service is dead" state we want to heal.
+# ---- tunnel health ----
+# One probe round through the test-mixed inbound (egresses via the active node) against
+# the user's services, with THE "is it alive" criterion of lib.sh (any HTTP answer = the
+# service is reachable through the node; no answer = dead): alive if ANY service answers.
 probe_tunnel_once() {
-	local tp u code
+	local tp
 	tp=$(uci -q get vpnpool.main.test_port); [ -n "$tp" ] || tp=1605
-	for u in $(check_probe_urls); do
-		code=$(curl -s -o /dev/null -m6 --proxy "http://127.0.0.1:$tp" -w '%{http_code}' "$u" 2>/dev/null)
-		case "$code" in ""|000) ;; *) return 0 ;; esac
+	probe_services "http://127.0.0.1:$tp" any
+}
+# A few attempts so a single flap doesn't read as dead.
+tunnel_healthy() {
+	probe_tunnel_once || { sleep 3; probe_tunnel_once; } || { sleep 3; probe_tunnel_once; }
+}
+# Bounded wait for a freshly (re)started sing-box to carry traffic.
+wait_tunnel() {   # $1 = rounds (default 8, ~2 s apart)
+	local i=0 n="${1:-8}"
+	while [ "$i" -lt "$n" ]; do
+		probe_tunnel_once && return 0
+		i=$((i + 1)); sleep 2
 	done
 	return 1
 }
 
-# Is the tunnel actually carrying traffic right now? (end-to-end through the test inbound,
-# a few attempts so a single flap doesn't read as dead). Used to AVOID committing the whole
-# LAN to a tunnel with no working exit: if the subscription is empty/stale and every node is
-# down, we keep the LAN on DIRECT (internet still works, just unprotected) instead of
-# blackholing it — the very state that made "enable vpnpool -> whole LAN + Tailscale die".
-tunnel_healthy() {
-	probe_tunnel_once || { sleep 3; probe_tunnel_once; } || { sleep 3; probe_tunnel_once; }
+# ---- routing: the single actor ----
+ROUTED=0   # 1 = the LAN is committed to the tunnel (our nft table + ip rule are up)
+killswitch_on() { [ "$(uci -q get vpnpool.main.killswitch)" = "1" ]; }
+paused() { [ -f "$PAUSE_FLAG" ]; }
+
+# Bring routing up and report HONESTLY. route.sh exits non-zero when nft fails to apply
+# the table (missing kernel module, ruleset error) — then traffic is NOT going through the VPN.
+routing_up() {
+	if "$LIBEXEC/route.sh" up; then
+		log "routing is UP"
+		return 0
+	fi
+	log "routing FAILED to apply (nft) — traffic is NOT going through the VPN"
+	return 1
 }
 
-# Whether the LAN is currently committed to the tunnel (0 = kept on DIRECT because no node
-# works yet). The supervise loop brings routing up as soon as a node becomes reachable.
-ROUTED=0
+# apply_routing <tunnel healthy 0|1> [reapply]
+# Decide with route_policy (lib.sh) and act; "reapply" re-installs the rules even when the
+# state doesn't change (a reload may have changed clients/ipv6/mode). Notifies on changes.
+apply_routing() {
+	local ks=0 pz=0 want was="$ROUTED"
+	killswitch_on && ks=1
+	paused && pz=1
+	want=$(route_policy "$ks" "$1" "$pz")
+	if [ "$want" = up ]; then
+		if [ "$ROUTED" != 1 ] || [ "${2:-}" = reapply ]; then
+			if routing_up; then ROUTED=1; else ROUTED=0; fi
+		fi
+		if [ "$was" != 1 ] && [ "$ROUTED" = 1 ]; then
+			if [ "$1" = 1 ]; then tg_notify "🟢 vpnpool: routing is up"
+			else log "kill-switch on: routing kept up although no node works (LAN traffic is blocked, not leaked)"
+			     tg_notify "🔒 vpnpool: no working node — kill-switch blocks the LAN until a node works"; fi
+		fi
+	else
+		if [ "$ROUTED" != 0 ] || [ "${2:-}" = reapply ]; then
+			"$LIBEXEC/route.sh" down
+			ROUTED=0
+		fi
+		if [ "$was" = 1 ] || [ "${2:-}" = startup ]; then
+			if [ "$pz" = 1 ]; then
+				log "routing paused by the user — LAN on direct, tunnel kept up"
+				tg_notify "⏸ vpnpool: routing paused — LAN on direct"
+			else
+				log "no working node — routing DOWN, LAN on direct until a node works"
+				tg_notify "🟡 vpnpool: no working node — LAN on direct for now"
+			fi
+		fi
+	fi
+}
+
+# Evaluate the tunnel only when the decision depends on it (kill-switch off, not paused).
+routing_eval() {   # [reapply|startup]
+	local h=0
+	if ! paused && ! killswitch_on; then
+		singbox_alive && wait_tunnel "${RE_ROUNDS:-1}" && h=1
+	fi
+	apply_routing "$h" "$1"
+}
+
+# ---- tunnel self-heal watchdog ----
+# (1) FAIL-SAFE: a tunnel confirmed dead (every service, several rounds, while WAN is up)
+#     must not hold the LAN — with the kill-switch off its routes come down (ROUTED=0,
+#     notification); the supervise loop restores them once a node works again.
+# (2) SELF-HEAL: the rare state where sing-box is ALIVE by pid but its urltest is stuck —
+#     every probe timing out for a long time while WAN is fine, recoverable only by a
+#     process restart.
+# CRITICAL TUNING LESSON (2026-06-11): the first cut fired far too eagerly and created
+# a restart LOOP — after every (re)start urltest needs ~60s to pick a working node, so
+# the e2e probe fails during warm-up; counting those failures tripped a restart, which
+# reset the warm-up, which failed again... The cure is: (1) a GRACE period after each
+# start during which the watchdog never counts a strike; (2) treat the tunnel as alive if
+# ANY of several probe attempts/URLs succeeds; (3) require a long run of confirmed-dead
+# checks and a long cooldown before a restart.
+# A manual node pick does NOT switch the watchdog off: a pinned dead node is exactly the
+# case where the LAN must not stay in a black hole.
+WD_BAD=0
+WD_DOWN_AFTER=2   # confirmed-dead checks before the fail-safe takes the routes down
+WD_LIMIT=8        # confirmed-dead checks (each does 3 attempts) before a restart
+WD_COOLDOWN=1800  # >= 30 min between self-heals — the real bug was hours-long, not flaps
+WD_GRACE=180      # after a (re)start, give urltest this long to warm up before judging
+WD_LAST=0
+WD_HEALTHY=""     # this tick's verdict for the supervise loop: 1 / 0 / "" (not judged)
 
 watchdog_check() {
 	local now
-	[ -n "$(uci -q get vpnpool.main.selected_node)" ] && { WD_BAD=0; return 0; }
+	WD_HEALTHY=""
 	now=$(date +%s)
 	# grace window after a (re)start: never judge a tunnel that is still warming up
 	[ $(( now - SB_STARTED )) -lt "$WD_GRACE" ] && { WD_BAD=0; return 0; }
-	# 3 attempts spread over ~6s — a single flap must not count as down
-	if probe_tunnel_once || { sleep 3; probe_tunnel_once; } || { sleep 3; probe_tunnel_once; }; then
-		WD_BAD=0; return 0
-	fi
+	if tunnel_healthy; then WD_BAD=0; WD_HEALTHY=1; return 0; fi
+	WD_HEALTHY=0
 	# probe failed all attempts — only OUR problem if WAN itself is up
-	probe_wan() { curl -s -o /dev/null -m6 -w '%{http_code}' http://cp.cloudflare.com/generate_204 2>/dev/null; }
-	[ "$(probe_wan)" = "204" ] || { WD_BAD=0; return 0; }
+	wan_alive || { WD_BAD=0; return 0; }
 	WD_BAD=$((WD_BAD + 1))
+	if [ "$WD_BAD" -ge "$WD_DOWN_AFTER" ] && [ "$ROUTED" = 1 ]; then
+		if killswitch_on; then
+			[ "$WD_BAD" = "$WD_DOWN_AFTER" ] && log "watchdog: tunnel dead while WAN is up — kill-switch keeps the LAN blocked"
+		else
+			log "watchdog: tunnel dead ${WD_BAD}x while WAN is up — fail-safe: routing down"
+			apply_routing 0
+		fi
+	fi
 	if [ "$WD_BAD" -ge "$WD_LIMIT" ] && [ $(( now - WD_LAST )) -ge "$WD_COOLDOWN" ]; then
 		WD_BAD=0; WD_LAST=$now
 		log "watchdog: tunnel dead ${WD_LIMIT}x (every probe) while WAN is up — self-healing (sing-box restart)"
@@ -239,96 +318,92 @@ cleanup() {
 	tg_notify "🔴 vpnpool: stopped"
 	"$LIBEXEC/route.sh" down
 	kill_singbox
+	rm -f "$SB_DATA/.reload_running"
 	log "stopped cleanly"
 	exit 0
 }
 
-# Bring routing up and report HONESTLY. route.sh exits non-zero when nft fails to apply
-# the table (missing kernel module, ruleset error) — in that case traffic is NOT going
-# through the VPN. Logging "routing is UP" unconditionally masked a dead tunnel in the
-# logs/diagnostics, so check the exit code and say what actually happened.
-routing_up() {
-	if "$LIBEXEC/route.sh" up; then
-		log "routing is UP"
+# ---- reload / refetch (serialised) ----
+RELOADING=0
+PENDING=""        # queued while a reload runs: "" | reload | refetch
+PENDING_ROUTE=0   # HUP arrived during a reload
+
+# do_reload <reload|refetch>: [fetch] -> build -> restart sing-box (routes untouched) ->
+# check the tunnel -> re-apply routing by the policy.
+do_reload() {
+	if [ "$1" = refetch ]; then
+		log "refetch: fetching sources"
+		"$LIBEXEC/fetch.sh" || log "fetch failed (cached copies are used where present)"
+	fi
+	[ -s "$SB_CONF" ] && cp "$SB_CONF" "$SB_CONF.prev"
+	if ! "$LIBEXEC/build.sh"; then
+		log "reload: build failed, keeping the current config and routing"
+		return 1
+	fi
+	if singbox_alive && [ -s "$SB_CONF.prev" ] && cmp -s "$SB_CONF" "$SB_CONF.prev"; then
+		log "reload: config unchanged, sing-box keeps running"
+	else
+		start_singbox   # routes stay as they are while it restarts
+	fi
+	RE_ROUNDS=8 routing_eval reapply
+	log "reload complete"
+}
+
+# request_reload <reload|refetch> — the entry point for signals and the periodic refresh.
+request_reload() {
+	if [ "$RELOADING" = 1 ]; then
+		if [ "$1" = refetch ]; then PENDING=refetch; else [ -n "$PENDING" ] || PENDING=reload; fi
+		log "reload already running — queued ($1)"
 		return 0
 	fi
-	log "routing FAILED to apply (nft) — traffic is NOT going through the VPN"
-	return 1
+	RELOADING=1; : > "$SB_DATA/.reload_running"
+	local what="$1"
+	while :; do
+		PENDING=""; PENDING_ROUTE=0
+		do_reload "$what"
+		[ -n "$PENDING" ] || break
+		what=$PENDING
+	done
+	RELOADING=0; rm -f "$SB_DATA/.reload_running"
+	[ "$PENDING_ROUTE" = 1 ] && on_hup
+	return 0
 }
 
-# USR1 = rebuild config from cache + manual nodes and hot-reload sing-box.
-# Sent by the LuCI backend after manual node / domain edits so they apply live.
-reload_config() {
-	log "reload (USR1): rebuilding config + routing"
-	if "$LIBEXEC/build.sh"; then
-		start_singbox   # stops the old instance and waits for the port/lock to free
-		# re-apply routing so per-client / ipv6 / coexist / domain edits take effect —
-		# but gate on tunnel health so a rebuild that ends up with no working node keeps
-		# the LAN on DIRECT instead of blackholing it (the supervise loop re-routes once a
-		# node is reachable). ROUTED=0 hands the decision back to that loop.
-		"$LIBEXEC/route.sh" down; ROUTED=0
-		if tunnel_healthy; then routing_up && ROUTED=1; fi
-		log "reload complete (sing-box reloaded)"
-	else
-		log "reload: build failed, keeping current config"
+# HUP: the pause flag changed (Telegram /on /off) — re-decide routing now.
+on_hup() {
+	if [ "$RELOADING" = 1 ]; then PENDING_ROUTE=1; return 0; fi
+	PENDING_ROUTE=0
+	RE_ROUNDS=3 routing_eval
+}
+
+# periodic refresh: through the same reload pipeline (and so the same fail-safe)
+LAST=0
+periodic_refresh() {
+	local EXP DAYS USAGE QTOT QUSED QLEFT QPCT QGB
+	LAST=$(date +%s)
+	log "periodic subscription refresh"
+	request_reload refetch
+	# subscription expiry warning
+	EXP=$(cat "$CONF_DIR/sub.expire" 2>/dev/null)
+	if [ -n "$EXP" ]; then
+		DAYS=$(( (EXP - $(date +%s)) / 86400 ))
+		[ "$DAYS" -ge 0 ] && [ "$DAYS" -le 3 ] && tg_notify "⚠️ vpnpool: subscription expires in ${DAYS}d"
+	fi
+	# subscription quota warning: alert once per refresh when <10% remains
+	USAGE=$(cat "$CONF_DIR/sub.usage" 2>/dev/null)
+	if [ -n "$USAGE" ]; then
+		QTOT=$(echo "$USAGE" | awk '{print $3+0}')
+		QUSED=$(echo "$USAGE" | awk '{print $1+$2}')
+		if [ "${QTOT:-0}" -gt 0 ] 2>/dev/null; then
+			QLEFT=$(( QTOT - QUSED ))
+			QPCT=$(( QLEFT * 100 / QTOT ))
+			QGB=$(awk -v b="$QLEFT" 'BEGIN{printf "%.1f", b/1073741824}')
+			[ "$QPCT" -ge 0 ] && [ "$QPCT" -le 10 ] && tg_notify "⚠️ vpnpool: subscription quota low — ${QGB} GB (${QPCT}%) left"
+		fi
 	fi
 }
 
-# USR2 = re-fetch all sources, then rebuild + hot-reload (source/subscription edits).
-refetch_config() {
-	log "refetch (USR2): fetching sources"
-	"$LIBEXEC/fetch.sh"
-	reload_config
-}
-
-trap cleanup TERM INT
-trap reload_config USR1
-trap refetch_config USR2
-
-mkdir -p "$SB_DATA"
-log "vpnpoold starting (whole-LAN selective, coexist with podkop)"
-kill_singbox   # clear any orphaned sing-box left by a previously crashed daemon
-
-# initial subscription + config, with soft retry (e.g. WAN not ready at boot) —
-# never give up, so the service self-heals once connectivity appears.
-while : ; do
-	"$LIBEXEC/fetch.sh" || log "fetch failed (will use cache if present)"
-	if "$LIBEXEC/build.sh"; then
-		break
-	fi
-	log "initial build failed (no nodes/cache yet), retrying in 15s"
-	sleep 15 & wait $!
-done
-
-start_singbox
-sleep 3
-# Wait (bounded) for the tunnel to pick a working node BEFORE committing the whole LAN to
-# it. Never blackhole the LAN into a dead tunnel: if no node works (empty/stale
-# subscription, every exit down) keep the LAN on DIRECT and let the refresh loop retry —
-# routing comes up automatically once a node is reachable (see the supervise loop).
-_wu=0
-while [ "$_wu" -lt 12 ]; do
-	tunnel_healthy && break
-	_wu=$((_wu + 1)); sleep 2
-done
-if tunnel_healthy; then
-	routing_up && ROUTED=1
-	tg_notify "🟢 vpnpool: routing is up"
-else
-	log "no working node yet (empty/stale subscription?) — keeping LAN on DIRECT, will route once a node is reachable"
-	tg_notify "🟡 vpnpool: no working node — LAN stays on direct for now"
-fi
-
-REFRESH=$(interval_seconds)
-LAST=$(date +%s)
-SB_FAILS=0        # consecutive supervisor restarts of a dead sing-box (for crash-loop backoff)
-LAST_NODE=""
-SNAP_LAST=0
-SNAP_EVERY=1800   # auto-snapshot reachable nodes at most every 30 min (self-guards on the toggle)
-ADAPT_LAST=0
-ADAPT_EVERY=600   # adaptive-routing scan at most every 10 min (self-guards on the toggle)
-
-# ---- dead-node auto-filter (opt-in, on by default) -------------------------------
+# ---- dead-node auto-filter (opt-in, on by default) ----
 # Periodically run nodecheck.sh in the BACKGROUND: it e2e-probes every node through
 # the clash delay API and demotes ones that reach nothing for a sustained run from the
 # auto/urltest pool (it self-signals USR1 on a change to rebuild). Backgrounded so a
@@ -347,7 +422,57 @@ node_quality_check() {
 	setsid sh -c "$LIBEXEC/nodecheck.sh" >/dev/null 2>&1 &
 }
 
-# main supervise/refresh loop. sleep in bg + wait so TERM is handled promptly.
+[ "${VPNPOOLD_NO_MAIN:-0}" = 1 ] && return 0 2>/dev/null
+
+# ======================= main =======================
+# Traps first (an untrapped USR1/USR2/HUP would KILL the daemon). Until start-up is done,
+# RELOADING=1 makes the handlers only queue the request.
+RELOADING=1
+trap cleanup TERM INT
+trap 'request_reload reload' USR1
+trap 'request_reload refetch' USR2
+trap on_hup HUP
+
+mkdir -p "$SB_DATA"
+log "vpnpoold starting (whole-LAN selective, coexist with podkop)"
+kill_singbox   # clear any orphaned sing-box left by a previously crashed daemon
+
+# Initial config, retried until it works (e.g. WAN not ready at boot) — never give up, so
+# the service self-heals once connectivity appears. The subscriptions are downloaded only
+# when due (lib.sh fetch_due: not more often than every 10 min, unless the subscription set
+# changed); the retries in between rebuild from what was already fetched/cached, so a
+# crash-looping start never hammers the provider's panel.
+while : ; do
+	if fetch_due; then
+		"$LIBEXEC/fetch.sh" || log "fetch failed (will use cache if present)"
+	fi
+	if "$LIBEXEC/build.sh"; then
+		break
+	fi
+	log "initial build failed (no nodes/cache yet), retrying in 15s"
+	sleep 15 & wait $!
+done
+
+start_singbox
+sleep 3
+# Kill-switch: up at once (fail-closed). Otherwise wait (bounded) for a working node BEFORE
+# committing the LAN; with none, the LAN stays on DIRECT and the supervise loop routes as
+# soon as a node works.
+RE_ROUNDS=12 routing_eval startup
+
+RELOADING=0
+if [ -n "$PENDING" ]; then _p=$PENDING; PENDING=""; request_reload "$_p"; fi
+
+REFRESH=$(interval_seconds)
+LAST=$(date +%s)
+SB_FAILS=0        # consecutive supervisor restarts of a dead sing-box (for crash-loop backoff)
+LAST_NODE=""
+SNAP_LAST=0
+SNAP_EVERY=1800   # auto-snapshot reachable nodes at most every 30 min (self-guards on the toggle)
+ADAPT_LAST=0
+ADAPT_EVERY=600   # adaptive-routing scan at most every 10 min (self-guards on the toggle)
+
+# main supervise/refresh loop. sleep in bg + wait so signals are handled promptly.
 while : ; do
 	sleep 15 & wait $!
 	cap_log
@@ -370,21 +495,21 @@ while : ; do
 		SB_FAILS=0
 	fi
 
-	# (the Telegram control bot is a separate procd instance — procd supervises it)
-
 	# preferred-node soft pin + switch-back
 	preferred_check
 
-	# end-to-end tunnel health: restart sing-box if it's alive-but-stuck
+	# end-to-end tunnel health: fail-safe routing down / restart a stuck sing-box
 	watchdog_check
 
-	# deferred routing: if we kept the LAN on DIRECT at startup/reload because no node
-	# worked, bring routing up the moment the tunnel becomes healthy (subscription
-	# restored / an exit came back). Cheap when already routed (the [ = 0 ] guard).
-	if [ "$ROUTED" = 0 ] && singbox_alive && tunnel_healthy; then
-		routing_up && ROUTED=1
-		log "a node became reachable — routing is now UP"
-		tg_notify "🟢 vpnpool: node reachable, routing is up"
+	# Routing by the policy: paused -> down; kill-switch -> up; otherwise up the moment the
+	# tunnel works again (re-uses the watchdog's verdict of this tick when it has one).
+	if paused; then
+		[ "$ROUTED" = 1 ] && apply_routing 0
+	elif [ "$ROUTED" != 1 ]; then
+		if killswitch_on; then apply_routing 0
+		elif [ "$WD_HEALTHY" = 1 ]; then apply_routing 1
+		elif [ -z "$WD_HEALTHY" ]; then routing_eval
+		fi
 	fi
 
 	# auto-snapshot reachable nodes into the persistent saved store (opt-in)
@@ -413,32 +538,5 @@ while : ; do
 
 	REFRESH=$(interval_seconds)
 	NOW=$(date +%s)
-	if [ $(( NOW - LAST )) -ge "$REFRESH" ]; then
-		LAST=$NOW
-		log "periodic subscription refresh"
-		if "$LIBEXEC/fetch.sh" && "$LIBEXEC/build.sh"; then
-			start_singbox   # stops the old instance and waits for the port/lock to free
-			log "subscription refreshed, sing-box reloaded"
-		else
-			log "refresh failed, keeping current config"
-		fi
-		# subscription expiry warning
-		EXP=$(cat "$CONF_DIR/sub.expire" 2>/dev/null)
-		if [ -n "$EXP" ]; then
-			DAYS=$(( (EXP - $(date +%s)) / 86400 ))
-			[ "$DAYS" -ge 0 ] && [ "$DAYS" -le 3 ] && tg_notify "⚠️ vpnpool: subscription expires in ${DAYS}d"
-		fi
-		# subscription quota warning: alert once per refresh when <10% remains
-		USAGE=$(cat "$CONF_DIR/sub.usage" 2>/dev/null)
-		if [ -n "$USAGE" ]; then
-			QTOT=$(echo "$USAGE" | awk '{print $3+0}')
-			QUSED=$(echo "$USAGE" | awk '{print $1+$2}')
-			if [ "${QTOT:-0}" -gt 0 ] 2>/dev/null; then
-				QLEFT=$(( QTOT - QUSED ))
-				QPCT=$(( QLEFT * 100 / QTOT ))
-				QGB=$(awk -v b="$QLEFT" 'BEGIN{printf "%.1f", b/1073741824}')
-				[ "$QPCT" -ge 0 ] && [ "$QPCT" -le 10 ] && tg_notify "⚠️ vpnpool: subscription quota low — ${QGB} GB (${QPCT}%) left"
-			fi
-		fi
-	fi
+	[ $(( NOW - LAST )) -ge "$REFRESH" ] && periodic_refresh
 done

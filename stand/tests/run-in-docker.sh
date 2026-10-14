@@ -8,6 +8,7 @@
 #   IMAGE      stand image (default vpnpool-stand; build: docker build -f stand/Dockerfile -t vpnpool-stand .)
 #   T_VERBOSE  1 = print PASS lines and XFAIL reasons
 # The container has NO network (--network none): every HTTP call goes to the curl test double.
+# NET_ADMIN: the daemon suite applies the real nft/ip routing inside the container's own netns.
 # Exit code = the runner's (non-zero if any test failed or an xfail unexpectedly passed).
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -24,7 +25,7 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || {
 
 NAME="vpnpool-tests-$$"
 # MSYS_NO_PATHCONV: stop Git Bash from rewriting the in-container paths below.
-MSYS_NO_PATHCONV=1 exec docker run --rm --name "$NAME" --network none \
+MSYS_NO_PATHCONV=1 exec docker run --rm --name "$NAME" --network none --cap-add NET_ADMIN \
 	-e T_VERBOSE="${T_VERBOSE:-0}" \
 	-v "$R/package/vpnpool/files/usr/libexec/vpnpool:/usr/libexec/vpnpool:ro" \
 	-v "$R/package/luci-app-vpnpool/files/usr/libexec/rpcd:/stage/rpcd:ro" \

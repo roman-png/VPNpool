@@ -94,10 +94,13 @@ up)
 "
 	fi
 
-	# Clean slate so `up` is idempotent: a table left by a crashed daemon would otherwise
-	# make the re-declaration fail ("chain already exists") and leave routing half-applied.
-	nft delete table inet vpnpool 2>/dev/null
+	# Replace the table in ONE nft transaction (add-if-missing, delete, re-create): `up` is
+	# idempotent, and a re-apply during a reload never leaves a moment without our rules —
+	# with the kill-switch on, a separate "delete" first would let LAN traffic leak past the
+	# tunnel between the two commands. Either the whole new table applies or nothing changes.
 	if ! nft -f - <<NFT
+add table inet vpnpool
+delete table inet vpnpool
 table inet vpnpool {
 	set localv4 {
 		type ipv4_addr
