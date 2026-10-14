@@ -159,7 +159,7 @@ VMP=$(printf '%s' "{\"v\":\"2\",\"ps\":\"VMP\",\"add\":\"vm.example.com\",\"port
 P vmess-bad-port-dropped - "vmess://$VMP" 'length==0'
 P vmess-garbage-dropped - "vmess://%%%notbase64" 'length==0'
 P hy2-port-hopping - "hy2://hypw@hy.example.com:443,5000-6000/?sni=hy.example.com&mport=7000-7100&hop_interval=30#HOP" \
-	'.[0].server_port==443' '.[0].server_ports==["5000:6000","7000:7100"]' '.[0].hop_interval=="30s"'
+	'.[0].server_port==443' '.[0].server_ports==["443:443","5000:6000","7000:7100"]' '.[0].hop_interval=="30s"'
 P hy2-only-range - "hysteria2://pw@hy.example.com:20000-30000#RNG" '.[0].server_ports==["20000:30000"]' '.[0].server_port==null'
 P hy2-default-port - "hy2://pw@hy.example.com/?sni=hy.example.com#DP" '.[0].server_port==443'
 P hy2-bandwidth - "hysteria2://pw@hy.example.com:443?up=50%20mbps&down=1gbps#BW" '.[0].up_mbps==50 and .[0].down_mbps==1000'
@@ -187,20 +187,57 @@ P base64url-subscription-blob - \
 P utf8-bom-and-comments - "$(printf '\357\273\277#profile-title: x\n// note\nvless://%s@203.0.113.27:443?security=tls#BOM\n' "$U")" \
 	'length==1 and .[0].tag=="BOM"'
 P unknown-schemes-dropped - "$(printf 'socks://abc\nssr://abc\nwireguard://abc\nhysteria://abc\n')" 'length==0'
-P same-node-other-name-dedup - \
-	"$(printf 'vless://%s@203.0.113.28:443?security=tls#First\nvless://%s@203.0.113.28:443?security=tls#Second\n' "$U" "$U")" \
-	'length==1' '.[0].tag=="First"'
+# dedup key = name + config: the same config under another name is a separate node (a user's
+# imported copy of a subscription node must not vanish; merging is ROADMAP 2.2)
+P dedup-keeps-differently-named-node - \
+	"$(printf 'vless://%s@203.0.113.28:443?security=tls#First\nvless://%s@203.0.113.28:443?security=tls#Second\nvless://%s@203.0.113.28:443?security=tls&type=tcp#First\n' "$U" "$U" "$U")" \
+	'length==2' 'map(.tag)==["First","Second"]'
+begin "parser/dedup-subscription-vs-imported-file"
+mkdir -p "$T_STATE/parser"
+printf 'vless://%s@203.0.113.29:443?security=tls#ProviderName\n' "$U" > "$T_STATE/parser/sub.raw"
+printf 'vless://%s@203.0.113.29:443?security=tls#MyImported\n' "$U" > "$T_STATE/parser/imported.links"
+_o=$(ucode "$PARSER" "$T_STATE/parser/sub.raw" "$T_STATE/parser/imported.links" 2>/dev/null)
+expect_jq "both nodes, each under its own name" "$_o" 'map(.tag)==["ProviderName","MyImported"]'
+end
+P json-key-order-dedup - \
+	"[{\"type\":\"vless\",\"tag\":\"K\",\"server\":\"203.0.113.30\",\"server_port\":443,\"uuid\":\"$U\"},{\"uuid\":\"$U\",\"server_port\":443,\"server\":\"203.0.113.30\",\"tag\":\"K\",\"type\":\"vless\"}]" \
+	'length==1'
 # reserved tags (ROADMAP 2.1): a node may never take a tag the generator defines
 P reserved-tags-renamed - \
-	"$(i=60; for t in auto proxy direct block dns-out; do i=$((i+1)); printf 'vless://%s@203.0.113.%s:443?security=tls#%s\n' "$U" "$i" "$t"; done)" \
-	'length==5' '[.[].tag] | map(select(.=="auto" or .=="proxy" or .=="direct" or .=="block" or .=="dns-out")) | length==0' \
-	'(map(.tag)|unique|length)==5' '.[0].tag=="auto #2"'
+	"$(i=60; for t in auto proxy direct block dns-out vpnpool-test; do i=$((i+1)); printf 'vless://%s@203.0.113.%s:443?security=tls#%s\n' "$U" "$i" "$t"; done)" \
+	'length==6' '[.[].tag] | map(select(.=="auto" or .=="proxy" or .=="direct" or .=="block" or .=="dns-out" or .=="vpnpool-test")) | length==0' \
+	'(map(.tag)|unique|length)==6' '.[0].tag=="auto #2"' '.[5].tag=="vpnpool-test #2"'
 P tag-suffix-unique-loop - \
 	"$(printf 'vless://%s@203.0.113.71:443?security=tls#A\nvless://%s@203.0.113.72:443?security=tls#A%%20%%232\nvless://%s@203.0.113.73:443?security=tls#A\nvless://%s@203.0.113.74:443?security=tls#A%%20%%232\nvless://%s@203.0.113.75:443?security=tls#A\n' "$U" "$U" "$U" "$U" "$U")" \
 	'length==5' '(map(.tag)|unique|length)==5'
 P json-outbound-reserved-tag - \
 	"{\"outbounds\":[{\"type\":\"vless\",\"tag\":\"proxy\",\"server\":\"203.0.113.76\",\"server_port\":443,\"uuid\":\"$U\"}]}" \
 	'length==1 and .[0].tag=="proxy #2"'
+# a sing-box JSON source gets the same guards as links: a long reality short_id there PANICS
+# sing-box (no outbounds[N] in the message -> build.sh cannot prune it)
+RL="\"tls\":{\"enabled\":true,\"server_name\":\"a.example\",\"reality\":{\"enabled\":true,\"public_key\":\"$PBK\""
+JSON_GUARD="{\"outbounds\":[
+{\"type\":\"vless\",\"tag\":\"JG-ok-reality\",\"server\":\"203.0.113.100\",\"server_port\":443,\"uuid\":\"$U\",$RL,\"short_id\":\"ab12\"}}},
+{\"type\":\"vless\",\"tag\":\"JG-long-sid\",\"server\":\"203.0.113.101\",\"server_port\":443,\"uuid\":\"$U\",$RL,\"short_id\":\"0123456789abcdef0123\"}}},
+{\"type\":\"vless\",\"tag\":\"JG-port\",\"server\":\"203.0.113.102\",\"server_port\":70000,\"uuid\":\"$U\"},
+{\"type\":\"vless\",\"tag\":\"JG-xhttp\",\"server\":\"203.0.113.103\",\"server_port\":443,\"uuid\":\"$U\",\"transport\":{\"type\":\"xhttp\"}},
+{\"type\":\"shadowsocks\",\"tag\":\"JG-rc4\",\"server\":\"203.0.113.104\",\"server_port\":8388,\"method\":\"rc4\",\"password\":\"p\"},
+{\"type\":\"vless\",\"tag\":\"JG-ok-fp\",\"server\":\"203.0.113.105\",\"server_port\":443,\"uuid\":\"$U\",\"tls\":{\"enabled\":true,\"utls\":{\"enabled\":true,\"fingerprint\":\"Chrome_120\"}}},
+{\"type\":\"hysteria2\",\"tag\":\"JG-hy2-notls\",\"server\":\"203.0.113.106\",\"server_port\":443,\"password\":\"p\"},
+{\"type\":\"vless\",\"tag\":\"JG-flow\",\"server\":\"203.0.113.107\",\"server_port\":443,\"uuid\":\"$U\",\"flow\":\"xtls-rprx-direct\"},
+{\"type\":\"tuic\",\"tag\":\"JG-tuic\",\"server\":\"203.0.113.108\",\"server_port\":443,\"uuid\":\"nope\",\"password\":\"p\",\"tls\":{\"enabled\":true}},
+{\"type\":\"selector\",\"tag\":\"sel\",\"outbounds\":[\"JG-ok-fp\"]}
+]}"
+begin "parser/json-source-guards"
+_r=$(printf '%s\n' "$JSON_GUARD" | ucode "$PARSER" --report 2>/dev/null)
+expect_jq "one record per outbound" "$_r" 'length==10'
+expect_jq "reasons per item" "$_r" '[.[] | .reason // "ok"] == ["ok","bad_short_id","bad_port","unsupported_transport","unsupported_method","ok","tls_required","unsupported_flow","bad_uuid","not_a_node"]'
+_o=$(printf '%s\n' "$JSON_GUARD" | ucode "$PARSER" 2>/dev/null)
+expect_jq "two nodes survive" "$_o" 'map(.tag)==["JG-ok-reality","JG-ok-fp"]'
+expect_jq "reality without uTLS gets chrome, unknown fp -> chrome" "$_o" '.[0].tls.utls.fingerprint=="chrome" and .[1].tls.utls.fingerprint=="chrome"'
+printf '%s' "$_o" | jq '{log:{level:"error"}, outbounds:(. + [{type:"direct",tag:"direct"}])}' > "$T_STATE/parser/jg.json"
+expect_true "sing-box check accepts the surviving nodes" sing-box check -c "$T_STATE/parser/jg.json"
+end
 
 # ---- node id (ROADMAP 2.2 groundwork): opt-in field, stable, name/order independent ----
 ID_LINKS="vless://$U@203.0.113.80:443?type=tcp&security=reality&pbk=$PBK&sid=ab12&sni=www.microsoft.com&fp=chrome#I1
@@ -222,12 +259,41 @@ begin "parser/id-changes-with-port-and-credential"
 _p1=$(printf '%s\n' "vless://$U@203.0.113.81:443?security=tls#X" | ucode "$PARSER" --with-id 2>/dev/null | jq -r '.[0].id')
 _p2=$(printf '%s\n' "vless://$U@203.0.113.81:444?security=tls#X" | ucode "$PARSER" --with-id 2>/dev/null | jq -r '.[0].id')
 _p3=$(printf '%s\n' "vless://11111111-2222-3333-4444-555555555555@203.0.113.81:443?security=tls#X" | ucode "$PARSER" --with-id 2>/dev/null | jq -r '.[0].id')
-_p4=$(printf '%s\n' "VLESS://$(echo $U | tr a-f A-F)@203.0.113.81:443?security=tls&fp=firefox#Y" | ucode "$PARSER" --with-id 2>/dev/null | jq -r '.[0].id')
+_p4=$(printf '%s\n' "VLESS://$(echo $U | tr a-f A-F)@203.0.113.81:443?security=tls#Y" | ucode "$PARSER" --with-id 2>/dev/null | jq -r '.[0].id')
 expect_true "id present ($_p1)" [ ${#_p1} -eq 12 ]
 expect_true "port change -> other id ($_p1 vs $_p2)" [ "$_p1" != "$_p2" ]
 expect_true "uuid change -> other id ($_p1 vs $_p3)" [ "$_p1" != "$_p3" ]
-expect_eq "uuid case / fingerprint / name do not change the id" "$_p4" "$_p1"
+expect_eq "uuid case / scheme case / name do not change the id" "$_p4" "$_p1"
 end
+# id = hash of the canonical outbound without tag: every config field counts, key order does not
+idof() { printf '%s\n' "$1" | ucode "$PARSER" --with-id 2>/dev/null | jq -r '.[0].id // "none"'; }
+begin "parser/id-covers-every-config-field"
+_f1=$(idof "vless://$U@203.0.113.82:443?security=tls&fp=chrome#F")
+_f2=$(idof "vless://$U@203.0.113.82:443?security=tls&fp=firefox#F")
+_o1=$(idof "hy2://pw@hy.example.com:443?obfs=salamander&obfs-password=one#O")
+_o2=$(idof "hy2://pw@hy.example.com:443?obfs=salamander&obfs-password=two#O")
+_s1=$(idof "ss://$(printf 'aes-256-gcm:pp' | base64 -w0)@ss.example.com:8388/?plugin=obfs-local%3Bobfs%3Dhttp#S")
+_s2=$(idof "ss://$(printf 'aes-256-gcm:pp' | base64 -w0)@ss.example.com:8388/?plugin=obfs-local%3Bobfs%3Dtls#S")
+expect_true "ids computed ($_f1 $_o1 $_s1)" sh -c '[ ${#1} -eq 12 ] && [ ${#2} -eq 12 ] && [ ${#3} -eq 12 ]' _ "$_f1" "$_o1" "$_s1"
+expect_true "fp chrome vs firefox -> other id" [ "$_f1" != "$_f2" ]
+expect_true "obfs password one vs two -> other id" [ "$_o1" != "$_o2" ]
+expect_true "ss plugin_opts http vs tls -> other id" [ "$_s1" != "$_s2" ]
+end
+begin "parser/id-json-key-order-and-link-agree"
+_j1=$(idof "[{\"type\":\"vless\",\"tag\":\"J1\",\"server\":\"203.0.113.83\",\"server_port\":443,\"uuid\":\"$U\",\"tls\":{\"enabled\":true,\"server_name\":\"a.example\"}}]")
+_j2=$(idof "[{\"tls\":{\"server_name\":\"a.example\",\"enabled\":true},\"uuid\":\"$U\",\"server_port\":443,\"server\":\"203.0.113.83\",\"tag\":\"J2\",\"type\":\"vless\"}]")
+_j3=$(idof "vless://$U@203.0.113.83:443?security=tls&sni=a.example#J3")
+expect_true "id computed ($_j1)" [ ${#_j1} -eq 12 ]
+expect_eq "permuted JSON keys (and another name) -> same id" "$_j2" "$_j1"
+expect_eq "the equivalent link -> same id" "$_j3" "$_j1"
+end
+# in nodes.json the id must be unique: same config under two names -> today two nodes with one
+# id; merging them (user's source wins) is ROADMAP 2.2
+begin "parser/id-unique-in-output"
+_u=$(printf 'vless://%s@203.0.113.84:443?security=tls#Sub\nvless://%s@203.0.113.84:443?security=tls#Mine\n' "$U" "$U" | ucode "$PARSER" --with-id 2>/dev/null)
+expect_jq "nodes parsed, all with an id" "$_u" 'length>=1 and all(.[]; (.id|length)==12)'
+expect_jq "no two nodes share an id" "$_u" '(map(.id)|unique|length)==length'
+end 2.2
 begin "parser/id-not-in-default-output"
 _o=$(printf '%s\n' "$ID_LINKS" | ucode "$PARSER" 2>/dev/null)
 expect_jq "6 nodes parsed" "$_o" 'length==6'
@@ -240,7 +306,7 @@ end
 # ---- --report: one record per input line, machine reason codes ----
 RPT_IN="#comment
 vless://$U@203.0.113.90:443?security=tls#R-ok
-vless://$U@203.0.113.90:443?security=tls#R-dup
+vless://$U@203.0.113.90:443?security=tls#R-ok
 vless://$U@x.example.com:443?type=xhttp&security=tls#R-xhttp
 vless://$U@203.0.113.91:70000?security=tls#R-port
 tuic://bad:pw@tu.example.com:443#R-uuid
