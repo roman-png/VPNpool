@@ -94,11 +94,31 @@ up)
 "
 	fi
 
+	# IPv6 leak guard (fail-closed): drop LAN IPv6 to the internet so v6 traffic can't bypass
+	# the v4 VPN (local/ULA/link-local v6 stays allowed). Part of the SAME table and the SAME
+	# transaction as the v4 rules: a separate second command used to leave the LAN's IPv6
+	# unguarded between the two (or for good when the second one failed).
+	V6=""
+	if [ "$IPV6" = "block" ]; then
+		V6="	set localv6 {
+		type ipv6_addr
+		flags interval
+		auto-merge
+		elements = { ::1/128, ::/128, fc00::/7, fe80::/10, ff00::/8, 64:ff9b::/96 }
+	}
+	chain v6filter {
+		type filter hook forward priority -90; policy accept;
+		meta nfproto ipv6 iifname \"$LAN_IF\" ip6 daddr != @localv6 reject
+	}
+"
+	fi
+
+	# apply_table <client sets> <client rule> <v6 part>
 	# Replace the table in ONE nft transaction (add-if-missing, delete, re-create): `up` is
-	# idempotent, and a re-apply during a reload never leaves a moment without our rules —
-	# with the kill-switch on, a separate "delete" first would let LAN traffic leak past the
-	# tunnel between the two commands. Either the whole new table applies or nothing changes.
-	if ! nft -f - <<NFT
+	# idempotent, and a re-apply during a reload never leaves a moment without our rules.
+	# A failed transaction changes NOTHING — the table that was there keeps working.
+	apply_table() {
+		nft -f - <<NFT
 add table inet vpnpool
 delete table inet vpnpool
 table inet vpnpool {
@@ -108,44 +128,46 @@ table inet vpnpool {
 		auto-merge
 		elements = { 0.0.0.0/8, 10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3 }
 	}
-${CLIENT_SET}	chain prerouting {
+${1}	chain prerouting {
 		type filter hook prerouting priority -90; policy accept;
 ${YIELD}		ip daddr @localv4 return
-${CLIENT_RULE}
+${2}
 		iifname "$LAN_IF" meta l4proto tcp th dport { 80, 443 } meta mark set $FWMARK
 		iifname "$LAN_IF" meta l4proto udp th dport 443 meta mark set $FWMARK
 ${EXTRA_MARK}		meta mark & $FWMARK == $FWMARK meta l4proto tcp tproxy ip to 127.0.0.1:$TPROXY_PORT
 		meta mark & $FWMARK == $FWMARK meta l4proto udp tproxy ip to 127.0.0.1:$TPROXY_PORT
 	}
-}
+${3}}
 NFT
-	then
-		log "route.sh: nft failed to apply routing table — VPN routing is NOT active"
-		nft delete table inet vpnpool 2>/dev/null
+	}
+	policy_route() {
+		ip route replace local 0.0.0.0/0 dev lo table "$RT_TABLE"
+		ip rule add fwmark "${FWMARK}/${FWMARK}" lookup "$RT_TABLE" priority "$RT_PRIO" 2>/dev/null
+	}
+
+	if apply_table "$CLIENT_SET" "$CLIENT_RULE" "$V6"; then
+		policy_route
+		exit 0
+	fi
+	# The new rules were refused (e.g. a client address nft doesn't accept). Never "roll
+	# back" by deleting: the failed transaction changed nothing, and the old table (if any)
+	# is the protection that is still working.
+	if nft list table inet vpnpool >/dev/null 2>&1; then
+		log "route.sh: nft refused the new routing rules — the previous rules stay active"
+		policy_route
 		exit 1
 	fi
-	ip route replace local 0.0.0.0/0 dev lo table "$RT_TABLE"
-	ip rule add fwmark "${FWMARK}/${FWMARK}" lookup "$RT_TABLE" priority "$RT_PRIO" 2>/dev/null
-
-	# IPv6 leak guard (fail-closed): drop LAN IPv6 to the internet so v6 traffic
-	# can't bypass the v4 VPN. Local/ULA/link-local v6 stays allowed.
-	if [ "$IPV6" = "block" ]; then
-		nft -f - <<NFT6
-table inet vpnpool {
-	set localv6 {
-		type ipv6_addr
-		flags interval
-		auto-merge
-		elements = { ::1/128, ::/128, fc00::/7, fe80::/10, ff00::/8, 64:ff9b::/96 }
-	}
-	chain v6filter {
-		type filter hook forward priority -90; policy accept;
-		meta nfproto ipv6 iifname "$LAN_IF" ip6 daddr != @localv6 reject
-	}
-}
-NFT6
-		[ $? -eq 0 ] || log "route.sh: nft failed to apply IPv6 leak guard"
+	# No table at all. With the kill-switch on, fail closed anyway: the same marking without
+	# the per-client sets (the usual suspect), so the LAN is blocked, not leaked.
+	if [ "$KILLSWITCH" = "1" ]; then
+		if apply_table "" "" "$V6" || apply_table "" "" ""; then
+			policy_route
+			log "route.sh: nft refused the routing rules — kill-switch: blocking table without per-client rules installed"
+			exit 1
+		fi
 	fi
+	log "route.sh: nft failed to apply routing table — VPN routing is NOT active"
+	exit 1
 	;;
 down)
 	nft delete table inet vpnpool 2>/dev/null
