@@ -45,6 +45,9 @@ start_service() {
 		procd_set_param stdout 1
 		procd_set_param stderr 1
 		procd_set_param pidfile /var/run/vpnpool.pid
+		# TERM handler: routes down first, then sing-box (up to ~13 s) — more than procd's
+		# default 5 s before SIGKILL
+		procd_set_param term_timeout 15
 		procd_close_instance
 	else
 		logger -t vpnpool "disabled in /etc/config/vpnpool (option enabled '0'); daemon not starting"
@@ -53,18 +56,18 @@ start_service() {
 	start_tgbot_instance
 }
 
-# On a config-change reload procd re-runs start_service and diffs instances: the daemon
-# instance is left running if its params are unchanged, while the tgbot instance is
-# started/stopped to match telegram_control and restarted when its signature changed. So
-# editing the bot settings in the UI never bounces the tunnel. rpcd's set_option calls
-# `/etc/init.d/vpnpool reload` for telegram_control / token / chat / via_proxy.
-reload_service() {
-	start_service
-}
+# `reload` (no reload_service here) = rc.common's start = procd "service set": procd diffs the
+# instances — an unchanged daemon keeps running, an instance no longer listed is stopped
+# (enabled=0 -> the daemon gets TERM, the bot stays), a changed one (bot signature) is
+# restarted. NOTE: a reload_service that called start_service directly sent NOTHING to procd
+# (no procd_open_service / close_service around it) — 1.x reloads were silent no-ops.
+# Users: lib.sh power_off/on (LuCI switch, schedule, Telegram /on), rpcd set_option
+# (telegram_control / token / chat / via_proxy).
 
 stop_service() {
 	# Routing/sing-box teardown is done by vpnpoold's own TERM handler; procd stops both
-	# instances (daemon + tgbot) on stop/restart.
+	# instances (daemon + tgbot) on stop/restart. The user's "off" (LuCI, schedule) does NOT
+	# use stop — it sets enabled=0 + reload, so the Telegram bot keeps running for /on.
 	return 0
 }
 

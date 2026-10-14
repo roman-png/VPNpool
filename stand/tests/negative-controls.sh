@@ -156,18 +156,37 @@ ctl daemon-killswitch-ignored daemon fail 'daemon/route-policy-table ;daemon/rel
 	"$LIBX/lib.sh" '[ "$1" = 1 ] && { echo up; return 0; }' '[ "$1" = 1 ] && { echo down; return 0; }'
 ctl daemon-reload-drops-routes-first daemon fail 'daemon/reload-killswitch-dead-tunnel-keeps-routes ;daemon/reload-healthy-keeps-routes ;daemon/reload-dead-tunnel-failsafe-down ;daemon/periodic-refresh-through-failsafe ' \
 	"$LIBX/vpnpoold" '		start_singbox   # routes stay as they are while it restarts' '		"$LIBEXEC/route.sh" down; start_singbox'
-ctl daemon-startup-keeps-stale-table daemon fail 'daemon/startup-dead-tunnel-clears-stale-routes ' \
+ctl daemon-startup-keeps-stale-table daemon fail 'daemon/startup-dead-tunnel-clears-stale-routes ;daemon/startup-guard-clears-stale-table-before-first-build ' \
 	"$LIBX/vpnpoold" 'if [ "$ROUTED" != 0 ] || [ -n "${2:-}" ]; then' 'if [ "$ROUTED" != 0 ] || [ "${2:-}" = reapply ]; then'
 ctl daemon-watchdog-no-failsafe daemon fail 'daemon/watchdog-dead-tunnel-takes-routes-down ' \
 	"$LIBX/vpnpoold" '			apply_routing 0' '			:'
-ctl daemon-reload-nested daemon fail 'daemon/reload-queued-not-nested ' \
-	"$LIBX/vpnpoold" 'if [ "$RELOADING" = 1 ]; then' 'if false; then'
+# review E: work done INSIDE the trap again -> ROUTED out of step with the table
+ctl daemon-work-in-trap daemon fail 'daemon/signal-during-route-up-no-desync ;daemon/reload-queued-not-nested ' \
+	"$LIBX/vpnpoold" 'on_usr1() { [ "$PENDING" = refetch ] || PENDING=reload; }' 'on_usr1() { PENDING=reload; serve_pending; }'
+ctl daemon-no-startup-guard daemon fail 'daemon/startup-guard-clears-stale-table-before-first-build ;daemon/startup-guard-killswitch-blocks-before-first-build ' \
+	"$LIBX/vpnpoold" '	apply_routing 0 guard' '	:'
+ctl daemon-stop-waits-for-telegram daemon fail 'daemon/stop-routes-down-first-notify-in-background ' \
+	"$LIBX/vpnpoold" '	( tg_notify "🔴 vpnpool: stopped" ) </dev/null >/dev/null 2>&1 &' '	tg_notify "🔴 vpnpool: stopped"'
 ctl daemon-dead-set-erases-pin daemon fail 'daemon/preferred-in-dead-set-hands-to-auto-keeps-pin ;daemon/preferred-recovered-switches-back ' \
 	"$LIBX/vpnpoold" 'PREF_DEAD_LOGGED=$pref' 'PREF_DEAD_LOGGED=$pref; uci -q delete vpnpool.main.preferred_node; uci commit vpnpool'
 ctl nodecheck-judges-without-wan daemon fail 'daemon/nodecheck-wan-down-judges-nothing ' \
 	"$LIBX/nodecheck.sh" 'if ! wan_alive; then' 'if false; then'
 ctl route-delete-then-add daemon fail 'daemon/route-up-atomic-idempotent ' \
-	"$LIBX/route.sh" '	if ! nft -f - <<NFT' '	nft delete table inet vpnpool 2>/dev/null; if ! nft -f - <<NFT'
+	"$LIBX/route.sh" '		nft -f - <<NFT' '		nft delete table inet vpnpool 2>/dev/null; nft -f - <<NFT'
+# review A: a refused re-apply "rolls back" by deleting the working table
+ctl route-failure-deletes-table daemon fail 'daemon/route-refused-reapply-keeps-old-table ' \
+	"$LIBX/route.sh" '	if nft list table inet vpnpool >/dev/null 2>&1; then' '	nft delete table inet vpnpool 2>/dev/null; if nft list table inet vpnpool >/dev/null 2>&1; then'
+ctl route-no-killswitch-fallback daemon fail 'daemon/route-refused-no-table-killswitch-blocks ' \
+	"$LIBX/route.sh" '		if apply_table "" "" "$V6" || apply_table "" "" ""; then' '		if false; then'
+# review B: IPv6 guard left out of the transaction
+ctl ipv6-guard-dropped daemon fail 'daemon/route-up-atomic-idempotent ' \
+	"$LIBX/route.sh" 'if apply_table "$CLIENT_SET" "$CLIENT_RULE" "$V6"; then' 'if apply_table "$CLIENT_SET" "$CLIENT_RULE" ""; then'
+ctl clash-delay-criterion-broken daemon fail 'daemon/alive-criterion ;daemon/nodecheck-wan-up-strikes-dead-node ' \
+	"$LIBX/lib.sh" 'clash_delay_alive() { case "$1" in *' 'clash_delay_alive() { return 0; case "$1" in *'
+ctl power-off-stops-everything tgbot fail 'tgbot/power-off-keeps-bot ' \
+	"$LIBX/power.sh" '	/etc/init.d/vpnpool reload >/dev/null 2>&1' '	/etc/init.d/vpnpool stop >/dev/null 2>&1'
+ctl initd-reload-noop-again tgbot fail 'tgbot/initd-reload-really-reaches-procd ' \
+	package/vpnpool/files/etc/init.d/vpnpool 'service_triggers() {' 'reload_service() { start_service; }; service_triggers() {'
 ctl alive-criterion-000-alive daemon fail 'daemon/alive-criterion ;daemon/probe-services-any-vs-all ' \
 	"$LIBX/lib.sh" 'svc_code_alive() { case "$1" in [1-5][0-9][0-9])' 'svc_code_alive() { case "$1" in [0-9][0-9][0-9])'
 ctl node-test-uses-lan-selector daemon fail 'daemon/node-tests-use-test-selector-only ' \

@@ -1,8 +1,8 @@
 #!/bin/sh
 # vpnpool scheduler: render the uci schedule into a marked block in the root
 # crontab. Times are "HH:MM" (24h, router local time).
-#   sched_off     -> stop the service at that time
-#   sched_on      -> start the service at that time
+#   sched_off     -> VPN off at that time (power.sh off: daemon stopped, the bot stays)
+#   sched_on      -> VPN on at that time (power.sh on)
 #   sched_refresh -> re-fetch the subscription (USR2 to the daemon)
 # The crontab is rewritten through a temp file + mv (never left half-written). Only a
 # COMPLETE "BEGIN … END" pair is removed: a lone BEGIN (e.g. left by an older version)
@@ -55,8 +55,8 @@ if [ "$(uci -q get vpnpool.main.sched_enabled)" = "1" ]; then
 			log "sched: ignoring invalid time '$1' (expected HH:MM)"; rc=2
 		fi
 	}
-	add_job "$OFF" "/etc/init.d/vpnpool stop"
-	add_job "$ON"  "/etc/init.d/vpnpool start"
+	add_job "$OFF" "/usr/libexec/vpnpool/power.sh off"
+	add_job "$ON"  "/usr/libexec/vpnpool/power.sh on"
 	add_job "$REF" "kill -USR2 \$(cat /var/run/vpnpool.pid 2>/dev/null) 2>/dev/null"
 	if [ -n "$JOBS" ]; then
 		{ echo "$BEGIN"; printf '%s' "$JOBS"; echo "$END"; } >> "$TMP"
