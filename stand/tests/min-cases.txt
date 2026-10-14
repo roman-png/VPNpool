@@ -5,6 +5,6 @@ build 24
 rpcd 194
 sched 4
 adaptive 3
-fetch 5
+fetch 9
 status 6
 uitext 6

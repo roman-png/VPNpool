@@ -45,7 +45,7 @@ sh "$FETCH" > "$FXF/log2" 2>&1; FRC=$?
 begin "fetch/primary-fails-extra-ok-keeps-primary-nodes"
 expect_eq "exit code" "$FRC" 0
 expect_eq "pool still has Pri1/Pri2 + Ext1" "$(pool_tags)" '["Ext1","Pri1","Pri2"]'
-end 2.5
+end
 
 # ---- everything down: whole cache served ----
 fetch_setup 200 200; sh "$FETCH" >/dev/null 2>&1          # repopulate the cache
@@ -62,4 +62,45 @@ expect_true "log mentions the fetch at all" grep -q 'fetch:' "$FXF/log1"
 end
 begin "fetch/token-masked-in-log"
 expect_eq "SECRETTOKEN123 occurrences in log" "$(cat "$FXF/log1" "$FXF/log2" "$FXF/log3" | gcount SECRETTOKEN123)" 0
-end 2.5
+end
+
+# ---- flash wear (2.11): an unchanged subscription does not rewrite its cached copy ----
+reset_state
+uci set vpnpool.main.subscription_url="$PRI"; uci add_list vpnpool.main.extra_sub="$EXT"; uci commit vpnpool
+fetch_setup 200 200; sh "$FETCH" >/dev/null 2>&1
+touch -d '2000-01-01 00:00:00' /etc/vpnpool/sources_cache/s-*.raw
+sh "$FETCH" >/dev/null 2>&1
+begin "fetch/unchanged-source-cache-not-rewritten"
+expect_eq "cached copies" "$(ls /etc/vpnpool/sources_cache/s-*.raw 2>/dev/null | wc -l)" 2
+expect_eq "cached copies still dated 2000" "$(for f in /etc/vpnpool/sources_cache/s-*.raw; do date -r "$f" +%Y; done | sort -u)" 2000
+end
+cp "$FXF/extra.txt" "$FXF/extra.orig"
+printf 'vless://%s@203.0.113.64:443?security=tls&sni=a.example#Ext2\n' "$U" >> "$FXF/extra.txt"
+sh "$FETCH" >/dev/null 2>&1
+begin "fetch/changed-source-cache-rewritten"   # positive control for the case above
+expect_eq "exactly one cached copy rewritten" "$(for f in /etc/vpnpool/sources_cache/s-*.raw; do date -r "$f" +%Y; done | grep -vc 2000)" 1
+end
+cp "$FXF/extra.orig" "$FXF/extra.txt"
+
+# ---- a removed subscription leaves the cache (its nodes must not come back from it) ----
+uci -q delete vpnpool.main.extra_sub; uci commit vpnpool
+fetch_setup 500 500
+sh "$FETCH" >/dev/null 2>&1
+begin "fetch/removed-source-dropped-from-cache"
+expect_eq "pool = primary from cache only" "$(pool_tags)" '["Pri1","Pri2"]'
+expect_eq "one cached copy left" "$(ls /etc/vpnpool/sources_cache/s-*.raw 2>/dev/null | wc -l)" 1
+end
+
+# ---- start-up throttle (2.1): no re-download within 10 min unless the source set changed ----
+due() { sh -c '. /usr/libexec/vpnpool/lib.sh; fetch_due'; }
+sig() { sh -c '. /usr/libexec/vpnpool/lib.sh; sources_sig'; }
+begin "fetch/fetch-due-throttle"
+expect_true "stamp written" [ -s /tmp/vpnpool/.last_fetch ]
+expect_true "not due right after a fetch" sh -c '! sh -c ". /usr/libexec/vpnpool/lib.sh; fetch_due"'
+echo "$(( $(date +%s) - 700 )) $(sig)" > /tmp/vpnpool/.last_fetch
+expect_true "due after 700 s" due
+echo "$(date +%s) $(sig)" > /tmp/vpnpool/.last_fetch
+expect_true "not due again (control for the next check)" sh -c '! sh -c ". /usr/libexec/vpnpool/lib.sh; fetch_due"'
+uci add_list vpnpool.main.extra_sub="$EXT"; uci commit vpnpool
+expect_true "due at once when a subscription was added" due
+end
