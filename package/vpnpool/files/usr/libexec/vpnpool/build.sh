@@ -71,22 +71,11 @@ if [ "${CNT:-0}" -lt 1 ]; then
 	fail
 fi
 
-# Tag hygiene BEFORE the generator. Every tag must be unique across the whole config, so:
-#  - a node named like one of the generator's own groups/outbounds (auto, proxy, direct, …)
-#    is dropped — it would make `sing-box check` fail with "duplicate tag" on EVERY rebuild;
-#  - a tag that repeats is kept once (first occurrence) and the repeats are dropped;
-#  - a node without a tag is dropped (nothing could reference it).
-RESJSON=$(printf '%s\n' $RESERVED_TAGS | jq -R . | jq -cs .)
-jq -c --argjson r "$RESJSON" '
-	map(select((.tag|type)=="string" and (.tag|length)>0 and ((.tag) as $t | ($r|index($t))==null)))
-	| reduce .[] as $n ({s:{}, o:[]}; if .s[$n.tag] then . else (.s[$n.tag]=true | .o += [$n]) end)
-	| .o' "$NB" > "$NB.x" 2>/dev/null && mv "$NB.x" "$NB" || fail
-CNT2=$(jq 'length' "$NB" 2>/dev/null || echo 0)
-[ "$CNT2" -lt "$CNT" ] && log "build: dropped $((CNT - CNT2)) node(s) with a reserved or repeated name"
-CNT=$CNT2
-if [ "${CNT:-0}" -lt 1 ]; then
-	log "build: 0 nodes left after the name check"; fail
-fi
+# Tag names: parser.uc is the ONLY owner — it renames a node named like one of the
+# generator's own outbounds (its RESERVED_TAGS: auto, proxy, direct, block, dns-out,
+# vpnpool-test) and gives repeated names unique suffixes. The stand test
+# build/generator-tags-reserved-in-parser checks that every tag the generator adds is in that
+# list, so no second copy of the rule lives here.
 
 # Persistent tag->link map for the "Save node" feature: re-parse the SAME inputs
 # with --keep-link so every displayed node's original vless:// link is recorded.
@@ -203,7 +192,7 @@ VPNPOOL_PROBE_URL=$(primary_probe_url) ucode /usr/libexec/vpnpool/generator.uc "
 # down. Instead, when check names a specific node, drop just that node (and its tag from
 # the urltest/selector groups) and re-check, up to a bounded number of times.
 #   "outbounds[3].server_port: …" / "outbound[3]" / "endpoints[0]…" -> that array element
-#   "duplicate outbound/endpoint tag: T"                              -> the LAST node named T
+# (Repeated / reserved names never get here: parser.uc makes every tag unique.)
 NODE_TYPES='["vless","vmess","trojan","shadowsocks","shadowtls","hysteria","hysteria2","tuic","wireguard","awg","socks","http","anytls"]'
 dropped=0; tries=0
 while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
@@ -212,7 +201,7 @@ while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 		log "build: >50 bad outbounds (dropped $dropped so far), giving up; keeping previous config — check subscription source quality"
 		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; fail
 	fi
-	arr=""; idx=""; dup=0
+	arr=""; idx=""
 	# sing-box names the offending element by its ARRAY (plural, "outbounds[3]" — decode
 	# errors) or singular ("outbound[3]" — init errors); WireGuard/AmneziaWG live in
 	# .endpoints on >=1.13. The array to prune comes from the match itself.
@@ -220,15 +209,6 @@ while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 	if [ -n "$m" ]; then
 		idx=${m##*[}; idx=${idx%]}
 		case "$m" in endpoint*) arr=endpoints ;; *) arr=outbounds ;; esac
-	else
-		dt=$(sed -n 's/.*duplicate [a-z/]* *tag: *//p' "$SB_DATA/check.err" | head -1 | tr -d '\r')
-		if [ -n "$dt" ]; then
-			loc=$(jq -r --arg t "$dt" --argjson nt "$NODE_TYPES" '
-				[ (.outbounds | to_entries[] | select(.value.tag==$t and ((.value.type) as $y | $nt|index($y))!=null) | "outbounds \(.key)"),
-				  ((.endpoints // []) | to_entries[] | select(.value.tag==$t and ((.value.type) as $y | $nt|index($y))!=null) | "endpoints \(.key)") ]
-				| last // ""' "$SB_CONF.new" 2>/dev/null)
-			if [ -n "$loc" ]; then arr=${loc% *}; idx=${loc#* }; dup=1; fi
-		fi
 	fi
 	if [ -z "$idx" ]; then
 		log "build: sing-box check failed (non-node error), keeping previous config"
@@ -241,15 +221,11 @@ while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; fail
 	fi
 	badtag=$(jq -r --arg a "$arr" --argjson i "$idx" '.[$a][$i].tag // ""' "$SB_CONF.new" 2>/dev/null)
-	# For a duplicate the tag still exists (its first holder stays), so the groups only lose
-	# the repeated entry; otherwise the tag leaves every group.
-	jq --arg arr "$arr" --argjson i "$idx" --arg t "$badtag" --argjson dup "$dup" '
+	jq --arg arr "$arr" --argjson i "$idx" --arg t "$badtag" '
 		del(.[$arr][$i])
 		| .outbounds |= map(
 			if (.type=="urltest" or .type=="selector") and (.outbounds|type=="array")
-			then (if $dup==1 then .outbounds |= reduce .[] as $x ([]; if any(.[]; .==$x) then . else . + [$x] end)
-			      else .outbounds -= [$t] end)
-			else . end)
+			then .outbounds -= [$t] else . end)
 	' "$SB_CONF.new" > "$SB_CONF.tmp" 2>/dev/null && mv "$SB_CONF.tmp" "$SB_CONF.new" || {
 		log "build: failed to prune bad node, keeping previous config"; fail; }
 	log "build: dropped node \"$badtag\" rejected by sing-box: $(grep -m1 -oE '(FATAL|ERROR).*' "$SB_DATA/check.err" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-160)"
