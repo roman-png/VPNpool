@@ -94,16 +94,26 @@ expect_jq "new node Good4 reached the config" "$(cat /etc/vpnpool/sing-box.json 
 end
 
 # The link poisons above are now dropped / renamed by parser.uc itself (stage 5 + 2.1 parser
-# part). build.sh's OWN pruning of a `sing-box check` error (2.1: outbounds[N] / endpoints[N] /
-# duplicate tag) is still needed for what the parser passes through verbatim — a sing-box
-# JSON source: one outbound there with port 70000 must not freeze the pool either.
+# part; JSON-source outbounds get the same guards). build.sh's OWN pruning of a `sing-box check`
+# error (2.1: outbounds[N] / endpoints[N] / duplicate tag) is still needed for what no parser
+# guard can foresee — e.g. a JSON outbound with a field this sing-box does not know.
 printf '%s\n' "$GOOD" > "$SUB"
-printf '{"outbounds":[{"type":"vless","tag":"JsonPort70000","server":"203.0.113.56","server_port":70000,"uuid":"%s"}]}\n' "$U" > "$T_STATE/build/poison.json"
+printf '{"outbounds":[{"type":"vless","tag":"JsonUnknownField","server":"203.0.113.56","server_port":443,"uuid":"%s","bogus_field":1}]}\n' "$U" > "$T_STATE/build/poison.json"
 run_build "$SUB" "$T_STATE/build/poison.json"
-begin "build/poison-json-source-port-70000"
+begin "build/poison-json-source-unknown-field"
 expect_good_config
-expect_jq "bad node not in config" "$(cat /etc/vpnpool/sing-box.json 2>/dev/null)" '[.outbounds[].tag] | index("JsonPort70000") == null'
+expect_jq "bad node not in config" "$(cat /etc/vpnpool/sing-box.json 2>/dev/null)" '[.outbounds[].tag] | index("JsonUnknownField") == null'
 end 2.1
+
+# a reality short_id longer than 8 bytes makes sing-box PANIC (no outbounds[N] in the message,
+# nothing for build.sh to prune) -> the parser must drop it from a JSON source too
+printf '{"outbounds":[{"type":"vless","tag":"JsonLongSid","server":"203.0.113.57","server_port":443,"uuid":"%s","tls":{"enabled":true,"server_name":"a.example","utls":{"enabled":true,"fingerprint":"chrome"},"reality":{"enabled":true,"public_key":"%s","short_id":"0123456789abcdef0123"}}}]}\n' "$U" "$PBK" > "$T_STATE/build/longsid.json"
+run_build "$SUB" "$T_STATE/build/longsid.json"
+begin "build/json-source-long-short-id-no-panic"
+expect_good_config
+expect_jq "bad node not in config" "$(cat /etc/vpnpool/sing-box.json 2>/dev/null)" '[.outbounds[].tag] | index("JsonLongSid") == null'
+expect_true "no panic in check.err" sh -c '! grep -q panic /tmp/vpnpool/check.err'
+end
 
 # ---- xhttp: unsupported transport must not become a (dead) node in the config ----
 printf '%s\n%s\n' "$GOOD" "vless://$U@203.0.113.55:443?type=xhttp&security=tls&sni=x.example&path=%2Fx#XHTTP" > "$SUB"

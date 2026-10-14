@@ -81,20 +81,35 @@ ctl parser-tag-one-attempt parser fail 'parser/tag-suffix-unique-loop ' \
 	"$LIBX/parser.uc" 'while (used_tags[cand] || RESERVED_TAGS[cand]) {' 'if (used_tags[cand] || RESERVED_TAGS[cand]) {'
 # 2.1: reserved tags not reserved
 ctl parser-reserved-off parser fail 'parser/reserved-tags-renamed ;parser/json-outbound-reserved-tag ;parser/report-reasons ' \
-	"$LIBX/parser.uc" "let RESERVED_TAGS = { auto: 1, proxy: 1, direct: 1, block: 1, 'dns-out': 1 };" 'let RESERVED_TAGS = {};'
-# id: port left out of the identity
-ctl parser-id-without-port parser fail 'parser/id-changes-with-port-and-credential ' \
-	"$LIBX/parser.uc" 'port, cred,' 'cred,'
+	"$LIBX/parser.uc" "let RESERVED_TAGS = { auto: 1, proxy: 1, direct: 1, block: 1, 'dns-out': 1, 'vpnpool-test': 1 };" 'let RESERVED_TAGS = {};'
+# id: TLS left out of the canonical config -> fp chrome/firefox share an id
+ctl parser-id-skips-tls parser fail 'parser/id-covers-every-config-field ' \
+	"$LIBX/parser.uc" "k != '_link') c[k] = ob[k];" "k != '_link' && k != 'tls') c[k] = ob[k];"
 # id depends on the display name -> renaming changes it
-ctl parser-id-uses-name parser fail 'parser/id-stable-across-order-and-name ;parser/id-changes-with-port-and-credential ' \
-	"$LIBX/parser.uc" 'port, cred,' 'port, cred, ob.tag,'
+ctl parser-id-uses-name parser fail 'parser/id-stable-across-order-and-name ;parser/id-changes-with-port-and-credential ;parser/id-json-key-order-and-link-agree ;XPASS parser/id-unique-in-output ' \
+	"$LIBX/parser.uc" "if (k != 'tag' && k != 'id' && k != '_link')" "if (k != 'id' && k != '_link')"
 # id leaks into the default output -> sing-box check rejects the config
-ctl parser-id-always parser fail 'parser/id-not-in-default-output ;parser/corpus-accepted-by-sing-box-check ' \
+ctl parser-id-always parser fail 'parser/id-not-in-default-output ;parser/corpus-accepted-by-sing-box-check ;parser/json-source-guards ' \
+	"$LIBX/parser.uc" 'let id = (is_awg || !(WITH_ID || REPORT)) ? null : node_id(ob);' 'let id = is_awg ? null : node_id(ob);' \
 	"$LIBX/parser.uc" 'if (WITH_ID && id) ob.id = id;' 'if (id) ob.id = id;'
+# dedup without the name -> a user's copy of a subscription node vanishes
+ctl parser-dedup-without-name parser fail 'parser/dedup-keeps-differently-named-node ;parser/dedup-subscription-vs-imported-file ;XPASS parser/id-unique-in-output ' \
+	"$LIBX/parser.uc" "return base + '\x1f' + canon(bare(ob));" 'return canon(bare(ob));'
+# canonical form keeps the JSON key order -> permuted JSON = another node / id
+ctl parser-canon-unsorted parser fail 'parser/json-key-order-dedup ;parser/id-json-key-order-and-link-agree ' \
+	"$LIBX/parser.uc" 'let ks = sort(keys(v), (a, b) => (a < b) ? -1 : ((a > b) ? 1 : 0));' 'let ks = keys(v);'
+# JSON-source outbounds taken unchecked
+ctl parser-json-unguarded parser fail 'parser/json-source-guards ' \
+	"$LIBX/parser.uc" 'let bad = check_json_node(o);' 'let bad = null;'
+ctl build-json-unguarded build fail 'build/json-source-long-short-id-no-panic ' \
+	"$LIBX/parser.uc" 'let bad = check_json_node(o);' 'let bad = null;'
+# hysteria2: the single port is not part of the hop set
+ctl parser-hy2-port-not-hopped parser fail 'parser/hy2-port-hopping ' \
+	"$LIBX/parser.uc" "if (port != null) unshift(ranges, port + ':' + port);" 'if (port != null) ;'
 # stage 5: unknown transports accepted -> dead/poison nodes
 ctl parser-unknown-transport-kept parser fail 'parser/vless-xhttp-refused ;parser/vless-splithttp-refused ;parser/vless-kcp-refused ;parser/trojan-xhttp-refused ;parser/vmess-xhttp-refused ;parser/report-reasons ' \
 	"$LIBX/parser.uc" "	return 'unsupported_transport';" "	return { type: t };"
-ctl build-config-not-installed build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ' \
+ctl build-config-not-installed build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/json-source-long-short-id-no-panic ' \
 	"$LIBX/build.sh" 'mv "$SB_CONF.new" "$SB_CONF"' 'rm -f "$SB_CONF.new"'
 ctl rpcd-add_node-no-signal rpcd fail 'rpcd/add_node/ok ' \
 	"$RPCD" 'uci add_list vpnpool.main.manual_node="$l"; uci commit vpnpool; signal_reload' \
