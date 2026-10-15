@@ -3,7 +3,7 @@
 # Active only while $MOCK_DIR/enabled exists; otherwise defers to the real curl.
 #
 # Rules: $MOCK_DIR/rules, one per line, TAB separated:
-#   <key-glob>  <http_code>  <body-file|->  [<headers-file|->]  [<time_connect>]
+#   <key-glob>  <http_code>  <body-file|->  [<headers-file|->]  [<time_connect>]  [<sleep s>]
 # key = "<METHOD> <url>" with "P " prepended when --proxy/-x is used, e.g.
 #   GET https://sub.example/primary*          200  /tmp/f/primary.b64  /tmp/f/h.txt
 #   P GET https://ifconfig.co/json            200  /tmp/f/ip.json
@@ -11,15 +11,17 @@
 # First matching rule wins. No match => connection refused (http_code 000, exit 7): the
 # stand runs without network, so an unexpected request is a visible failure, not a leak.
 # Every call is appended to $MOCK_DIR/calls.log ("<key>\t<code>").
+# Several transfers in one call (curl URL1 -o F1 URL2 -o F2, or URL1 URL2 to stdout) are
+# answered in order, like curl: each URL pairs with the n-th -o, -w is printed per transfer.
 MOCK_DIR=${MOCK_DIR:-/tmp/curlmock}
 REAL=/usr/bin/curl
 [ -f "$MOCK_DIR/enabled" ] || exec "$REAL" "$@"
 
-url=""; out=""; wfmt=""; hdr=""; fail=0; proxy=""; method=GET; hasdata=0
-nurl=0; nout=0   # several transfers in one call (curl URL1 -o F1 URL2 -o F2): pairs by order
+wfmt=""; hdr=""; fail=0; proxy=""; method=GET; hasdata=0
+nurl=0; nout=0
 while [ $# -gt 0 ]; do
 	case "$1" in
-		-o|--output) nout=$((nout + 1)); if [ "$nout" -eq 1 ]; then out="$2"; else eval "out_$nout=\$2"; fi; shift ;;
+		-o|--output) nout=$((nout + 1)); eval "out_$nout=\$2"; shift ;;
 		-w|--write-out) wfmt="$2"; shift ;;
 		-D|--dump-header) hdr="$2"; shift ;;
 		-x|--proxy) proxy="$2"; shift ;;
@@ -28,50 +30,64 @@ while [ $# -gt 0 ]; do
 		-A|--user-agent|-H|--header|-m|--max-time|--connect-timeout|-e|--referer|-u|--user|-b|--cookie|-c|--cookie-jar|--retry|-r|--range|--limit-rate|--resolve|--interface) shift ;;
 		-f|--fail) fail=1 ;;
 		-*) case "$1" in -*f*) case "$1" in --*) ;; *) fail=1 ;; esac ;; esac ;;   # e.g. -sfL
-		*) nurl=$((nurl + 1)); if [ "$nurl" -eq 1 ]; then url="$1"; else eval "url_$nurl=\$1"; fi ;;
+		*) nurl=$((nurl + 1)); eval "url_$nurl=\$1" ;;
 	esac
 	shift
 done
-# the 2nd.. transfers: the same double, one call each (method / proxy / --fail carried over)
-_i=2
-while [ "$_i" -le "$nurl" ]; do
-	eval "_u=\$url_$_i; _o=\${out_$_i:-}"
-	"$0" -X "$method" ${proxy:+-x "$proxy"} $([ "$fail" = 1 ] && echo -f) ${_o:+-o "$_o"} "$_u"
-	_i=$((_i + 1))
-done
 [ "$method" = GET ] && [ "$hasdata" = 1 ] && method=POST
-key="$method $url"; [ -n "$proxy" ] && key="P $key"
+TAB='	'
+NL='
+'
 
-code=000; body=-; hfile=-; tconn=0
-TAB=$(printf '\t')
-if [ -f "$MOCK_DIR/rules" ]; then
-	while IFS="$TAB" read -r pat c b h t; do
-		[ -n "$pat" ] || continue
-		case "$pat" in \#*) continue ;; esac
-		# shellcheck disable=SC2254
-		case "$key" in
-			$pat) code="$c"; body="${b:--}"; hfile="${h:--}"; tconn="${t:-0.010}"; break ;;
-		esac
-	done < "$MOCK_DIR/rules"
-fi
-printf '%s\t%s\n' "$key" "$code" >> "$MOCK_DIR/calls.log"
-
-[ -n "$hdr" ] && {
-	if [ "$hfile" != - ] && [ -f "$hfile" ]; then cat "$hfile" > "$hdr"; else printf 'HTTP/1.1 %s\r\n\r\n' "$code" > "$hdr"; fi
-}
-emit_body() { [ "$body" != - ] && [ -f "$body" ] && cat "$body"; }
-if [ "$code" != 000 ]; then
-	if [ "$fail" = 1 ] && [ "$code" -ge 400 ]; then :; else
-		if [ -n "$out" ]; then emit_body > "$out"; else emit_body; fi
+transfer() {   # $1=url $2=output file ("" = stdout) -> sets RC
+	url="$1"; out="$2"
+	key="$method $url"; [ -n "$proxy" ] && key="P $key"
+	code=000; body=-; hfile=-; tconn=0; slp=0
+	if [ -f "$MOCK_DIR/rules" ]; then
+		while IFS="$TAB" read -r pat c b h t s; do
+			[ -n "$pat" ] || continue
+			case "$pat" in \#*) continue ;; esac
+			# shellcheck disable=SC2254
+			case "$key" in
+				$pat) code="$c"; body="${b:--}"; hfile="${h:--}"; tconn="${t:-0.010}"; slp="${s:-0}"; break ;;
+			esac
+		done < "$MOCK_DIR/rules"
 	fi
-fi
-if [ -n "$wfmt" ]; then
-	[ "$code" = 000 ] && tc=0 || tc="$tconn"
-	# size_download = body bytes; speed_download = the same number (as if it took 1 s)
-	sz=0; [ "$code" != 000 ] && [ "$body" != - ] && [ -f "$body" ] && sz=$(wc -c < "$body" | tr -d ' ')
-	printf '%s' "$wfmt" | sed -e "s/%{http_code}/$code/g" -e "s/%{time_connect}/$tc/g" -e "s/%{time_total}/$tc/g" \
-		-e "s/%{size_download}/$sz/g" -e "s/%{speed_download}/$sz/g" -e 's/\\n/\n/g'
-fi
-[ "$code" = 000 ] && exit 7
-[ "$fail" = 1 ] && [ "$code" -ge 400 ] && exit 22
-exit 0
+	printf '%s\t%s\n' "$key" "$code" >> "$MOCK_DIR/calls.log"
+	[ "$slp" != 0 ] && sleep "$slp"
+	[ -n "$hdr" ] && {
+		if [ "$hfile" != - ] && [ -f "$hfile" ]; then cat "$hfile" > "$hdr"; else printf 'HTTP/1.1 %s\r\n\r\n' "$code" > "$hdr"; fi
+	}
+	if [ "$code" != 000 ]; then
+		if [ "$fail" = 1 ] && [ "$code" -ge 400 ]; then :; else
+			if [ "$body" != - ] && [ -f "$body" ]; then
+				if [ -n "$out" ]; then cat "$body" > "$out"; else cat "$body"; fi
+			fi
+		fi
+	fi
+	if [ -n "$wfmt" ]; then
+		[ "$code" = 000 ] && tc=0 || tc="$tconn"
+		# size_download = body bytes; speed_download = the same number (as if it took 1 s)
+		# (shell substitutions, not sed: the status suite counts the processes of a poll)
+		sz=0
+		case "$wfmt" in *size_download*|*speed_download*)
+			[ "$code" != 000 ] && [ "$body" != - ] && [ -f "$body" ] && sz=$(wc -c < "$body" | tr -d ' ') ;;
+		esac
+		w=$wfmt
+		w=${w//'%{http_code}'/$code}; w=${w//'%{time_connect}'/$tc}; w=${w//'%{time_total}'/$tc}
+		w=${w//'%{size_download}'/$sz}; w=${w//'%{speed_download}'/$sz}; w=${w//'\n'/$NL}
+		printf '%s' "$w"
+	fi
+	RC=0
+	[ "$code" = 000 ] && RC=7
+	[ "$fail" = 1 ] && [ "$code" -ge 400 ] && RC=22
+	return 0
+}
+
+i=1; RC=7
+while [ "$i" -le "$nurl" ]; do
+	eval "_u=\$url_$i; _o=\${out_$i:-}"
+	transfer "$_u" "$_o"
+	i=$((i + 1))
+done
+exit "$RC"

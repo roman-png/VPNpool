@@ -72,8 +72,8 @@ reset_state() {   # fresh config + empty runtime/persistent dirs + no mocks + no
 }
 
 mock_on()   { mkdir -p /tmp/curlmock; : > /tmp/curlmock/enabled; : > /tmp/curlmock/rules; }
-mock_rule() {   # <key-glob> <code> [body-file] [headers-file] [time_connect]
-	printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "${3:--}" "${4:--}" "${5:-0.010}" >> /tmp/curlmock/rules
+mock_rule() {   # <key-glob> <code> [body-file] [headers-file] [time_connect] [sleep seconds]
+	printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "${3:--}" "${4:--}" "${5:-0.010}" "${6:-0}" >> /tmp/curlmock/rules
 }
 mock_calls() { gcount "$1" /tmp/curlmock/calls.log; }
 
