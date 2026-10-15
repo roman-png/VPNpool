@@ -1,7 +1,4 @@
 # UI text guard baseline — known violations; may only SHRINK (see stand/tests/ui-text-guard.sh)
-luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/dashboard.js	urltest	AUTO (urltest)
-luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/dashboard.js	urltest	Select which nodes take part in automatic switching (urltest). Unchecked nodes stay available for manual selection only.
-luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/dashboard.js	urltest	auto / urltest
 luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/diagnostics.js	clash	Clash API
 luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/diagnostics.js	clash	Clash API reachable
 luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/diagnostics.js	fwmark	fwmark / table
@@ -12,21 +9,15 @@ luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/diagnostics.js	rul
 luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/diagnostics.js	srs	SRS cache present
 luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/diagnostics.js	srs	SRS cache size (KB)
 luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/diagnostics.js	tproxy	tproxy port
-luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/routing.js	srs	Community lists (itdoginfo/allow-domains, auto-updated SRS)
 luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/settings.js	clash	Clash API
 luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/settings.js	fwmark	fwmark
-luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/settings.js	generate_204	A bare host is probed as http://host/generate_204; a full URL is used as-is. Leave empty to fall back to a generic connectivity check.
-luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/settings.js	snake_case	A bare host is probed as http://host/generate_204; a full URL is used as-is. Leave empty to fall back to a generic connectivity check.
 luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/settings.js	tproxy	tproxy port
-luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/settings.js	urltest	Auto-switch to a working node (urltest)
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	clash	Clash API
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	clash	Clash API reachable
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	clash	Clash API доступен
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	fwmark	fwmark
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	fwmark	fwmark / table
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	fwmark	fwmark / таблица
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	generate_204	A bare host is probed as http://host/generate_204; a full URL is used as-is. Leave empty to fall back to a generic connectivity check.
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	generate_204	Голый хост проверяется как http://host/generate_204; полный URL используется как есть. Пусто — откат к обычной проверке связи.
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	nft	nft-таблица podkop
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	nft	nft-таблица zapret
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	nft	podkop nft table
@@ -35,23 +26,9 @@ luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	pid	PID sing-bo
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	pid	sing-box PID
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	ruleset	Community rule-sets
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	ruleset	Списки сообществ (rule-set)
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	snake_case	A bare host is probed as http://host/generate_204; a full URL is used as-is. Leave empty to fall back to a generic connectivity check.
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	snake_case	Голый хост проверяется как http://host/generate_204; полный URL используется как есть. Пусто — откат к обычной проверке связи.
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	srs	Community lists (itdoginfo/allow-domains, auto-updated SRS)
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	srs	SRS cache present
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	srs	SRS cache size (KB)
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	srs	SRS-кэш есть
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	srs	Размер SRS-кэша (КБ)
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	srs	Списки сообществ (itdoginfo/allow-domains, авто-SRS)
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	tproxy	tproxy port
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	tproxy	порт tproxy
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	urltest	AUTO (urltest)
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	urltest	Auto-switch to a working node (urltest)
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	urltest	Select which nodes take part in automatic switching (urltest). Unchecked nodes stay available for manual selection only.
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	urltest	auto / urltest
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	urltest	АВТО (urltest)
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	urltest	Авто-переключение на рабочий узел (urltest)
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	urltest	Выберите узлы, участвующие в авто-переключении (urltest). Невыбранные останутся доступны только для ручного выбора.
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	urltest	авто / urltest
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	urltest	— auto (urltest) —
-luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	urltest	— авто (urltest) —
