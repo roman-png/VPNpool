@@ -392,8 +392,19 @@ case "\$1" in
 esac
 exit 0
 EOF
-chmod +x "$ISH/opkg"
+# apk double (OpenWrt 25.12 stand): same idea; RAM flow = `apk fetch` + `apk extract`
+cat > "$ISH/apk" <<EOF
+#!/bin/sh
+case "\$1" in
+	--print-arch) cat "\$ESH/arch" ;;
+	fetch) while [ \$# -gt 0 ]; do [ "\$1" = -o ] && { shift; : > "\$1/sing-box-1.0-r1.apk"; }; shift; done ;;
+	extract) while [ \$# -gt 0 ]; do [ "\$1" = --destination ] && { shift; mkdir -p "\$1/usr/bin"; cp "$EW/stock.bak" "\$1/usr/bin/sing-box"; }; shift; done ;;
+esac
+exit 0
+EOF
+chmod +x "$ISH/opkg" "$ISH/apk"
 : > "$EW/pkg/vpnpool_2.0.0-r1_all.ipk"; : > "$EW/pkg/luci-app-vpnpool_2.0.0-r1_all.ipk"
+: > "$EW/pkg/vpnpool-2.0.0-r1.apk"; : > "$EW/pkg/luci-app-vpnpool-2.0.0-r1.apk"
 HOOKF=/etc/hotplug.d/iface/99-vpnpool-singbox-ram
 INST() {   # <VPNPOOL_AWG> <VPNPOOL_RAM_SINGBOX> — runs install.sh; IOUT / IRC
 	run_with_timeout 180 env PATH="$ISH:$PATH" ESH="$ESH" ESRV="$ESRV" ENGINE_MEMINFO="$ESH/meminfo" \
