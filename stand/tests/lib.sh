@@ -87,23 +87,32 @@ metric() { echo "METRIC $1=$2"; echo "$1=$2" >> "$T_STATE/metrics"; }
 
 # run_with_timeout <seconds> <cmd...>  — busybox here has no `timeout` applet.
 # Exit 124 if the command had to be killed (same convention as coreutils timeout).
+# A background watchdog kills the command on timeout; the caller just waits for the command, so a
+# 10 ms command costs 10 ms (polling with `sleep 1` — busybox here takes integers only — made every
+# call cost at least a second).
 run_with_timeout() {
 	secs=$1; shift
 	"$@" &
 	_rwt_pid=$!
-	_rwt_i=0
-	while kill -0 "$_rwt_pid" 2>/dev/null; do
-		if [ "$_rwt_i" -ge "$secs" ]; then
-			pkill_tree "$_rwt_pid"
-			kill -TERM "$_rwt_pid" 2>/dev/null; sleep 1; kill -KILL "$_rwt_pid" 2>/dev/null
-			wait "$_rwt_pid" 2>/dev/null
-			return 124
-		fi
-		sleep 1   # busybox sleep here takes integers only
-		_rwt_i=$((_rwt_i + 1))
-	done
-	wait "$_rwt_pid"
+	_rwt_flag="$T_STATE/.rwt.$_rwt_pid"; rm -f "$_rwt_flag"
+	(
+		_s=""
+		trap '[ -n "$_s" ] && kill "$_s"; exit 0' TERM
+		_i=0
+		while [ "$_i" -lt "$secs" ]; do sleep 1 & _s=$!; wait "$_s"; _i=$((_i + 1)); done
+		: > "$_rwt_flag"
+		pkill_tree "$_rwt_pid"
+		kill -TERM "$_rwt_pid" 2>/dev/null; sleep 1; kill -KILL "$_rwt_pid" 2>/dev/null
+	) 2>/dev/null &
+	_rwt_wd=$!
+	wait "$_rwt_pid"; _rwt_rc=$?
+	kill -TERM "$_rwt_wd" 2>/dev/null; wait "$_rwt_wd" 2>/dev/null
+	if [ -f "$_rwt_flag" ]; then rm -f "$_rwt_flag"; return 124; fi
+	return "$_rwt_rc"
 }
+
+# msleep <ms> — sub-second sleep (busybox sleep here takes integers only; ucode spawns in ~1 ms)
+msleep() { ucode -e "sleep($1)"; }
 
 pkill_tree() {   # best-effort: kill children of $1 (busybox has no pkill -P)
 	for p in $(ls /proc 2>/dev/null | grep -E '^[0-9]+$'); do
