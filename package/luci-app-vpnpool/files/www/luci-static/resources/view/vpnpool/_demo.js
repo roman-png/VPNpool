@@ -7,6 +7,8 @@
 'require dom';
 'require vpnpool.common as common';
 
+var E = common.E;   // every string child as text (node names are foreign data)
+
 // TEMPORARY component showcase for the stand (ROADMAP-2.0 §10.1), not in the menu: the stand
 // test stand/tests/ui-components.sh mounts a route for it. Removed with the screen packs.
 // Strings here are plain English on purpose (not translated, not in po/).
@@ -47,7 +49,8 @@ function selfTest() {
 		common_loaded: !!(common && typeof common.call === 'function'),
 		common_methods: common ? Object.keys(common.METHODS).length : 0,
 		common_css: !!document.getElementById('vpnpool-common-css'),
-		page_scroll_x: document.documentElement.scrollWidth > document.documentElement.clientWidth
+		page_scroll_x: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+		xss_fired: !!window.vpXss
 	};
 	return r;
 }
@@ -81,7 +84,8 @@ return view.extend({
 		var states = [
 			{ id: 'n1', title: '🇩🇪 Germany, Frankfurt — a very long node name that has to wrap on a phone', sub: 'VLESS · 42 ms', state: 'in automatic choice', badges: [ { text: 'YouTube', kind: 'ok' }, { text: 'Telegram', kind: 'ok' } ], active: true },
 			{ id: 'n2', title: '🇳🇱 Amsterdam', sub: 'Trojan · 180 ms', state: 'does not open youtube.com: 3 checks in a row', stateKind: 'error', badges: [ { text: 'YouTube', kind: 'error' } ] },
-			{ id: 'n3', title: 'AmneziaWG home', sub: 'AmneziaWG', state: 'waits for the AmneziaWG engine', badges: [ { text: 'waiting', kind: 'warn' } ], dimmed: true }
+			{ id: 'n3', title: 'AmneziaWG home', sub: 'AmneziaWG', state: 'waits for the AmneziaWG engine', badges: [ { text: 'waiting', kind: 'warn' } ], dimmed: true },
+			{ id: 'n4', title: '<img src=x onerror="window.vpXss=1">Node with markup in its name', sub: '<b>VLESS</b>', state: '<script>window.vpXss=1</script>', badges: [ { text: '<i>x</i>', kind: 'muted' } ] }
 		];
 		var cardEls = states.map(function(st) {
 			var el = common.nodeCard({
