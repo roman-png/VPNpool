@@ -154,7 +154,7 @@ ctl adaptive-ttl-ignored adaptive fail 'adaptive/verdict-cache-ttl ' \
 ctl fetch-userinfo-lost fetch fail 'fetch/all-sources-ok ' \
 	"$LIBX/fetch.sh" "grep -o 'expire=[0-9]*'" "grep -o 'expireX=[0-9]*'"
 # stage 2 (2.5 / 2.11): fetch
-ctl fetch-no-per-source-cache fetch fail 'fetch/primary-fails-extra-ok-keeps-primary-nodes ;fetch/all-fail-serves-cache ;fetch/removed-source-dropped-from-cache ;fetch/fetch-due-throttle ' \
+ctl fetch-no-per-source-cache fetch fail 'fetch/primary-fails-extra-ok-keeps-primary-nodes ;fetch/status-per-source ;fetch/all-fail-serves-cache ;fetch/removed-source-dropped-from-cache ;fetch/fetch-due-throttle ' \
 	"$LIBX/fetch.sh" 'if [ -s "$cached" ]; then' 'if false; then'
 ctl fetch-url-in-clear fetch fail 'fetch/token-masked-in-log ' \
 	"$LIBX/fetch.sh" 'log "fetch: $(mask_url "$url") -> $best nodes' 'log "fetch: $url -> $best nodes'
@@ -270,7 +270,7 @@ ctl api-analyze-no-dup-check rpcd fail 'rpcd/analyze/statuses ' \
 	"$LIBX/api.uc" "				if (exist_ids[r.id]) { it.status = 'dup'; it.reason = 'exists'; }" "				if (false) { it.status = 'dup'; it.reason = 'exists'; }" \
 	"$LIBX/api.uc" "				it.reason = exist_tags[r.dup_of] ? 'exists' : 'repeated';" "				it.reason = 'repeated';"
 # a "not found" answered as success again
-ctl rpcd-del_sub-not-found-ok rpcd fail 'rpcd/del_sub/bad-input ' \
+ctl rpcd-del_sub-not-found-ok rpcd fail 'rpcd/del_sub/bad-input ;rpcd/del_sub/ambiguous-mask-refused ' \
 	"$RPCD" '		u=$(resolve_url extra_sub "$u") || { rep false not_found; exit 0; }' '		u=$(resolve_url extra_sub "$u") || { rep true deleted; exit 0; }'
 # export hands out the token / subscription URL in clear
 ctl rpcd-export-unmasked rpcd fail 'rpcd/export/telegram-token-masked ;rpcd/export/subscription-url-masked ;rpcd/import/masked-export-refused ' \
