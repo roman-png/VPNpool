@@ -343,7 +343,7 @@ ctl ui-view-raw-E ui-unit fail 'FAIL - old views: E is common.E' \
 ctl ui-view-modal-title-html ui-unit fail 'FAIL - old views: E is common.E' \
 	"$VIEW/dashboard.js" "ui.showModal(common.txt(_('Share node') + ': ' + tag), [" "ui.showModal(_('Share node') + ': ' + tag, ["
 ctl ui-backend-code-without-text ui-unit fail 'FAIL - every code the backend answers with has a human text' \
-	"$RPCD" '{ reply false no_nodes; exit 0; }' '{ reply false brand_new_code; exit 0; }'
+	"$RPCD" '|| { rep false no_nodes; exit 0; }' '|| { rep false brand_new_code; exit 0; }'
 ctl ui-pages-feed-no-i18n ui-unit fail 'FAIL - packaging' \
 	.github/workflows/pages.yml 'expected 3 .ipk' 'expected 2 .ipk'
 ctl deploy-no-translation deploy-tar fail 'Russian translation missing' \
