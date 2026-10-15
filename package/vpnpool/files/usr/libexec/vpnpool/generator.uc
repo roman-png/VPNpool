@@ -14,11 +14,19 @@
 
 import { readfile } from 'fs';
 import { cursor } from 'uci';
+import { VALID_COMMUNITY } from './common.uc';
 
 let nodes_path = ARGV[0];
 let nodes = nodes_path ? json(readfile(nodes_path)) : [];
 if (type(nodes) != 'array')
 	nodes = [];
+// nodes.json carries the node identity `id` (parser --with-id; status/rpcd key on it) and may
+// carry `_link`: sing-box rejects unknown outbound fields, so neither may reach the config.
+for (let n in nodes) {
+	if (type(n) != 'object') continue;
+	delete n.id;
+	delete n._link;
+}
 
 let uci = cursor();
 function opt(section, name, def) {
@@ -75,12 +83,7 @@ if (type(communities) != 'array')
 	communities = [communities];
 
 let SRS_BASE = 'https://github.com/itdoginfo/allow-domains/releases/latest/download';
-let VALID_COMMUNITY = {
-	russia_inside: 1, russia_outside: 1, geoblock: 1, block: 1,
-	porn: 1, news: 1, anime: 1, youtube: 1, hdrezka: 1, tiktok: 1, google_ai: 1,
-	google_play: 1, google_meet: 1, hodca: 1, discord: 1, meta: 1, twitter: 1,
-	cloudflare: 1, cloudfront: 1, digitalocean: 1, hetzner: 1, ovh: 1, telegram: 1, roblox: 1
-};
+// VALID_COMMUNITY: the one list lives in common.uc (the settings validator uses it too).
 
 let rule_sets = [];
 let comm_tags = [];
