@@ -32,12 +32,13 @@ if sing-box version 2>/dev/null | grep -qiE 'awg'; then echo true; else echo fal
 # imported_node — links the user hand-picked from a probed source) each as their own
 # file. vless:// links never contain spaces, so a uci LIST read is safe here.
 . /lib/functions.sh 2>/dev/null
-write_links() {   # $1=uci option  $2=outfile
-	: > "$2"
-	__wl_out="$2"
+write_links() {   # $1=uci option  $2=outfile (replaced by mv: a new inode for status.uc's cache)
+	__wl_out="$2.tmp.$$"
+	: > "$__wl_out"
 	__wl_add() { printf '%s\n' "$1" >> "$__wl_out"; }
 	config_load vpnpool 2>/dev/null
 	config_list_foreach main "$1" __wl_add 2>/dev/null
+	mv -f "$__wl_out" "$2"
 }
 write_links manual_node   "$SB_DATA/manual.links"
 write_links imported_node "$SB_DATA/imported.links"
@@ -79,9 +80,19 @@ build_status() {   # $1=true|false $2=error code ("" on success)
 	rm -f "$DROPS" "$SB_DATA/.build_report.json"
 }
 fail() {   # $1=error code
+	trap - INT TERM HUP
 	rm -f "$NB" "$NB.x" "$NB.full" "$SB_CONF.new" "$SB_CONF.tmp"
 	build_status false "${1:-build_failed}"; exit 1
 }
+# Killed (the daemon stops / restarts: TERM to its child): the result is "interrupted", never
+# the previous build's ok. The live config and nodes.json are untouched (replaced only at the
+# end). build.sh holds no lock of its own.
+on_signal() {
+	trap - INT TERM HUP
+	rm -f "$NB" "$NB.x" "$NB.full" "$SB_CONF.new" "$SB_CONF.tmp"
+	build_status false interrupted; exit 143
+}
+trap on_signal INT TERM HUP
 
 # ONE parse for the node list AND the tag->link map (--keep-link), with the node identity
 # (--with-id; generator.uc strips id/_link before they could reach sing-box).
@@ -285,10 +296,11 @@ if [ "$dropped" -gt 0 ]; then
 fi
 mv -f "$NB" "$NODES"
 CNT=$(jq 'length' "$NODES" 2>/dev/null || echo 0)
+trap - INT TERM HUP
 build_status true ""
 
 if [ "$dropped" -gt 0 ]; then
-	log "build: ok ($((CNT - dropped)) nodes; dropped $dropped unsupported)"
+	log "build: ok ($CNT nodes; dropped $dropped unsupported)"   # CNT is already the final count
 else
 	log "build: ok ($CNT nodes)"
 fi
