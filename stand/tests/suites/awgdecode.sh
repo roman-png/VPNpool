@@ -13,8 +13,14 @@ mkdir -p "$AD"
 dj() {
 	_f=$1; shift
 	rm -f "$AD/out"
-	run_with_timeout 20 sh -c 'ucode "$1" --json < "$2" > "$3" 2>/dev/null' _ "$AWGDEC" "$_f" "$AD/out"
+	rm -f "$AD/cpu"
+	run_with_timeout 20 sh -c 'busybox time -o "$4" -f "%U %S" ucode "$1" --json < "$2" > "$3" 2>/dev/null' _ "$AWGDEC" "$_f" "$AD/out" "$AD/cpu"
 	DRC=$?
+	# CPU seconds of the decoder (user + sys, rounded up): unlike wall clock, it does not grow
+	# when other stand runs share the machine
+	# (a non-zero exit adds a "Command exited ..." line first: take the LAST line; no number = 99)
+	DCPU=$(awk 'END { if ($1 ~ /^[0-9.]+$/ && $2 ~ /^[0-9.]+$/) { s = $1 + $2; c = int(s); if (c < s) c++; print c } }' "$AD/cpu" 2>/dev/null)
+	DCPU=${DCPU:-99}
 	DJ=$(cat "$AD/out" 2>/dev/null)
 }
 # dl <file> — legacy mode (what rpcd calls today): raw .conf on stdout
@@ -165,13 +171,13 @@ _o=$(ucode "$AWGDEC" --json "Ключ: $(cat "$AFX/dec/xray_reality.txt")" 2>/de
 expect_jq "link item" "$_o" '.ok and .items[0].kind=="link"'
 end
 
-# ---- 5. limits: untrusted input is refused fast and with a code (each < 3 s on x86) ----
-# L <case> <input file> <jq-pred>  — watchdog 20 s + wall-clock bound + exactly one JSON line
+# ---- 5. limits: untrusted input is refused fast and with a code (each <= 3 CPU s on x86) ----
+# L <case> <input file> <jq-pred>  — watchdog 20 s + CPU-time bound + exactly one JSON line
 L() {
 	begin "awgdecode/$1"
-	_t0=$(date +%s); dj "$2"; _dt=$(( $(date +%s) - _t0 ))
+	dj "$2"
 	expect_true "not hung (rc=$DRC)" [ "$DRC" -ne 124 ]
-	expect_le "seconds" "$_dt" 3
+	expect_le "CPU seconds" "$DCPU" 3
 	expect_eq "stdout is one line" "$(printf '%s\n' "$DJ" | grep -c .)" 1
 	expect_jq "$1" "$DJ" "$3"
 	end
