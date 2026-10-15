@@ -18,7 +18,12 @@ TESTED="$FXR/tested"; : > "$TESTED"
 # /etc/init.d stubs: procd isn't running in the stand; record what the plugin asked for.
 INITD_LOG="$FXR/initd.calls"
 for svc in vpnpool cron; do
-	printf '#!/bin/sh\necho "%s $*" >> %s\nexit 0\n' "$svc" "$INITD_LOG" > /etc/init.d/$svc
+	printf '#!/bin/sh\necho "%s $*" >> %s\n' "$svc" "$INITD_LOG" > /etc/init.d/$svc
+	# like procd: a reload with enabled=0 stops the daemon instance (TERM)
+	[ "$svc" = vpnpool ] && cat >> /etc/init.d/$svc <<'EOF'
+[ "$1" = reload ] && [ "$(uci -q get vpnpool.main.enabled)" = 0 ] && kill "$(cat /var/run/vpnpool.pid 2>/dev/null)" 2>/dev/null
+EOF
+	echo 'exit 0' >> /etc/init.d/$svc
 	chmod +x /etc/init.d/$svc
 done
 
@@ -368,7 +373,7 @@ expect_jq "ok:false bad_time" "$R" '.ok==false and .code=="bad_time"'
 expect_eq "uci sched_on untouched" "$(uci -q get vpnpool.main.sched_on)" ''
 end
 
-reset_state; daemon_start; : > "$INITD_LOG"; : > /tmp/vpnpool/.routing_paused
+reset_state; daemon_start; : > "$INITD_LOG"; : > /tmp/vpnpool/.routing_paused; uci set vpnpool.main.enabled=1; uci commit vpnpool
 rcall set_enabled '{"enabled":true}'
 begin "rpcd/set_enabled/on-with-daemon-running-no-restart"
 expect_jq "ok" "$R" '.ok==true'

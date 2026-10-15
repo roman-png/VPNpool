@@ -19,6 +19,7 @@ EOF
 cat > "$FL/build.sh" <<EOF
 #!/bin/sh
 echo build >> "$RLOG"
+[ -f "$DS/build_slow" ] && /bin/sleep 3
 [ -f "$DS/build_fail" ] && exit 1
 [ -f "$DS/build_fail_once" ] && { rm -f "$DS/build_fail_once"; exit 1; }
 mkdir -p /tmp/vpnpool; echo "{\"gen\":\$\$}" > /tmp/vpnpool/sing-box.json
@@ -27,6 +28,7 @@ EOF
 cat > "$FL/fetch.sh" <<EOF
 #!/bin/sh
 echo fetch >> "$RLOG"
+[ -f "$DS/fetch_slow" ] && /bin/sleep 20
 exit 0
 EOF
 chmod +x "$FL"/*.sh
@@ -43,7 +45,7 @@ dstub() {
 }
 ds_reset() {   # <killswitch 0|1> <tunnel up|down>
 	reset_state
-	mkdir -p "$DS"; : > "$RLOG"; rm -f "$DS/build_fail" "$DS/routed"
+	mkdir -p "$DS"; : > "$RLOG"; rm -f "$DS/build_fail" "$DS/routed" "$DS/fetch_slow" "$DS/build_slow" /var/run/vpnpool.restarting
 	echo "$2" > "$DS/tunnel"; echo up > "$DS/wan"
 	uci set vpnpool.main.killswitch="$1"; uci commit vpnpool
 }
@@ -149,6 +151,58 @@ expect_le "stop took seconds, not the 30 s of the hanging send" "$_dt" 5
 expect_eq "sing-box stopped after the routes" "$(grep -E '^(route|kill)' "$RLOG" | tr '\n' ';')" "route down;kill;"
 end
 for p in $(pgrep -f '/bin/sleep 30'); do kill "$p" 2>/dev/null; done
+
+# TERM during a LONG step (a 20-second fetch): ash defers a trap until a FOREGROUND child exits,
+# procd SIGKILLs at term_timeout — so the step must run through run_child and cleanup at once
+sc_term() { install_traps; sh -c 'echo $PPID' > "$DS/pid"; ROUTED=1; PENDING=refetch; serve_pending; }
+ds_reset 0 up; : > "$DS/fetch_slow"; rm -f "$DS/pid"
+in_daemon sc_term & _dp=$!
+_i=0; while [ ! -s "$DS/pid" ] && [ $_i -lt 10 ]; do sleep 1; _i=$((_i+1)); done
+sleep 1; _t0=$(date +%s); kill -TERM "$(cat "$DS/pid")"
+wait "$_dp"; _dt=$(( $(date +%s) - _t0 ))
+begin "daemon/term-during-long-fetch-cleans-up-at-once"
+expect_le "cleanup within 3 s of TERM (the fetch would take 20 s)" "$_dt" 3
+expect_eq "fetch started, then routes down + sing-box stopped, no build" "$(grep -E '^(fetch|build|start|route|kill)' "$RLOG" | tr '\n' ';')" "fetch;route down;kill;"
+expect_eq "the fetch's own child was stopped too" "$(pgrep -f '/bin/sleep 20' | wc -l)" 0
+end
+for p in $(pgrep -f '/bin/sleep 20'); do kill "$p" 2>/dev/null; done
+
+# a queued signal (USR1) during build does not lose build's exit code
+sc_usr1_build() {
+	install_traps; sh -c 'echo $PPID' > "$DS/pid"
+	( sleep 1; kill -USR1 "$(cat "$DS/pid")" ) &
+	ROUTED=1; do_reload reload; echo "rc=$?" > "$DS/rc"
+}
+ds_reset 0 up; : > "$DS/build_slow"; : > "$DS/build_fail"; in_daemon sc_usr1_build
+begin "daemon/usr1-during-build-keeps-failure"
+expect_eq "do_reload reports the failed build" "$(cat "$DS/rc")" "rc=1"
+expect_eq "sing-box not restarted on a failed build" "$(gcount '^start' "$RLOG")" 0
+end
+ds_reset 0 up; : > "$DS/build_slow"; in_daemon sc_usr1_build
+begin "daemon/usr1-during-build-keeps-success"   # positive control
+expect_eq "build ok -> sing-box restarted" "$(gcount '^start' "$RLOG")" 1
+end
+
+# restart vs stop with the kill-switch on (integrator's assumption): a service restart keeps
+# the block, a plain stop and the user's off remove it
+sc_stop() { ROUTED=1; cleanup; }
+ds_reset 1 down; uci set vpnpool.main.enabled=1; uci commit vpnpool; : > /var/run/vpnpool.restarting
+in_daemon sc_stop
+begin "daemon/restart-with-killswitch-keeps-block"
+expect_eq "no route down" "$(gcount '^route down' "$RLOG")" 0
+expect_eq "sing-box stopped" "$(gcount '^kill' "$RLOG")" 1
+end
+ds_reset 1 down; uci set vpnpool.main.enabled=1; uci commit vpnpool
+in_daemon sc_stop
+begin "daemon/stop-with-killswitch-removes-block"
+expect_eq "route down" "$(gcount '^route down' "$RLOG")" 1
+end
+ds_reset 1 down; uci set vpnpool.main.enabled=0; uci commit vpnpool; : > /var/run/vpnpool.restarting
+in_daemon sc_stop
+begin "daemon/user-off-with-killswitch-removes-block-even-in-a-restart"
+expect_eq "route down" "$(gcount '^route down' "$RLOG")" 1
+end
+rm -f /var/run/vpnpool.restarting
 
 # a USR1 that arrives while the main loop applies the routes is QUEUED, not run inside the
 # trap: the reload runs afterwards and its verdict is the last word (ROUTED == the table)

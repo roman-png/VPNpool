@@ -61,8 +61,19 @@ start_service() {
 # (enabled=0 -> the daemon gets TERM, the bot stays), a changed one (bot signature) is
 # restarted. NOTE: a reload_service that called start_service directly sent NOTHING to procd
 # (no procd_open_service / close_service around it) — 1.x reloads were silent no-ops.
-# Users: lib.sh power_off/on (LuCI switch, schedule, Telegram /on), rpcd set_option
-# (telegram_control / token / chat / via_proxy).
+# Users: /usr/libexec/vpnpool/power.sh on|off (LuCI switch, schedule, Telegram /on), rpcd
+# set_option (telegram_control / token / chat / via_proxy).
+
+# restart = rc.common's own (stop, then start) plus a marker for the daemon: a restart is not
+# an "off", so with the kill-switch on the daemon keeps the block while it is replaced
+# (INTEGRATOR'S ASSUMPTION, 15.10.2026). A plain stop leaves no marker and removes routing.
+restart() {
+	mkdir -p /var/run && : > /var/run/vpnpool.restarting
+	trap '' TERM
+	stop "$@"
+	trap - TERM
+	start "$@"
+}
 
 stop_service() {
 	# Routing/sing-box teardown is done by vpnpoold's own TERM handler; procd stops both

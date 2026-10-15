@@ -18,7 +18,8 @@
 #   enabled=0 -> the daemon is stopped) takes routes down even with the kill-switch —
 #   integrator's assumption (14.10.2026), see route_policy in lib.sh.
 # A reload keeps the current routes while sing-box restarts, then checks the tunnel and
-# re-applies the policy. Stop (TERM): routes down first, everything slow after.
+# re-applies the policy. Stop (TERM): routes down first, everything slow after — except a
+# service restart with the kill-switch on, which keeps the block (integrator's assumption).
 #
 # Signals: USR1 = rebuild from cache + hot-reload; USR2 = re-fetch + rebuild + hot-reload;
 # HUP = re-evaluate routing now (pause flag changed). The handlers only queue the request;
@@ -34,6 +35,33 @@ LIBEXEC=/usr/libexec/vpnpool
 
 SB_LOG="$SB_DATA/sing-box.log"
 LOG_CAP=524288   # 512 KiB — keep the volatile /tmp log bounded
+
+# busybox ash runs a trap only AFTER a FOREGROUND child exits — a TERM that arrives during a
+# 100-second fetch would wait for it, procd SIGKILLs us at term_timeout, and cleanup never
+# runs (routes left up, sing-box orphaned). `wait` is interruptible, so every long step runs
+# in the background through run_child (the exit code is kept), and every pause through nap.
+CHILD=""
+run_child() {   # <command...> -> its exit code; CHILD = its PID while it runs
+	local rc
+	"$@" & CHILD=$!
+	while :; do
+		wait "$CHILD"; rc=$?
+		# woken by a (queued) signal while the child still runs -> keep waiting
+		if [ "$rc" -gt 128 ] && kill -0 "$CHILD" 2>/dev/null; then continue; fi
+		break
+	done
+	CHILD=""
+	return "$rc"
+}
+nap() { sleep "$1" & wait $!; }
+# stop the running long step (cleanup): the child and its direct children (curl, ucode)
+stop_child() {
+	local c p
+	c=$CHILD; [ -n "$c" ] || return 0
+	for p in $(pgrep -P "$c" 2>/dev/null); do kill "$p" 2>/dev/null; done
+	kill "$c" 2>/dev/null
+	CHILD=""
+}
 
 cap_log() {
 	[ -f "$SB_LOG" ] && [ "$(wc -c < "$SB_LOG" 2>/dev/null || echo 0)" -gt "$LOG_CAP" ] && : > "$SB_LOG"
@@ -64,10 +92,10 @@ kill_singbox() {
 			if [ "$i" -ge 5 ]; then kill -9 "$p" 2>/dev/null; else kill "$p" 2>/dev/null; fi
 		done
 		[ "$i" -ge 12 ] && break
-		sleep 1
+		nap 1
 	done
 	rm -f "$SB_PIDFILE"
-	sleep 1   # let the kernel release the listening sockets before a re-bind
+	nap 1   # let the kernel release the listening sockets before a re-bind
 }
 
 _do_start_singbox() {
@@ -85,9 +113,10 @@ _do_start_singbox() {
 # sing-box instances that fought over :1603 -> crash loop.
 # SB_STARTED = time of the last (re)start — the watchdog's warm-up grace window.
 SB_STARTED=0
+_locked_start() { ( flock 9; _do_start_singbox; ) 9>/var/run/vpnpool-sb.lock; }
 start_singbox() {
 	if command -v flock >/dev/null 2>&1; then
-		( flock 9; _do_start_singbox; ) 9>/var/run/vpnpool-sb.lock
+		run_child _locked_start
 	else
 		_do_start_singbox
 	fi
@@ -189,18 +218,18 @@ preferred_check() {
 probe_tunnel_once() {
 	local tp
 	tp=$(uci -q get vpnpool.main.test_port); [ -n "$tp" ] || tp=1605
-	probe_services "http://127.0.0.1:$tp" any
+	run_child probe_services "http://127.0.0.1:$tp" any
 }
 # A few attempts so a single flap doesn't read as dead.
 tunnel_healthy() {
-	probe_tunnel_once || { sleep 3; probe_tunnel_once; } || { sleep 3; probe_tunnel_once; }
+	probe_tunnel_once || { nap 3; probe_tunnel_once; } || { nap 3; probe_tunnel_once; }
 }
 # Bounded wait for a freshly (re)started sing-box to carry traffic.
 wait_tunnel() {   # $1 = rounds (default 8, ~2 s apart)
 	local i=0 n="${1:-8}"
 	while [ "$i" -lt "$n" ]; do
 		probe_tunnel_once && return 0
-		i=$((i + 1)); sleep 2
+		i=$((i + 1)); nap 2
 	done
 	return 1
 }
@@ -317,14 +346,35 @@ watchdog_check() {
 	fi
 }
 
+# init.d `restart` leaves this marker before stopping us (see init.d restart()).
+RESTART_MARK=/var/run/vpnpool.restarting
+restart_keeps_block() {
+	local now mt
+	killswitch_on || return 1
+	[ "$(uci -q get vpnpool.main.enabled)" = 1 ] || return 1   # the user's off: never keep
+	[ -f "$RESTART_MARK" ] || return 1
+	now=$(date +%s); mt=$(date -r "$RESTART_MARK" +%s 2>/dev/null || echo 0)
+	[ $(( now - mt )) -lt 120 ]   # a stale marker (restart that never finished) doesn't count
+}
+
 cleanup() {
 	# Inside procd's TERM window (init.d term_timeout): routing comes down FIRST, then sing-box;
 	# the notification goes last and in the background — a Telegram send through a dead
 	# tunnel can take tens of seconds and must never keep the LAN routed into it (procd
-	# SIGKILLs us when the window is over).
-	"$LIBEXEC/route.sh" down
-	ROUTED=0
-	log "stopping: routing removed, stopping sing-box"
+	# SIGKILLs us when the window is over). A long step in progress (fetch/build) is stopped
+	# first — it must not outlive us.
+	stop_child
+	if restart_keeps_block; then
+		# INTEGRATOR'S ASSUMPTION (15.10.2026): a package/service RESTART is not an "off" —
+		# with the kill-switch on, the block stays while the daemon is replaced (the new one
+		# re-applies it in startup_guard). A plain stop (sysupgrade, removal, manual stop)
+		# and the user's off (enabled=0) remove it — no daemon would ever lift it otherwise.
+		log "stopping for a restart: kill-switch on — routing/block kept"
+	else
+		"$LIBEXEC/route.sh" down
+		ROUTED=0
+		log "stopping: routing removed, stopping sing-box"
+	fi
 	kill_singbox
 	rm -f "$SB_DATA/.reload_running"
 	( tg_notify "🔴 vpnpool: stopped" ) </dev/null >/dev/null 2>&1 &
@@ -353,10 +403,10 @@ install_traps() {
 do_reload() {
 	if [ "$1" = refetch ]; then
 		log "refetch: fetching sources"
-		"$LIBEXEC/fetch.sh" || log "fetch failed (cached copies are used where present)"
+		run_child "$LIBEXEC/fetch.sh" || log "fetch failed (cached copies are used where present)"
 	fi
 	[ -s "$SB_CONF" ] && cp "$SB_CONF" "$SB_CONF.prev"
-	if ! "$LIBEXEC/build.sh"; then
+	if ! run_child "$LIBEXEC/build.sh"; then
 		log "reload: build failed, keeping the current config and routing"
 		return 1
 	fi
@@ -409,9 +459,9 @@ startup_guard() {
 initial_build() {
 	while : ; do
 		if fetch_due; then
-			"$LIBEXEC/fetch.sh" || log "fetch failed (will use cache if present)"
+			run_child "$LIBEXEC/fetch.sh" || log "fetch failed (will use cache if present)"
 		fi
-		"$LIBEXEC/build.sh" && return 0
+		run_child "$LIBEXEC/build.sh" && return 0
 		log "initial build failed (no nodes/cache yet), retrying in 15s"
 		sleep 15 & wait $!
 	done
@@ -473,11 +523,12 @@ install_traps
 mkdir -p "$SB_DATA"
 log "vpnpoold starting (whole-LAN selective, coexist with podkop)"
 startup_guard  # kill-switch: block now; otherwise: no stale table during the first build
+rm -f "$RESTART_MARK"   # the restart is done: a later plain stop must remove the block
 kill_singbox   # clear any orphaned sing-box left by a previously crashed daemon
 initial_build
 
 start_singbox
-sleep 3
+nap 3
 # Kill-switch: already up (fail-closed). Otherwise wait (bounded) for a working node BEFORE
 # committing the LAN; with none, the LAN stays on DIRECT and the supervise loop routes as
 # soon as a node works.
@@ -511,7 +562,7 @@ while : ; do
 			log "sing-box crash-looping — backing off ${bo}s"
 			sleep "$bo" & wait $!
 		else
-			sleep 2
+			nap 2
 		fi
 	else
 		SB_FAILS=0
@@ -538,7 +589,7 @@ while : ; do
 	NOWS=$(date +%s)
 	if [ "$(uci -q get vpnpool.main.auto_snapshot)" = "1" ] && [ $(( NOWS - SNAP_LAST )) -ge "$SNAP_EVERY" ]; then
 		SNAP_LAST=$NOWS
-		"$LIBEXEC/snapshot.sh" 2>/dev/null
+		run_child "$LIBEXEC/snapshot.sh" 2>/dev/null
 	fi
 
 	# adaptive routing scan (opt-in): runs in the background so a slow probe never

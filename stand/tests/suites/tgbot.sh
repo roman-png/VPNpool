@@ -8,7 +8,12 @@ in_bot() {   # <fn...> — run inside a subshell with the real tgbot.sh function
 	( TGBOT_NO_MAIN=1; export TGBOT_NO_MAIN; . /usr/libexec/vpnpool/tgbot.sh; "$@" )
 }
 stub_initd() {
-	printf '#!/bin/sh\necho "vpnpool $*" >> %s\nexit 0\n' "$TINIT" > /etc/init.d/vpnpool
+	printf '#!/bin/sh\necho "vpnpool $*" >> %s\n' "$TINIT" > /etc/init.d/vpnpool
+	# like procd: a reload with enabled=0 stops the daemon instance (TERM)
+	cat >> /etc/init.d/vpnpool <<'EOF'
+[ "$1" = reload ] && [ "$(uci -q get vpnpool.main.enabled)" = 0 ] && kill "$(cat /var/run/vpnpool.pid 2>/dev/null)" 2>/dev/null
+exit 0
+EOF
 	chmod +x /etc/init.d/vpnpool; : > "$TINIT"
 }
 PAUSE=/tmp/vpnpool/.routing_paused
@@ -144,6 +149,17 @@ expect_jq "enabled=0: bot instance only" "$J0" '(.instances|has("tgbot")) and ((
 expect_jq "enabled=1: daemon + bot" "$J1" '(.instances|has("tgbot")) and (.instances|has("vpnpoold"))'
 expect_jq "daemon TERM window > 5 s" "$J1" '.instances.vpnpoold.term_timeout >= 15'
 end
+rm -f /var/run/vpnpool.restarting
+J2=$(initd_real restart)
+begin "tgbot/initd-restart-marks-a-restart"
+expect_true "restart leaves the marker the daemon's cleanup reads" [ -f /var/run/vpnpool.restarting ]
+expect_jq "and still starts the service" "$J2" '.instances|has("vpnpoold")'
+end
+rm -f /var/run/vpnpool.restarting
+initd_real stop >/dev/null
+begin "tgbot/initd-stop-no-marker"   # control: a plain stop is not a restart
+expect_true "no marker after stop" [ ! -f /var/run/vpnpool.restarting ]
+end
 
 # ---- power.sh: the user's off keeps the bot, on starts / re-checks ----
 reset_state; stub_initd; daemon_stop; uci set vpnpool.main.enabled=1; uci commit vpnpool
@@ -152,7 +168,7 @@ begin "tgbot/power-off-keeps-bot"
 expect_eq "enabled=0" "$(uci -q get vpnpool.main.enabled)" 0
 expect_eq "init.d: boot hook kept + reload (procd stops only the daemon)" "$(tr '\n' ';' < "$TINIT")" "vpnpool enable;vpnpool reload;"
 end
-reset_state; stub_initd; daemon_start; : > "$PAUSE"
+reset_state; stub_initd; daemon_start; : > "$PAUSE"; uci set vpnpool.main.enabled=1; uci commit vpnpool
 sh /usr/libexec/vpnpool/power.sh on >/dev/null 2>&1
 begin "tgbot/power-on-running-daemon-hup-only"
 expect_eq "enabled=1" "$(uci -q get vpnpool.main.enabled)" 1
@@ -160,3 +176,38 @@ expect_true "daemon got HUP" [ "$(signals_seen HUP)" -ge 1 ]
 expect_eq "no start of a running service" "$(gcount '^vpnpool start' "$TINIT")" 0
 expect_true "pause ended" [ ! -f "$PAUSE" ]
 end
+
+# quick off -> on: the old daemon is still in its cleanup (lives 3 more s) when "on" comes
+reset_state; stub_initd; daemon_start; uci set vpnpool.main.enabled=0; uci commit vpnpool
+( sleep 3; for p in $(pgrep -f "$FAKED"); do kill "$p"; done ) & _killer=$!
+_t0=$(date +%s); POWER_WAIT_MAX=10 sh /usr/libexec/vpnpool/power.sh on >/dev/null 2>&1; _dt=$(( $(date +%s) - _t0 ))
+begin "tgbot/power-quick-off-on-waits-and-starts"
+expect_eq "enabled=1" "$(uci -q get vpnpool.main.enabled)" 1
+expect_eq "no HUP to the dying daemon" "$(gcount '^HUP$' "$FAKED_LOG")" 0
+expect_eq "service started after the old daemon left" "$(gcount '^vpnpool start' "$TINIT")" 1
+expect_true "it waited for the old daemon (${_dt}s)" [ "$_dt" -ge 2 ]
+end
+wait "$_killer" 2>/dev/null
+
+# off when the daemon died before its cleanup (SIGKILL): power.sh removes the leftovers
+reset_state; stub_initd; daemon_stop
+ip link add br-lan type bridge 2>/dev/null; ip link set br-lan up 2>/dev/null
+uci set vpnpool.main.lan_if=br-lan; uci set vpnpool.main.enabled=1; uci commit vpnpool
+sh /usr/libexec/vpnpool/route.sh up >/dev/null 2>&1
+begin "tgbot/power-off-removes-leftovers-of-a-killed-daemon"
+expect_true "table there before (positive control)" nft list table inet vpnpool
+sh /usr/libexec/vpnpool/power.sh off >/dev/null 2>&1
+expect_true "table removed" sh -c '! nft list table inet vpnpool'
+expect_eq "enabled=0" "$(uci -q get vpnpool.main.enabled)" 0
+end
+
+# RAM mode (16 MB): no boot hook from power.sh (install.sh's WAN hotplug hook starts us)
+reset_state; stub_initd; daemon_stop
+mkdir -p /etc/hotplug.d/iface; : > /etc/hotplug.d/iface/99-vpnpool-singbox-ram
+sh /usr/libexec/vpnpool/power.sh on >/dev/null 2>&1
+sh /usr/libexec/vpnpool/power.sh off >/dev/null 2>&1
+begin "tgbot/power-ram-mode-no-enable"
+expect_eq "no init.d enable in RAM mode" "$(gcount '^vpnpool enable' "$TINIT")" 0
+expect_eq "on still starts" "$(gcount '^vpnpool start' "$TINIT")" 1
+end
+rm -f /etc/hotplug.d/iface/99-vpnpool-singbox-ram
