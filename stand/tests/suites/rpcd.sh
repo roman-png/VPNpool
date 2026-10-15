@@ -837,6 +837,8 @@ expect_jq "the link added, the URL failed with fetch_failed" "$R" '.ok==true and
 expect_eq "extra_sub empty" "$(ulist vpnpool.main.extra_sub)" ''
 expect_eq "the trial download happened" "$(mock_calls 'GET https://dead.example.com/s')" 1
 end
+# the URL even serves nodes: only add_node's own refusal keeps it from becoming a subscription
+printf '%s\n' "$L2" > "$FXR/evil.txt"; mock_rule 'GET https://evil.example/sub' 200 "$FXR/evil.txt"
 rcall add_node '{"link":"https://evil.example/sub"}'
 begin "rpcd/add_node/url-refused"
 expect_jq "invalid" "$R" '.ok==false and .code=="invalid"'

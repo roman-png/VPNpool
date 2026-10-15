@@ -252,7 +252,7 @@ ctl rpcd-interval-unchecked rpcd fail 'rpcd/set_option/interval-below-10m-reject
 	"$LIBX/api.uc" "if (n < INTERVAL_MIN) return [ null, 'too_small' ];" "if (false) return [ null, 'too_small' ];"
 ctl rpcd-telegram-no-reload rpcd fail 'rpcd/set_option/telegram-token-change-reloads-bot ;rpcd/set_option/telegram_chat-change-reloads-bot ;rpcd/set_option/telegram_via_proxy-change-reloads-bot ;rpcd/set_config/ok ' \
 	"$RPCD" '			bot) /etc/init.d/vpnpool reload >/dev/null 2>&1 ;;' '			bot) : ;;'
-ctl status-delay-lost status fail 'status/300-nodes-daemon-up-valid ' \
+ctl status-delay-lost status fail 'status/300-nodes-daemon-up-valid ;status/overlapping-polls-no-shared-temp-files ' \
 	"$LIBX/status.uc" 'if (h?.delay != null && h.delay > 0) delay = h.delay;' 'if (h?.delay != null && h.delay > 100000) delay = h.delay;'
 # ---- stage 3 (ROADMAP §6): honest API, one validator, secrets, analyze/add, backup/restore, status ----
 # set_config writes the valid part of a refused save
@@ -270,8 +270,8 @@ ctl api-analyze-no-dup-check rpcd fail 'rpcd/analyze/statuses ' \
 	"$LIBX/api.uc" "				if (exist_ids[r.id]) { it.status = 'dup'; it.reason = 'exists'; }" "				if (false) { it.status = 'dup'; it.reason = 'exists'; }" \
 	"$LIBX/api.uc" "				it.reason = exist_tags[r.dup_of] ? 'exists' : 'repeated';" "				it.reason = 'repeated';"
 # a "not found" answered as success again
-ctl rpcd-del_sub-not-found-ok rpcd fail 'rpcd/del_sub/bad-input ;rpcd/del_sub/ambiguous-mask-refused ' \
-	"$RPCD" '		u=$(resolve_url extra_sub "$u") || { rep false not_found; exit 0; }' '		u=$(resolve_url extra_sub "$u") || { rep true deleted; exit 0; }'
+ctl rpcd-del_sub-not-found-ok rpcd fail 'rpcd/del_sub/bad-input ' \
+	"$RPCD" '		need_url extra_sub "$(printf '"'"'%s'"'"' "$input" | jq -r '"'"'.url // ""'"'"')" 1; u=$U' '		need_url extra_sub "$(printf '"'"'%s'"'"' "$input" | jq -r '"'"'.url // ""'"'"')" 0; u=$U'
 # export hands out the token / subscription URL in clear
 ctl rpcd-export-unmasked rpcd fail 'rpcd/export/telegram-token-masked ;rpcd/export/subscription-url-masked ;rpcd/import/masked-export-refused ' \
 	"$RPCD" '		if ucode "$API" export > /tmp/vpnpool/.export.txt 2>/dev/null; then' '		if uci export vpnpool > /tmp/vpnpool/.export.txt 2>/dev/null; then'
@@ -291,7 +291,7 @@ ctl rpcd-restore-any-path rpcd fail 'rpcd/restore/path-outside-tmp-refused ;rpcd
 ctl api-resolve-no-key rpcd fail 'rpcd/del_sub/by-status-key ' \
 	"$LIBX/api.uc" '	for (let x in all) if (str_key(x) == val) return x;' '	;'
 # backup without the AWG files
-ctl rpcd-backup-no-awg rpcd fail 'rpcd/backup/full-copy-with-secrets ;rpcd/restore/without-confirm-changes-nothing ;rpcd/restore/replace-all ' \
+ctl rpcd-backup-no-awg rpcd fail 'rpcd/backup/full-copy-with-secrets ;rpcd/restore/without-confirm-changes-nothing ;rpcd/restore/replace-all ;rpcd/backup/members-by-the-restore-rule ;rpcd/restore/own-backup-round-trip ;rpcd/restore/same-archive-without-the-fault ' \
 	"$RPCD" '	for f in /etc/vpnpool/awg/* /etc/vpnpool/$BACKUP_MAPS; do' '	for f in /etc/vpnpool/$BACKUP_MAPS; do'
 # status: the token / the subscription URL in clear
 ctl status-token-unmasked status fail 'status/telegram-token-masked ' \
@@ -309,13 +309,13 @@ ctl status-busy-ignores-owner status fail 'status/build-busy-pause-progress ' \
 	"$LIBX/status.uc" "	if (match(pid, /^[0-9]+\$/)) return !!access('/proc/' + pid);" "	if (match(pid, /^[0-9]+\$/)) return true;"
 # generator: the node id (nodes.json carries it since stage 3) reaches the sing-box config
 # (sing-box refuses the unknown field: EVERY build that installs a config goes red)
-ctl generator-keeps-id build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/poison-json-source-unknown-field ;build/status-file-lists-engine-drop ;build/json-source-long-short-id-no-panic ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/awg-node-on-stock-engine-deferred ;build/unchanged-pool-no-flash-write ;build/changed-pool-flash-updated ;build/after-reboot-failed-build-keeps-flash-config ;build/node-test-selector-separate-from-proxy ;build/generator-tags-reserved-in-parser ;build/status-file-success ;build/nodes-carry-id-config-does-not ' \
+ctl generator-keeps-id build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/poison-json-source-unknown-field ;build/status-file-lists-engine-drop ;build/log-counts-the-final-pool ;build/json-source-long-short-id-no-panic ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/awg-node-on-stock-engine-deferred ;build/unchanged-pool-no-flash-write ;build/changed-pool-flash-updated ;build/after-reboot-failed-build-keeps-flash-config ;build/node-test-selector-separate-from-proxy ;build/generator-tags-reserved-in-parser ;build/status-file-success ;build/nodes-carry-id-config-does-not ;build/before-kill-status-ok ;build/term-writes-interrupted ' \
 	"$LIBX/generator.uc" '	delete n.id;' '	n.id = n.id;'
 # build: no build_status.json on success
-ctl build-status-not-written build fail 'build/status-file-success ;build/status-file-lists-engine-drop ' \
+ctl build-status-not-written build fail 'build/status-file-success ;build/status-file-lists-engine-drop ;build/before-kill-status-ok ' \
 	"$LIBX/build.sh" 'build_status true ""' ':'
 # fetch: a failed run forgets the last successful fetch time
-ctl fetch-status-forgets-last-ok fetch fail 'fetch/status-per-source ' \
+ctl fetch-status-forgets-last-ok fetch fail 'fetch/status-per-source ;fetch/term-records-interrupted ' \
 	"$LIBX/fetch.sh" 'else ($p[$r[0]].last_ok_at // null) end' 'else null end'
 ctl uitext-new-technical-string uitext fail 'uitext/real-app-no-new-violations ;uitext/baseline-gates-new-violations ;uitext/stale-baseline-line-fails ' \
 	"$VIEW/dashboard.js" "_('Cancel')" "_('Cancel via rpcd')"
@@ -447,7 +447,7 @@ ctl engine-installer-leaks-codes engine fail 'engine/install-sh-awg1-unsupported
 ctl review-v1-backup-ignores-rule rpcd fail 'rpcd/backup/members-by-the-restore-rule ;rpcd/restore/own-backup-round-trip ' \
 	"$RPCD" 'printf '"'"'%s\n'"'"' "$rel" | grep -Eq "$MEMBER_RE"; then' 'true; then'
 # V2: restore / import without the value check
-ctl review-v2-restore-values-unchecked rpcd fail 'rpcd/restore/bad-values-refused ' \
+ctl review-v2-restore-values-unchecked rpcd fail 'rpcd/restore/bad-values-refused ;rpcd/import/bad-values-refused ' \
 	"$RPCD" '		CC=$(ucode "$API" check_config "$D/root/etc/config" "$D/save" 2>/dev/null)' "		CC='{\"ok\":true}'"
 ctl review-v2-import-values-unchecked rpcd fail 'rpcd/import/bad-values-refused ' \
 	"$RPCD" '		CC=$(ucode "$API" check_config "$D" "$D/save" 2>/dev/null)' "		CC='{\"ok\":true}'"
@@ -479,7 +479,7 @@ ctl review-v6-mask-any-list rpcd fail 'rpcd/probe_source/mask-resolved-in-source
 ctl review-v6-is-url-takes-mask rpcd fail 'rpcd/add_sub/mask-literal-refused ' \
 	"$LIBX/api.uc" "	if (index(s, '***') >= 0) return false;" '	;'
 # V7: add stores a URL without the trial download; add_node takes a URL
-ctl review-v7-add-no-trial rpcd fail 'rpcd/add/url-without-nodes-not-stored ;rpcd/add_sub/bad-input ' \
+ctl review-v7-add-no-trial rpcd fail 'rpcd/add/url-without-nodes-not-stored ;rpcd/add_sub/bad-input ;rpcd/add_node/url-refused ' \
 	"$LIBX/api.uc" '			if (pr.n < 1) {' '			if (false) {'
 ctl review-v7-add_node-takes-url rpcd fail 'rpcd/add_node/url-refused ' \
 	"$RPCD" "			http://*|https://*) rep false invalid n/a '{\"errors\":{\"link\":\"bad_value\"}}'; exit 0 ;;" '			NEVER-MATCHES) ;;'
