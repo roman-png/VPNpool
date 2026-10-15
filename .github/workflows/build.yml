@@ -39,7 +39,18 @@ jobs:
       - name: Build stand image (OpenWrt 24.10.4 + sing-box 1.12.x)
         run: docker build -f stand/Dockerfile -t vpnpool-stand .
 
+      - name: Fetch the AWG engine release asset (x86_64) for the engine suite
+        run: |
+          set -eu
+          v=1.14.3-awg.1; a="vpnpool-engine_${v}_x86_64"
+          mkdir -p "$RUNNER_TEMP/engine"
+          cd "$RUNNER_TEMP/engine"
+          curl -fsSL --retry 3 -o "$a" "https://github.com/roman-png/vpnpool-engine/releases/download/v$v/$a"
+          echo "1a145e0ceffb7d8dc0936657d0364e7a112ae1b4ec8bbbcc6e82a379eecdbc19  $a" | sha256sum -c
+
       - name: Run stand tests
+        env:
+          ENGINE_ASSET_DIR: ${{ runner.temp }}/engine
         run: |
           set -o pipefail
           sh stand/tests/run-in-docker.sh 2>&1 | tee stand-tests.log
