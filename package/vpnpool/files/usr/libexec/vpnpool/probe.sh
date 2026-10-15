@@ -15,7 +15,7 @@
 . /lib/functions.sh 2>/dev/null
 
 URL="$1"
-[ -n "$URL" ] || { echo '{"error":"no url","total":0,"capped":false,"shown":0,"nodes":[]}'; exit 0; }
+[ -n "$URL" ] || { echo '{"ok":false,"code":"invalid","error":"invalid","total":0,"capped":false,"shown":0,"nodes":[]}'; exit 0; }
 
 P="/tmp/vpnpool/probe.$$"; mkdir -p "$P"; trap 'rm -rf "$P"' EXIT
 CAP=300; PARALLEL=64
@@ -44,7 +44,7 @@ for ua in $UAS; do
 	if [ "$cnt" -gt "$best" ]; then best="$cnt"; cp "$P/txt" "$P/best"; fi
 	[ "$best" -ge 1 ] && break   # first UA that yields nodes is good enough — keep it fast
 done
-[ "$best" -ge 1 ] || { echo '{"error":"no usable nodes from this source","total":0,"capped":false,"shown":0,"nodes":[]}'; exit 0; }
+[ "$best" -ge 1 ] || { echo '{"ok":false,"code":"no_nodes","error":"no_nodes","total":0,"capped":false,"shown":0,"nodes":[]}'; exit 0; }
 
 ucode /usr/libexec/vpnpool/parser.uc --keep-link "$P/best" 2>/dev/null > "$P/nodes.json"
 TOTAL=$(jq 'length' "$P/nodes.json" 2>/dev/null); [ -n "$TOTAL" ] || TOTAL=0

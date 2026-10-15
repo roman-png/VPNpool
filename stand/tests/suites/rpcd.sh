@@ -2,8 +2,8 @@
 # (sourced by run.sh). Per method, up to three cases:
 #   ok        valid input, fake vpnpoold running: reply is an object, side effect landed,
 #             and the expected signal (USR1 rebuild / USR2 refetch) reached the daemon;
-#   bad       invalid input: the reply must say so (.ok==false). Today ~25 methods answer
-#             ok:true having done nothing -> xfail 3.1 (honest API) / 3.3 (validation);
+#   bad       invalid input: the reply must say so (.ok==false) — stage 3 made every method
+#             answer the truth (not_found / invalid / disabled / ..., ROADMAP 3.1, 3.3);
 #   nodaemon  valid input, NO daemon: still an object; a method whose effect needs the
 #             daemon must report it (.daemon=="not_running", ROADMAP 3.1).
 # A final coverage case fails if an ACL method has no case here or isn't served by rpcd.
@@ -42,8 +42,6 @@ fx_saved() { jq -nc --arg a "$L1" '{Node1:$a}' > /etc/vpnpool/saved.map.json; }
 # Invariants ("ubus rc 0", "reply is an object") never sit inside an xfail case: when the
 # semantic case is xfail they get their own plain case "<kind>-reply", so a regression there
 # is a FAIL, not hidden as XFAIL.
-# methods already answering in the section 6.1 shape {ok, code, daemon} (stage 2 touched them)
-DAEMON_HONEST="refresh set_option"
 base_checks() { expect_eq "ubus rc" "$RC" 0; expect_jq "reply is an object" "$R" 'type=="object"'; }
 reply_case() {   # <case-id> — invariants as a separate non-xfail case
 	begin "$1"; base_checks; end
@@ -59,6 +57,7 @@ M() {
 	begin "rpcd/$_m/ok"
 	[ -z "$_okx" ] && base_checks
 	expect_jq "reply does not report an error" "$R" '(.ok != false) and (has("error")|not)'
+	expect_jq "reply shape {ok, code, daemon} (ROADMAP 3.1)" "$R" '(.ok|type)=="boolean" and (.code|type)=="string" and (.daemon=="signalled" or .daemon=="not_running" or .daemon=="n/a")'
 	[ "$_sig" != - ] && expect_true "daemon got $_sig" [ "$(signals_seen "$_sig")" -ge 1 ]
 	[ "$_chk" != - ] && "$_chk"
 	end "$_okx"
@@ -72,6 +71,7 @@ M() {
 		begin "rpcd/$_m/bad-input"
 		[ -z "$_badx" ] && base_checks
 		expect_jq "reply says ok:false" "$R" '.ok==false'
+	expect_jq "with a machine code (and .error = code)" "$R" '(.code|type)=="string" and (.code|length)>0 and .error==.code'
 		end "$_badx"
 	fi
 	# nodaemon
@@ -81,7 +81,7 @@ M() {
 	if [ "$_sig" != - ]; then
 		begin "rpcd/$_m/no-daemon-reported"
 		expect_jq "reply reports the daemon is not running" "$R" '.daemon=="not_running"'
-		case " $DAEMON_HONEST " in *" $_m "*) end ;; *) end 3.1 ;; esac
+		end
 	fi
 }
 
@@ -110,7 +110,7 @@ M node_link '{"tag":"Node1"}' - - c_node_link '{"tag":"Nope"}' -
 
 s_export_nodes() { fx_nodes; uci add_list vpnpool.main.manual_node="$L1"; uci commit vpnpool; }
 c_export_nodes() { expect_jq "manual links" "$R" ".links==[$(jarg --arg l "$L1" '$l')]"; }
-M export_nodes '{"scope":"manual"}' - - c_export_nodes '{"scope":"zzz"}' 3.1
+M export_nodes '{"scope":"manual"}' - - c_export_nodes '{"scope":"zzz"}' -
 
 c_idle() { expect_jq "idle" "$R" '.running==false'; }
 M unlock_result '{}' - - c_idle - -
@@ -126,7 +126,7 @@ c_set_enabled() {
 	expect_eq "no stop / disable (the bot must survive)" "$(gcount -e '^vpnpool stop' -e '^vpnpool disable' "$INITD_LOG")" 0
 }
 s_set_enabled() { : > "$INITD_LOG"; uci set vpnpool.main.enabled=1; uci commit vpnpool; }
-M set_enabled '{"enabled":false}' - - c_set_enabled '{"enabled":"maybe"}' 3.3
+M set_enabled '{"enabled":false}' - - c_set_enabled '{"enabled":"maybe"}' -
 
 s_select() { fx_nodes; mock_on; mock_rule 'PUT http://127.0.0.1:9091/proxies/proxy' 204; }
 b_select() { mock_on; mock_rule 'PUT http://127.0.0.1:9091/proxies/proxy' 404; }
@@ -151,7 +151,7 @@ c_ping() {
 M ping '{}' - - c_ping - -
 
 c_set_url() { expect_eq "subscription_url" "$(uci -q get vpnpool.main.subscription_url)" 'https://sub.example.com/s'; }
-M set_url '{"url":"https://sub.example.com/s"}' USR2 - c_set_url '{"url":"ftp://bad url"}' 3.3
+M set_url '{"url":"https://sub.example.com/s"}' USR2 - c_set_url '{"url":"ftp://bad url"}' -
 
 s_del_subscription() { uci set vpnpool.main.subscription_url='https://sub.example.com/s'; uci commit vpnpool; }
 c_del_subscription() { expect_eq "subscription_url cleared" "$(uci -q get vpnpool.main.subscription_url)" ''; expect_jq "promoted" "$R" '.promoted==0'; }
@@ -160,7 +160,7 @@ M del_subscription '{}' USR2 - c_del_subscription - -
 
 s_del_source() { uci add_list vpnpool.main.source='https://src.example.com/l'; uci commit vpnpool; }
 c_del_source() { expect_eq "source removed" "$(ulist vpnpool.main.source)" ''; }
-M del_source '{"url":"https://src.example.com/l"}' USR1 - c_del_source '{"url":"https://unknown.example.com/"}' 3.1
+M del_source '{"url":"https://src.example.com/l"}' USR1 - c_del_source '{"url":"https://unknown.example.com/"}' -
 
 s_probe_source() { mock_on; printf '%s\n%s\n' "$L1" "$L2" > "$FXR/src.txt"; mock_rule 'GET https://src.example.com/l' 200 "$FXR/src.txt"; }
 c_probe_source() {
@@ -168,18 +168,18 @@ c_probe_source() {
 	_i=0; while [ $_i -lt 300 ]; do rcall probe_result; printf '%s' "$R" | jq -e '.running==false' >/dev/null 2>&1 && break; msleep 100; _i=$((_i+1)); done
 	expect_jq "probe_result lists both nodes" "$R" '.running==false and .total==2 and (.nodes|length)==2'
 }
-M probe_source '{"url":"https://src.example.com/l"}' - - c_probe_source '{"url":""}' 3.1
+M probe_source '{"url":"https://src.example.com/l"}' - - c_probe_source '{"url":""}' -
 
 s_import_select() { jq -nc --arg a "$L1" --arg b "$L2" '{url:"https://src.example.com/l",nodes:[{i:0,link:$a,tag:"Node1"},{i:1,link:$b,tag:"Node2"}]}' > /tmp/vpnpool/.probe-cache.json; }
 c_import_select() { expect_eq "imported_node" "$(ulist vpnpool.main.imported_node)" "$L1"; expect_jq "count" "$R" '.count==1'; }
-M import_select '{"url":"https://src.example.com/l","idx":[0]}' USR1 - c_import_select '{"url":"https://other.example.com/","idx":[0]}' 3.1
+M import_select '{"url":"https://src.example.com/l","idx":[0]}' USR1 - c_import_select '{"url":"https://other.example.com/","idx":[0]}' -
 
 c_add_node() { expect_eq "manual_node" "$(ulist vpnpool.main.manual_node)" "$L1"; }
-M add_node "$(jarg --arg l "$L1" '{link:$l}')" USR1 - c_add_node '{"link":"this is not a node"}' 3.1
+M add_node "$(jarg --arg l "$L1" '{link:$l}')" USR1 - c_add_node '{"link":"this is not a node"}' -
 
 s_del_node() { uci add_list vpnpool.main.manual_node="$L1"; uci commit vpnpool; }
 c_del_node() { expect_eq "manual_node empty" "$(ulist vpnpool.main.manual_node)" ''; }
-M del_node "$(jarg --arg l "$L1" '{link:$l}')" USR1 - c_del_node '{"link":"vless://nope@1.1.1.1:1#x"}' 3.1
+M del_node "$(jarg --arg l "$L1" '{link:$l}')" USR1 - c_del_node '{"link":"vless://nope@1.1.1.1:1#x"}' -
 
 c_import_nodes() { expect_jq "added 2" "$R" '.added==2'; expect_eq "manual_node count" "$(ulist vpnpool.main.manual_node | wc -l)" 2; }
 M import_nodes "$(jarg --arg t "$L1
@@ -191,15 +191,15 @@ M delete_node '{"tag":"Node1"}' USR1 - c_delete_node '{"tag":"Nope"}' -
 
 s_delete_nodes() { fx_nodes; uci add_list vpnpool.main.manual_node="$L1"; uci add_list vpnpool.main.manual_node="$L2"; uci commit vpnpool; }
 c_delete_nodes() { expect_eq "manual_node empty" "$(ulist vpnpool.main.manual_node)" ''; }
-M delete_nodes '{"tags":["Node1","Node2"]}' USR1 - c_delete_nodes '{"tags":["Nope"]}' 3.1
+M delete_nodes '{"tags":["Node1","Node2"]}' USR1 - c_delete_nodes '{"tags":["Nope"]}' -
 
 s_restore_node() { fx_nodes; echo '["Node1"]' > /tmp/vpnpool/.dead_tags.json; }
 c_restore_node() { expect_eq "keep_auto" "$(ulist vpnpool.main.keep_auto)" Node1; expect_jq "dead set pruned" "$(cat /tmp/vpnpool/.dead_tags.json)" '.==[]'; }
-M restore_node '{"tag":"Node1"}' USR1 - c_restore_node '{"tag":"Nope"}' 3.1
+M restore_node '{"tag":"Node1"}' USR1 - c_restore_node '{"tag":"Nope"}' -
 
 s_refilter_node() { fx_nodes; uci add_list vpnpool.main.keep_auto=Node1; uci commit vpnpool; }
 c_refilter_node() { expect_eq "keep_auto empty" "$(ulist vpnpool.main.keep_auto)" ''; }
-M refilter_node '{"tag":"Node1"}' USR1 - c_refilter_node '{"tag":"Nope"}' 3.1
+M refilter_node '{"tag":"Node1"}' USR1 - c_refilter_node '{"tag":"Nope"}' -
 
 s_save_node() { fx_nodes; }
 c_save_node() { expect_true "saved.map has Node1" jq -e '.Node1|startswith("vless://")' /etc/vpnpool/saved.map.json; expect_eq "uci saved_node" "$(ulist vpnpool.main.saved_node)" "$L1"; }
@@ -207,7 +207,7 @@ M save_node '{"tag":"Node1"}' - - c_save_node '{"tag":"Nope"}' -
 
 s_unsave_node() { fx_nodes; fx_saved; }
 c_unsave_node() { expect_true "saved.map empty" jq -e '.==({})' /etc/vpnpool/saved.map.json; }
-M unsave_node '{"tag":"Node1"}' - - c_unsave_node '{"tag":"Nope"}' 3.1
+M unsave_node '{"tag":"Node1"}' - - c_unsave_node '{"tag":"Nope"}' -
 
 s_activate_saved() { fx_saved; }
 c_activate_saved() { expect_eq "active_saved" "$(ulist vpnpool.main.active_saved)" "$L1"; }
@@ -215,16 +215,16 @@ M activate_saved '{"tag":"Node1"}' USR1 - c_activate_saved '{"tag":"Nope"}' -
 
 s_deactivate_saved() { fx_saved; uci add_list vpnpool.main.active_saved="$L1"; uci commit vpnpool; }
 c_deactivate_saved() { expect_eq "active_saved empty" "$(ulist vpnpool.main.active_saved)" ''; }
-M deactivate_saved '{"tag":"Node1"}' USR1 - c_deactivate_saved '{"tag":"Nope"}' 3.1
+M deactivate_saved '{"tag":"Node1"}' USR1 - c_deactivate_saved '{"tag":"Nope"}' -
 
 s_add_sub() { mock_on; printf '%s\n%s\n' "$L1" "$L2" > "$FXR/sub.txt"; mock_rule 'GET https://extra.example.com/x' 200 "$FXR/sub.txt"; }
 b_add_sub() { mock_on; mock_rule 'GET https://extra.example.com/x' 500; }
 c_add_sub() { expect_jq "fetched 2" "$R" '.fetched==2'; expect_eq "extra_sub" "$(ulist vpnpool.main.extra_sub)" 'https://extra.example.com/x'; }
-M add_sub '{"url":"https://extra.example.com/x"}' USR2 - c_add_sub '{"url":"https://extra.example.com/x"}' 3.1
+M add_sub '{"url":"https://extra.example.com/x"}' USR2 - c_add_sub '{"url":"https://extra.example.com/x"}' -
 
 s_del_sub() { uci add_list vpnpool.main.extra_sub='https://extra.example.com/x'; uci commit vpnpool; }
 c_del_sub() { expect_eq "extra_sub empty" "$(ulist vpnpool.main.extra_sub)" ''; }
-M del_sub '{"url":"https://extra.example.com/x"}' USR2 - c_del_sub '{"url":"https://unknown.example.com/"}' 3.1
+M del_sub '{"url":"https://extra.example.com/x"}' USR2 - c_del_sub '{"url":"https://unknown.example.com/"}' -
 
 s_set_schedule() { mkdir -p /etc/crontabs; : > /etc/crontabs/root; }
 c_set_schedule() {
@@ -235,24 +235,24 @@ M set_schedule '{"enabled":true,"on":"07:00","off":"23:30","refresh":""}' - - c_
 
 s_unlock() { fx_nodes; }
 c_started() { expect_jq "started in background" "$R" '.started==true'; }
-M unlock '{"tag":"Node1"}' - - c_started '{"tag":""}' 3.1
+M unlock '{"tag":"Node1"}' - - c_started '{"tag":""}' -
 
 c_add_auto_domain() { expect_eq "auto_domain" "$(ulist vpnpool.routing.auto_domain)" example.com; }
-M add_auto_domain '{"domain":"https://Example.COM/path"}' USR1 - c_add_auto_domain '{"domain":"not a domain!"}' 3.3
+M add_auto_domain '{"domain":"https://Example.COM/path"}' USR1 - c_add_auto_domain '{"domain":"not a domain!"}' -
 
 s_del_auto_domain() { uci add_list vpnpool.routing.auto_domain=example.com; uci commit vpnpool; }
 c_del_auto_domain() { expect_eq "auto_domain empty" "$(ulist vpnpool.routing.auto_domain)" ''; }
-M del_auto_domain '{"domain":"example.com"}' USR1 - c_del_auto_domain '{"domain":"unknown.example"}' 3.1
+M del_auto_domain '{"domain":"example.com"}' USR1 - c_del_auto_domain '{"domain":"unknown.example"}' -
 
 s_run_adaptive() { uci set vpnpool.main.adaptive_routing=1; uci commit vpnpool; }
 b_run_adaptive() { uci set vpnpool.main.adaptive_routing=0; uci commit vpnpool; }
-M run_adaptive '{}' - - c_started '{}' 3.1
+M run_adaptive '{}' - - c_started '{}' -
 
 c_set_domains() { expect_eq "domains" "$(ulist vpnpool.routing.domain | tr '\n' ' ')" 'a.example b.example '; }
-M set_domains '{"domains":["a.example","b.example"]}' USR1 - c_set_domains '{"domains":["bad domain!"]}' 3.3
+M set_domains '{"domains":["a.example","b.example"]}' USR1 - c_set_domains '{"domains":["bad domain!"]}' -
 
 c_set_communities() { expect_eq "communities" "$(ulist vpnpool.routing.community)" telegram; }
-M set_communities '{"communities":["telegram"]}' USR1 - c_set_communities '{"communities":["no_such_list"]}' 3.3
+M set_communities '{"communities":["telegram"]}' USR1 - c_set_communities '{"communities":["no_such_list"]}' -
 
 c_set_option() { expect_eq "failover_interval" "$(uci -q get vpnpool.main.failover_interval)" 120; }
 M set_option '{"name":"failover_interval","value":"120"}' USR1 - c_set_option '{"name":"no_such_option","value":"1"}' -
@@ -262,17 +262,17 @@ c_set_clients() {
 	expect_eq "client" "$(ulist vpnpool.main.client)" 192.168.1.10
 	expect_eq "client_dev" "$(ulist vpnpool.main.client_dev)" 'aa:bb:cc:dd:ee:ff'
 }
-M set_clients '{"mode":"include","clients":["192.168.1.10"],"devices":["aa:bb:cc:dd:ee:ff"]}' USR1 - c_set_clients '{"mode":"zzz","clients":["999.1.1.1"],"devices":[]}' 3.3
+M set_clients '{"mode":"include","clients":["192.168.1.10"],"devices":["aa:bb:cc:dd:ee:ff"]}' USR1 - c_set_clients '{"mode":"zzz","clients":["999.1.1.1"],"devices":[]}' -
 
 c_set_auto_members() { expect_eq "auto_member" "$(ulist vpnpool.main.auto_member)" Node1; }
-M set_auto_members '{"members":["Node1"]}' USR1 - c_set_auto_members '{"members":"Node1"}' 3.3
+M set_auto_members '{"members":["Node1"]}' USR1 - c_set_auto_members '{"members":"Node1"}' -
 
 s_set_preferred() { fx_nodes; }
 c_set_preferred() { expect_eq "preferred_node" "$(uci -q get vpnpool.main.preferred_node)" Node1; }
-M set_preferred '{"tag":"Node1"}' - - c_set_preferred '{"tag":"Nope"}' 3.1
+M set_preferred '{"tag":"Node1"}' - - c_set_preferred '{"tag":"Nope"}' -
 
 s_speedtest() { fx_nodes; uci set vpnpool.main.speedtest_min_mem_kb=1; uci commit vpnpool; }
-M speedtest '{"tag":"Node1"}' - - c_started '{"tag":""}' 3.1
+M speedtest '{"tag":"Node1"}' - - c_started '{"tag":""}' -
 
 s_tg_test() {
 	uci set vpnpool.main.telegram_token='123:abc'; uci set vpnpool.main.telegram_chat='42'; uci commit vpnpool
@@ -281,11 +281,58 @@ s_tg_test() {
 b_tg_test() { uci -q delete vpnpool.main.telegram_token; uci commit vpnpool; }
 M tg_test '{}' - - - '{}' -
 
+# ---------------- stage 3: set_config / analyze / add / backup / restore ----------------
+s_set_config() { : > "$INITD_LOG"; }
+c_set_config() {
+	expect_eq "failover_interval" "$(uci -q get vpnpool.main.failover_interval)" 90
+	expect_eq "domains" "$(ulist vpnpool.routing.domain)" a.example
+	expect_eq "telegram_chat" "$(uci -q get vpnpool.main.telegram_chat)" 42
+	expect_eq "bot reloaded once (chat changed)" "$(gcount '^vpnpool reload' "$INITD_LOG")" 1
+	expect_jq "saved, changed fields listed" "$R" '.code=="saved" and (.changed|sort)==["domains","failover_interval","telegram_chat"]'
+}
+M set_config '{"settings":{"failover_interval":"90","domains":["A.example"],"telegram_chat":"42"}}' USR1 - c_set_config '{"settings":{"failover_interval":"90","domains":["bad domain!"]}}' -
+
+c_analyze() {
+	expect_jq "two lines: a new link + a new subscription URL" "$R" \
+		'(.items|length)==2 and .items[0].status=="add" and .items[0].kind=="link" and .items[0].name=="Node1" and .items[1].kind=="subscription_url" and .items[1].status=="add"'
+	expect_eq "nothing written (manual_node)" "$(ulist vpnpool.main.manual_node)" ''
+}
+M analyze "$(jarg --arg t "$L1
+https://new.example.com/s" '{text:$t}')" - - c_analyze '{"text":5}' -
+
+c_add() {
+	expect_jq "added 2" "$R" '.added==2 and .dup==0 and .failed==[]'
+	expect_eq "manual_node" "$(ulist vpnpool.main.manual_node)" "$L1"
+	expect_eq "extra_sub" "$(ulist vpnpool.main.extra_sub)" 'https://new.example.com/s'
+	expect_eq "ONE signal: the refetch (it rebuilds too), no extra rebuild" "$(gcount '^USR1$' "$FAKED_LOG")" 0
+}
+M add "$(jarg --arg t "$L1
+https://new.example.com/s" '{text:$t}')" USR2 - c_add '{"text":"only garbage here"}' -
+
+c_backup() {
+	printf '%s' "$R" | jq -r '.data' | base64 -d > "$FXR/bk.tgz" 2>/dev/null
+	expect_true "data is a tar.gz" tar -tzf "$FXR/bk.tgz"
+	expect_true "it holds the config" sh -c "tar -tzf '$FXR/bk.tgz' | grep -qx etc/config/vpnpool"
+	expect_jq "name, size, report" "$R" '(.name|endswith(".tar.gz")) and .size>0 and (.report.settings>0)'
+}
+M backup '{}' - - c_backup - -
+
+# a real backup of a config with a marker (failover 77) -> restored over the default (60)
+reset_state; uci set vpnpool.main.failover_interval=77; uci set vpnpool.main.enabled=1; uci commit vpnpool   # enabled: a reload keeps the daemon
+rcall backup
+RESTORE_OK=$(printf '%s' "$R" | jq -c '{data, replace_all:true}')
+c_restore() {
+	expect_eq "marker restored" "$(uci -q get vpnpool.main.failover_interval)" 77
+	expect_jq "restored + report" "$R" '.code=="restored" and (.report|type)=="object"'
+	expect_true "the state before kept in RAM" [ -s /tmp/vpnpool/pre-restore.tar.gz ]
+}
+M restore "$RESTORE_OK" USR2 - c_restore '{"data":"bm90IGFuIGFyY2hpdmU=","replace_all":true}' -
+
 reset_state
 uci export vpnpool | sed "s/option failover_interval '60'/option failover_interval '77'/" > "$FXR/import.cfg"
 IMPORT_ARGS=$(jq -nc --rawfile c "$FXR/import.cfg" '{config:$c}')
 c_import() { expect_eq "imported value" "$(uci -q get vpnpool.main.failover_interval)" 77; }
-M import "$IMPORT_ARGS" USR2 - c_import '{"config":"this is not a uci file {"}' 3.6
+M import "$IMPORT_ARGS" USR2 - c_import '{"config":"this is not a uci file {"}' -
 
 # ---------------- extra cases beyond the ok/bad/no-daemon grid ----------------
 reset_state; daemon_start
@@ -302,7 +349,7 @@ expect_jq "export works" "$R" '.config|contains("config vpnpool")'
 end
 begin "rpcd/export/telegram-token-masked"
 expect_eq "token in export" "$(printf '%s' "$R" | gcount SECRET-BOT-TOKEN)" 0
-end 3.5
+end
 
 reset_state
 # start from 77, NOT the default 60: today's clamp rewrites junk to 60, so an unchanged-60
@@ -312,7 +359,7 @@ rcall set_option '{"name":"failover_interval","value":"abc"}'
 begin "rpcd/set_option/non-numeric-rejected"
 expect_jq "ok:false" "$R" '.ok==false'
 expect_eq "uci keeps the old value" "$(uci -q get vpnpool.main.failover_interval)" 77
-end 3.3
+end
 
 reset_state
 rcall import '{"config":"this is not a uci file {"}'
@@ -321,7 +368,7 @@ expect_eq "uci config still has main" "$(uci -q get vpnpool.main.failover_interv
 end
 begin "rpcd/import/garbage-rejected"
 expect_jq "ok:false" "$R" '.ok==false'
-end 3.6
+end
 
 # ---------------- stage 2: set_option subscription_interval / telegram reload / refresh ----------------
 reset_state; daemon_start
@@ -381,6 +428,232 @@ expect_true "daemon re-checks routing (HUP)" [ "$(signals_seen HUP)" -ge 1 ]
 expect_eq "no restart / start of a running service" "$(gcount -e restart -e '^vpnpool start' "$INITD_LOG")" 0
 expect_true "Telegram pause ended" [ ! -f /tmp/vpnpool/.routing_paused ]
 end
+
+# ---------------- stage 3: validation, one signal, secrets, analyze/add, backup/restore ----------------
+reset_state; daemon_start; : > "$INITD_LOG"
+rcall set_config '{"settings":{"failover_interval":"90","domains":["a.example"]}}'
+begin "rpcd/set_config/valid-subset-writes"   # positive control for the all-or-nothing case
+expect_jq "saved" "$R" '.ok==true and .code=="saved"'
+expect_eq "written" "$(uci -q get vpnpool.main.failover_interval)" 90
+end
+reset_state; daemon_start
+rcall set_config '{"settings":{"failover_interval":"90","domains":["a.example"],"clients":["999.1.1.1"]}}'
+begin "rpcd/set_config/all-or-nothing"
+expect_jq "invalid + the one bad field named" "$R" '.ok==false and .code=="invalid" and .errors=={"clients[0]":"bad_ipv4"}'
+expect_eq "valid failover_interval NOT written" "$(uci -q get vpnpool.main.failover_interval)" 60
+expect_eq "valid domains NOT written" "$(ulist vpnpool.routing.domain)" ''
+expect_eq "no signal for a refused save" "$(signals_seen USR1)" 0
+end
+
+reset_state; daemon_start
+rcall set_config "$(jq -nc '{settings:{subscription_interval:"5m", failover_interval:"abc", failover_tolerance:"99999",
+	sched_on:"24:00", clients:["10.0.0.300"], client_devices:["aa:bb:cc:dd:ee"], lan_if:"bad if name",
+	fwmark:"0xZZ", domains:["ok.example","bad domain"], communities:["telegram","nope"], mode:"zzz",
+	auto_switch:"maybe", telegram_token:"no-colon", health_url:"ftp://x", no_such_field:1}}')"
+begin "rpcd/set_config/every-check-names-its-code"
+expect_jq "field codes" "$R" '.errors == {subscription_interval:"too_small", failover_interval:"bad_value",
+	failover_tolerance:"too_large", sched_on:"bad_time", "clients[0]":"bad_ipv4", "client_devices[0]":"bad_mac",
+	lan_if:"bad_ifname", fwmark:"bad_mark", "domains[1]":"bad_domain", "communities[1]":"bad_community",
+	mode:"bad_value", auto_switch:"bad_value", telegram_token:"bad_token", health_url:"bad_url",
+	no_such_field:"unknown_field"}'
+expect_eq "nothing written" "$(uci -q get vpnpool.main.subscription_interval)" 6h
+end
+rcall set_config "$(jq -nc '{settings:{subscription_interval:"10m", failover_tolerance:"5000", sched_on:"23:59",
+	clients:["10.0.0.0/24"], client_devices:["AA:BB:CC:DD:EE:FF"], lan_if:"br-lan.10", fwmark:"0x400000",
+	communities:["telegram","youtube"], mode:"exclude", log_level:"info", dns_strategy:"ipv4_only", ipv6:"off"}}')"
+begin "rpcd/set_config/boundary-values-accepted"   # positive control: the edges of every check pass
+expect_jq "saved" "$R" '.ok==true and .code=="saved"'
+expect_eq "MAC normalised" "$(ulist vpnpool.main.client_dev)" 'aa:bb:cc:dd:ee:ff'
+expect_eq "interval stored" "$(uci -q get vpnpool.main.subscription_interval)" 10m
+expect_true "crontab rewritten (sched_on changed)" [ -f /etc/crontabs/root ]
+end
+
+reset_state; daemon_start; : > "$INITD_LOG"
+rcall set_config '{"settings":{"failover_interval":"90","subscription_url":"https://sub.example.com/new"}}'
+begin "rpcd/set_config/one-signal-only"
+expect_jq "saved, signalled" "$R" '.ok==true and .daemon=="signalled"'
+expect_eq "USR2 (refetch + rebuild) once" "$(signals_seen USR2)" 1
+expect_eq "no second rebuild signal" "$(gcount '^USR1$' "$FAKED_LOG")" 0
+expect_eq "bot untouched" "$(gcount '^vpnpool reload' "$INITD_LOG")" 0
+end
+: > "$FAKED_LOG"
+rcall set_config '{"settings":{"failover_interval":"90"}}'
+begin "rpcd/set_config/unchanged-no-signal"
+expect_jq "unchanged" "$R" '.ok==true and .code=="unchanged" and .daemon=="n/a"'
+expect_eq "no signal" "$(gcount -e '^USR1$' -e '^USR2$' "$FAKED_LOG")" 0
+end
+
+reset_state; daemon_start
+uci set vpnpool.main.telegram_token='123456:SECRET-BOT-TOKEN'; uci set vpnpool.main.subscription_url='https://sub.example.com/s/TOKEN'; uci commit vpnpool
+rcall status
+MTOK=$(printf '%s' "$R" | jq -r '.settings.telegram_token'); MURL=$(printf '%s' "$R" | jq -r '.subscription.url')
+rcall set_config "$(jq -nc --arg t "$MTOK" '{settings:{telegram_token:$t, failover_interval:"91"}}')"
+begin "rpcd/set_config/masked-token-sent-back-keeps-the-real-one"
+expect_eq "status showed it masked" "$MTOK" '123456:***'
+expect_jq "saved (the other field)" "$R" '.ok==true and .changed==["failover_interval"]'
+expect_eq "real token kept" "$(uci -q get vpnpool.main.telegram_token)" '123456:SECRET-BOT-TOKEN'
+end
+rcall set_url "$(jq -nc --arg u "$MURL" '{url:$u}')"
+begin "rpcd/set_url/masked-url-sent-back-unchanged"
+expect_jq "unchanged, no signal" "$R" '.ok==true and .code=="unchanged" and .daemon=="n/a"'
+expect_eq "real URL kept" "$(uci -q get vpnpool.main.subscription_url)" 'https://sub.example.com/s/TOKEN'
+end
+rcall export
+begin "rpcd/export/subscription-url-masked"
+expect_eq "token path in export" "$(printf '%s' "$R" | gcount 's/TOKEN')" 0
+expect_jq "masked line present" "$R" '.config | contains("option subscription_url '"'"'https://sub.example.com/***'"'"'")'
+end
+rcall import "$(printf '%s' "$R" | jq -c '{config}')"
+begin "rpcd/import/masked-export-refused"
+expect_jq "masked_values" "$R" '.ok==false and .code=="masked_values"'
+expect_eq "real token kept" "$(uci -q get vpnpool.main.telegram_token)" '123456:SECRET-BOT-TOKEN'
+end
+
+reset_state; daemon_start
+uci add_list vpnpool.main.extra_sub='https://e1.example.com/a/SECRET'; uci commit vpnpool
+rcall del_sub '{"url":"https://e1.example.com/***"}'
+begin "rpcd/del_sub/masked-url-resolved"
+expect_jq "deleted" "$R" '.ok==true and .code=="deleted"'
+expect_eq "extra_sub empty" "$(ulist vpnpool.main.extra_sub)" ''
+end
+# two subscriptions on ONE host: the masked form is ambiguous -> refused; the status key picks one
+uci add_list vpnpool.main.extra_sub='https://e1.example.com/a/ONE'; uci add_list vpnpool.main.extra_sub='https://e1.example.com/b/TWO'; uci commit vpnpool
+rcall del_sub '{"url":"https://e1.example.com/***"}'
+begin "rpcd/del_sub/ambiguous-mask-refused"
+expect_jq "not_found" "$R" '.ok==false and .code=="not_found"'
+expect_eq "both kept" "$(ulist vpnpool.main.extra_sub | wc -l)" 2
+end
+rcall status
+K2=$(printf '%s' "$R" | jq -r '.subscriptions[] | select(.kind=="extra") | .key' | sed -n 2p)
+rcall del_sub "$(jq -nc --arg k "$K2" '{url:$k}')"
+begin "rpcd/del_sub/by-status-key"
+expect_jq "deleted" "$R" '.ok==true and .code=="deleted"'
+expect_eq "the second one removed" "$(ulist vpnpool.main.extra_sub)" 'https://e1.example.com/a/ONE'
+end
+
+reset_state
+printf "config vpnpool 'main'\n\toption failover_interval '55'\n" > "$FXR/partial.cfg"
+rcall import "$(jq -nc --rawfile c "$FXR/partial.cfg" '{config:$c}')"
+begin "rpcd/import/partial-config-refused"
+expect_jq "incomplete_config" "$R" '.ok==false and .code=="incomplete_config"'
+expect_eq "routing section survives" "$(ulist vpnpool.routing.community | head -1)" telegram
+expect_eq "main untouched" "$(uci -q get vpnpool.main.failover_interval)" 60
+end
+
+# ---- analyze: every status, nothing written ----
+reset_state; uci add_list vpnpool.main.manual_node="$L1"; uci set vpnpool.main.subscription_url='https://sub.example.com/s'; uci commit vpnpool
+cp /etc/config/vpnpool "$FXR/before.cfg"
+L3="vless://$U@203.0.113.73:443?security=tls&sni=a.example#Node3"
+L1R="vless://$U@203.0.113.71:443?security=tls&sni=a.example#Renamed"
+rcall analyze "$(jarg --arg t "$L1
+$L3
+$L3
+$L1R
+https://sub.example.com/s
+https://extra.example.com/x
+vpn://AAAA
+hello world
+vless://$U@203.0.113.74:70000?security=tls#BadPort" '{text:$t}')"
+begin "rpcd/analyze/statuses"
+expect_jq "line 1: same link as a manual node -> dup exists" "$R" '.items[0] | .line==1 and .status=="dup" and .reason=="exists"'
+expect_jq "line 2: new -> add, with name/type/server/id" "$R" '.items[1] | .status=="add" and .name=="Node3" and .type=="vless" and .server=="203.0.113.73" and (.id|length)==12'
+expect_jq "line 3: repeated in the paste -> dup repeated" "$R" '.items[2] | .status=="dup" and .reason=="repeated"'
+expect_jq "line 4: same config under another name -> dup exists" "$R" '.items[3] | .status=="dup" and .reason=="exists"'
+expect_jq "line 5: the configured subscription -> dup" "$R" '.items[4] | .kind=="subscription_url" and .status=="dup"'
+expect_jq "line 6: new URL -> add, shown masked" "$R" '.items[5] | .kind=="subscription_url" and .status=="add" and .name=="https://extra.example.com/***"'
+expect_jq "line 7: vpn:// -> awg pending (stage 4)" "$R" '.items[6] | .kind=="awg" and .status=="pending_stage4"'
+expect_jq "line 8: junk -> unknown skip" "$R" '.items[7] | .kind=="unknown" and .status=="skip" and .reason=="not_a_link"'
+expect_jq "line 9: bad port -> skip with the parser reason" "$R" '.items[8] | .line==9 and .status=="skip" and .reason=="bad_port"'
+expect_jq "summary" "$R" '.summary=={add:2, dup:4, skip:2, pending:1}'
+expect_true "config byte-identical (nothing written)" cmp -s /etc/config/vpnpool "$FXR/before.cfg"
+end
+
+# ---- add: only the picked lines; duplicates are not added twice ----
+reset_state; daemon_start
+rcall add "$(jarg --arg t "$L1
+$L2" '{text:$t, lines:[2]}')"
+begin "rpcd/add/picked-lines-only"
+expect_jq "added 1" "$R" '.ok==true and .added==1'
+expect_eq "only line 2 stored" "$(ulist vpnpool.main.manual_node)" "$L2"
+end
+rcall add "$(jarg --arg t "$L2" '{text:$t}')"
+begin "rpcd/add/duplicate-not-added"
+expect_jq "nothing_added, 1 dup" "$R" '.ok==false and .code=="nothing_added" and .dup==1 and .added==0'
+expect_eq "still one manual node" "$(ulist vpnpool.main.manual_node | wc -l)" 1
+end
+rcall add '{"items":["vpn://AAAA","hello"]}'
+begin "rpcd/add/failed-lines-reported"
+expect_jq "awg pending + junk, each with its line and reason" "$R" '.ok==false and .failed==[{line:1,reason:"needs_stage4"},{line:2,reason:"not_a_link"}]'
+end
+
+# ---- backup holds the secrets; restore checks before it replaces ----
+reset_state
+uci set vpnpool.main.telegram_token='123456:SECRET-BOT-TOKEN'; uci add_list vpnpool.main.manual_node="$L1"; uci set vpnpool.main.enabled=1; uci commit vpnpool
+mkdir -p /etc/vpnpool/awg; cp "$T_DIR/fixtures/awg/awg2.conf" /etc/vpnpool/awg/a1.conf; cp "$T_DIR/fixtures/awg/wg-plain.conf" /etc/vpnpool/awg/a2.conf
+NAWG=$(ls /etc/vpnpool/awg/*.conf | wc -l)
+echo '{"Node1":"'"$L1"'"}' > /etc/vpnpool/saved.map.json
+rcall backup
+printf '%s' "$R" | jq -r '.data' | base64 -d > "$FXR/full.tgz" 2>/dev/null
+mkdir -p "$FXR/full"; tar -xzf "$FXR/full.tgz" -C "$FXR/full" 2>/dev/null
+begin "rpcd/backup/full-copy-with-secrets"
+expect_true "real token inside (it is THE backup)" grep -q 'SECRET-BOT-TOKEN' "$FXR/full/etc/config/vpnpool"
+expect_eq "AWG confs inside" "$(ls "$FXR/full/etc/vpnpool/awg/"*.conf 2>/dev/null | wc -l)" "$NAWG"
+expect_true "saved map inside" [ -s "$FXR/full/etc/vpnpool/saved.map.json" ]
+expect_jq "report counts" "$R" ".report.nodes==1 and .report.awg==$NAWG and .report.saved==0"
+end
+BK=$(printf '%s' "$R" | jq -r '.data')
+reset_state
+rcall restore "$(jq -nc --arg d "$BK" '{data:$d}')"
+begin "rpcd/restore/without-confirm-changes-nothing"
+expect_jq "confirm_required + the report" "$R" ".ok==false and .code==\"confirm_required\" and .report.nodes==1 and .report.awg==$NAWG"
+expect_eq "config not replaced" "$(uci -q get vpnpool.main.telegram_token)" ''
+expect_eq "no AWG file restored" "$(ls /etc/vpnpool/awg/*.conf 2>/dev/null | wc -l)" 0
+end
+reset_state; daemon_start
+rcall restore "$(jq -nc --arg d "$BK" '{data:$d, replace_all:true}')"
+begin "rpcd/restore/replace-all"
+expect_jq "restored" "$R" '.ok==true and .code=="restored" and .daemon=="signalled"'
+expect_eq "token back" "$(uci -q get vpnpool.main.telegram_token)" '123456:SECRET-BOT-TOKEN'
+expect_eq "AWG confs back" "$(ls /etc/vpnpool/awg/*.conf 2>/dev/null | wc -l)" "$NAWG"
+expect_true "saved map back" [ -s /etc/vpnpool/saved.map.json ]
+end
+# foreign member (anything outside the backup's own paths) -> refused, nothing touched
+reset_state
+mkdir -p "$FXR/evil/etc/config" "$FXR/evil/etc/init.d"
+cp /etc/config/vpnpool "$FXR/evil/etc/config/vpnpool"; sed -i "s/option failover_interval '60'/option failover_interval '33'/" "$FXR/evil/etc/config/vpnpool"
+echo 'echo pwned' > "$FXR/evil/etc/init.d/evil"
+tar -czf "$FXR/evil.tgz" -C "$FXR/evil" etc/config/vpnpool etc/init.d/evil
+rcall restore "$(jq -nc --arg d "$(base64 -w0 "$FXR/evil.tgz")" '{data:$d, replace_all:true}')"
+begin "rpcd/restore/foreign-member-refused"
+expect_jq "invalid_archive" "$R" '.ok==false and .code=="invalid_archive"'
+expect_eq "config untouched" "$(uci -q get vpnpool.main.failover_interval)" 60
+end
+# an archive whose config lacks a section -> refused
+reset_state
+mkdir -p "$FXR/half/etc/config"
+printf "config vpnpool 'main'\n\toption failover_interval '44'\n" > "$FXR/half/etc/config/vpnpool"
+tar -czf "$FXR/half.tgz" -C "$FXR/half" etc/config/vpnpool
+rcall restore "$(jq -nc --arg d "$(base64 -w0 "$FXR/half.tgz")" '{data:$d, replace_all:true}')"
+begin "rpcd/restore/incomplete-config-refused"
+expect_jq "incomplete_config" "$R" '.ok==false and .code=="incomplete_config"'
+expect_eq "config untouched" "$(uci -q get vpnpool.main.failover_interval)" 60
+end
+# the archive as a file LuCI uploaded to /tmp (too big for one request): same checks, same result
+reset_state
+printf '%s' "$BK" | base64 -d > /tmp/vpnpool-upload.tgz
+rcall restore '{"path":"/tmp/vpnpool-upload.tgz","replace_all":true}'
+begin "rpcd/restore/from-uploaded-file"
+expect_jq "restored" "$R" '.ok==true and .code=="restored"'
+expect_eq "token back" "$(uci -q get vpnpool.main.telegram_token)" '123456:SECRET-BOT-TOKEN'
+end
+reset_state
+cp /tmp/vpnpool-upload.tgz /etc/vpnpool/x.tgz
+rcall restore '{"path":"/etc/vpnpool/x.tgz","replace_all":true}'
+begin "rpcd/restore/path-outside-tmp-refused"
+expect_jq "invalid path" "$R" '.ok==false and .code=="invalid" and .errors.path=="bad_value"'
+expect_eq "config untouched" "$(uci -q get vpnpool.main.telegram_token)" ''
+end
+rm -f /tmp/vpnpool-upload.tgz
 
 # ---------------- coverage: ACL <-> rpcd list <-> this suite ----------------
 begin "rpcd/coverage-acl-methods"

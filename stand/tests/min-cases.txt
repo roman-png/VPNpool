@@ -1,12 +1,12 @@
 # Minimum number of cases per suite (stand/tests/run.sh): a suite that silently runs fewer
 # (stopped early, lost cases) fails the run. Raise when you add cases; never lower to hide a loss.
 parser 132
-build 33
-rpcd 195
+build 39
+rpcd 211
 sched 6
 adaptive 4
-fetch 9
-status 6
+fetch 10
+status 12
 uitext 6
 daemon 38
 tgbot 18
