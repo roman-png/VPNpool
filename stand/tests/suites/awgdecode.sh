@@ -227,11 +227,11 @@ printf '%s\n' "let s = replace(replace(ARGV[0], /-/g, '+'), /_/g, '/'); while (l
 _dec=$(ucode "$AD/b64.uc" "$_ui" 2>/dev/null)
 expect_eq "decodes to method:password" "$_dec" 'aes-256-gcm:???>>>???'
 end
-# the ssxray link through today's parser.uc (base64url without padding is parser item 5)
+# the ssxray link through parser.uc (base64url without padding — parser item 5, done)
 begin "awgdecode/ss-sip002-parses"
 _p=$(parse_link "$_l")
 expect_jq "shadowsocks node, password intact" "$_p" 'length==1 and .[0].type=="shadowsocks" and .[0].password=="???>>>???"'
-end 5
+end
 
 # ---- 7. legacy mode looks through ALL containers for a .conf (default xray + awg) ----
 begin "awgdecode/legacy-default-xray-still-gives-conf"
