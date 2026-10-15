@@ -254,14 +254,31 @@ ctl deploy-old-behaviour deploy-tar fail 'root/dirs changed' \
 	scripts/deploy.sh 'check_tar "$ARCHIVE"' ': check_tar' \
 	scripts/deploy.sh "REMOTE_EXTRACT='tar xzof - -C /'" "REMOTE_EXTRACT='tar xzf - -C /'"
 # awgdecode.uc (vpn:// decoder)
-# the old unbounded inflate: no end-of-input / stored-header / NLEN / stored-length guard
-# (four layers; any one of them alone stops the zero-filled stream, hence all four here)
-ctl awgdecode-inflate-unbounded awgdecode fail 'awgdecode/garbage-zlib-zeros ;awgdecode/no-human-text-in-errors ' \
+# the old unbounded inflate: no end-of-input / stored-header / NLEN / stored-length guard and
+# no block budget (five layers; any one alone stops the zero-filled stream, hence all five)
+ctl awgdecode-inflate-unbounded awgdecode fail 'awgdecode/garbage-zlib-zeros ;awgdecode/blocks-5000-refused ;awgdecode/no-human-text-in-errors ' \
 	"$LIBX/awgdecode.uc" 'if (pos >= dlen) { overrun = true; return 0; }' 'if (false) { overrun = true; return 0; }' \
 	"$LIBX/awgdecode.uc" 'if (pos + 4 > dlen) return null;' 'if (false) return null;' \
-	"$LIBX/awgdecode.uc" 'if ((len ^ 0xffff) != nlen) return null;' 'if (false) return null;' 	"$LIBX/awgdecode.uc" 'if (pos + len > dlen || length(out) + len > maxout) return null;' 'if (length(out) + len > maxout) return null;'
+	"$LIBX/awgdecode.uc" 'if ((len ^ 0xffff) != nlen) return null;' 'if (false) return null;' \
+	"$LIBX/awgdecode.uc" 'if (pos + len > dlen || length(out) + len > maxout) return null;' 'if (length(out) + len > maxout) return null;' \
+	"$LIBX/awgdecode.uc" 'if (++nblocks > MAX_BLOCKS) return null;' 'if (++nblocks < 0) return null;'
 ctl awgdecode-whitespace-kept awgdecode fail 'awgdecode/vec-B2_wrapped_crlf ;awgdecode/vec-B3_space_inside ;awgdecode/vec-B_wrapped76 ;awgdecode/caption-wrapped-trailing-text ;awgdecode/uncompressed-json-crlf-wrapped ' \
-	"$LIBX/awgdecode.uc" "push(cands, join('', slice(words, 0, n)));" "push(cands, join(' ', slice(words, 0, n)));"
+	"$LIBX/awgdecode.uc" "return (n >= 1) ? join('', slice(words, 0, n)) : null;" "return (n >= 1) ? join(' ', slice(words, 0, n)) : null;"
+# limits on untrusted input (each control lifts ONE limit; the case with that vector goes red)
+ctl awgdecode-cands-unbounded awgdecode fail 'awgdecode/many-words-40k ' \
+	"$LIBX/awgdecode.uc" 'const MAX_CANDS = 3;' 'const MAX_CANDS = 100000;'
+ctl awgdecode-input-unbounded awgdecode fail 'awgdecode/input-over-256k-refused ;awgdecode/links-100k-refused ' \
+	"$LIBX/awgdecode.uc" 'const MAX_IN = 256 * 1024;' 'const MAX_IN = 64 * 1024 * 1024;'
+ctl awgdecode-declared-unbounded awgdecode fail 'awgdecode/declared-4mb-refused ;awgdecode/no-human-text-in-errors ' \
+	"$LIBX/awgdecode.uc" "if (want > MAX_OUT) return { code: 'E_TOO_BIG' };" "if (false) return { code: 'E_TOO_BIG' };"
+ctl awgdecode-blocks-unbounded awgdecode fail 'awgdecode/blocks-5000-refused ' \
+	"$LIBX/awgdecode.uc" 'if (++nblocks > MAX_BLOCKS) return null;' 'if (++nblocks < 0) return null;'
+ctl awgdecode-links-unbounded awgdecode fail 'awgdecode/links-40k-capped ;awgdecode/links-33-good ' \
+	"$LIBX/awgdecode.uc" 'if (length(res) >= MAX_LINKS) { more++; continue; }' 'if (false) { more++; continue; }'
+ctl awgdecode-types-unguarded awgdecode fail 'awgdecode/types-stream-str ;awgdecode/types-reality-num ;awgdecode/types-ws-headers-str ' \
+	"$LIBX/awgdecode.uc" "function objv(x) { return (type(x) == 'object') ? x : {}; }" 'function objv(x) { return x ?? {}; }'
+ctl awgdecode-legacy-default-only awgdecode fail 'awgdecode/legacy-default-xray-still-gives-conf ' \
+	"$LIBX/awgdecode.uc" "if (want_conf && pb.proto != 'awg' && pb.proto != 'wireguard') continue;" 'if (false) continue;'
 ctl awgdecode-default-ignored awgdecode fail 'awgdecode/default-container-wins ' \
 	"$LIBX/awgdecode.uc" 'rank: (isdef ? 0 : 10)' 'rank: (isdef ? 10 : 10)'
 # (the api-key vector also carries config_version, which a second rule refuses: the
@@ -284,8 +301,20 @@ ctl engine-space-unchecked engine fail 'engine/no-space-refused ' \
 	"$LIBX/engine.sh" '[ "$_avail" -ge $((_need + ENGINE_SPACE_MARGIN_KB)) ]' 'true || [ "$_avail" -ge 0 ]'
 ctl engine-download-over-working engine fail 'engine/corrupt-asset-sha-refused ;engine/override-sha-mismatch-refused ;engine/override-no-sha256-refused ;engine/override-garbage-sha256-refused ;engine/wrong-version-refused ;engine/no-awg-check-refused ;engine/download-404-refused ;engine/real-corrupt-over-working ' \
 	"$LIBX/engine.sh" 'TMPF="$_dir/.$(basename "$DEST").new.$$"' 'TMPF="$DEST"'
-ctl engine-arch-too-wide engine fail 'engine/arch-mipsel_74kc ' \
-	"$LIBX/engine.sh" 'mipsel_24kc|mipsel_24kc_*) echo mipsel_24kc ;;' 'mipsel_*) echo mipsel_24kc ;;'
+ctl engine-arch-too-wide engine fail 'engine/arch-mips64_octeonplus ;engine/unknown-arch-refused ;engine/install-sh-awg1-unsupported-arch ' \
+	"$LIBX/engine.sh" 'mips_24kc|mips_24kc_*|mips_34kc|mips_34kc_*|mips_74kc|mips_74kc_*) echo mips_24kc ;;' 'mips*) echo mips_24kc ;;'
+ctl engine-orphan-kept engine fail 'engine/orphan-temp-file-removed ' \
+	"$LIBX/engine.sh" 'rm -f "$_dir/.$(basename "$DEST").new."* 2>/dev/null' ': "$_dir"'
+ctl engine-ram-threshold-256 engine fail 'engine/ram-mode-small-memtotal-refused ;engine/ram-mode-256mb-class-ok ;engine/update-keeps-ram-mode ' \
+	"$LIBX/engine.sh" 'ENGINE_RAM_MIN_MB="${VPNPOOL_ENGINE_RAM_MIN_MB:-200}"' 'ENGINE_RAM_MIN_MB="${VPNPOOL_ENGINE_RAM_MIN_MB:-256}"'
+ctl engine-update-ignores-record engine fail 'engine/update-keeps-ram-mode ' \
+	"$LIBX/engine.sh" "&& [ \"\$(jq -r '.ram // false' \"\$ENGINE_STATE\" 2>/dev/null)\" = true ]; then" '&& false; then'
+ctl engine-fetch-no-fallback engine fail 'engine/downloader-fallback-to-wget ;engine/override-no-sha256-refused ;engine/download-404-refused ' \
+	"$LIBX/engine.sh" 'fetch_once "$_t" "$1" "$2" && return 0   # fallback downloader' 'false && return 0   # fallback downloader'
+ctl engine-stock-not-restored engine fail 'engine/install-restores-stock-opkg ;engine/stock-restore-fails-engine-stays ;engine/install-restores-stock-apk ;engine/install-sh-restores-stock ;engine/install-sh-stock-restore-fails ' \
+	"$LIBX/engine.sh" 'if [ "$S_REPLACED" = true ] && [ "$S_REASON" != ram ]; then' 'if false; then'
+ctl engine-fork-not-recognised engine fail 'engine/stock-fork-detected-opkg ;engine/install-restores-stock-opkg ;engine/stock-restore-fails-engine-stays ' \
+	"$LIBX/engine.sh" 'case "$S_VER" in *awg*|*AWG*) S_REPLACED=true; S_REASON=awg_build; return ;; esac' ':'
 ctl engine-installer-leaks-codes engine fail 'engine/install-sh-awg1-unsupported-arch ;engine/install-sh-update-without-engine ;engine/install-sh-ram-small-memory ' \
 	install.sh 'say "AmneziaWG: $(awg_explain "$code" "$pa").' 'say "AmneziaWG: $res $(awg_explain "$code" "$pa").'
 
