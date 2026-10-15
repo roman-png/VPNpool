@@ -329,6 +329,45 @@ wan_alive() {
 	return 1
 }
 
+# ---- tag safety net for the generated config ----
+# parser.uc owns the names (RESERVED_TAGS + unique suffixes), so a repeat should never reach
+# here. If one does anyway (a new generator outbound, a source bypassing the parser), sing-box
+# check says "duplicate outbound/endpoint tag: X" WITHOUT an index and the pool would freeze on
+# the previous config forever. config_tag_guard <config.json> rewrites the file in place:
+#   - a NODE whose tag belongs to one of the generator's own outbounds -> dropped;
+#   - a NODE repeating an earlier node's tag -> dropped (the first one stays);
+#   - group member lists de-duplicated;
+#   - two of the generator's OWN outbounds with one tag -> rc 1 (nothing a node drop can fix).
+# Sets TAG_GUARD_DROPPED (count), logs the dropped names. The file is untouched when clean.
+NODE_TYPES='["vless","vmess","trojan","shadowsocks","shadowtls","hysteria","hysteria2","tuic","wireguard","awg","socks","http","anytls"]'
+TAG_GUARD_DROPPED=0
+config_tag_guard() {
+	local out names
+	TAG_GUARD_DROPPED=0
+	out=$(jq -c --argjson nt "$NODE_TYPES" '
+		def isnode: ((.type) as $y | $nt | index($y)) != null;
+		([.outbounds[]? | select(isnode | not) | .tag]) as $own
+		| if ($own | length) != ($own | unique | length) then error("own outbounds repeat a tag") else . end
+		| reduce (((.outbounds // [])[] | {a:"outbounds", v:.}),
+		          ((.endpoints // [])[] | {a:"endpoints", v:.})) as $e
+		    ({seen:{}, outbounds:[], endpoints:[], dropped:[]};
+		     if ($e.v | isnode) and ((($own | index($e.v.tag)) != null) or .seen[$e.v.tag])
+		     then .dropped += [$e.v.tag]
+		     else .seen[$e.v.tag] = true | .[$e.a] += [$e.v] end) as $r
+		| {dropped: $r.dropped,
+		   cfg: (.outbounds = ($r.outbounds | map(
+		           if (.type=="urltest" or .type=="selector") and (.outbounds|type=="array")
+		           then .outbounds |= reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end)
+		           else . end))
+		        | if has("endpoints") then .endpoints = $r.endpoints else . end)}' "$1" 2>/dev/null) || return 1
+	TAG_GUARD_DROPPED=$(printf '%s' "$out" | jq '.dropped | length')
+	[ "${TAG_GUARD_DROPPED:-0}" -gt 0 ] || { TAG_GUARD_DROPPED=0; return 0; }
+	names=$(printf '%s' "$out" | jq -r '.dropped | join(", ")')
+	printf '%s' "$out" | jq '.cfg' > "$1.tg" && mv -f "$1.tg" "$1" || { rm -f "$1.tg"; return 1; }
+	log "build: dropped node(s) with a repeated name before check: $names"
+	return 0
+}
+
 # ---- per-node tests (speedtest.sh, unlock.sh) ----
 # They point the dedicated 'vpnpool-test' selector (generator.uc) at the node under test
 # and send their requests through the node-test-in inbound (uci node_test_port, 1606) —

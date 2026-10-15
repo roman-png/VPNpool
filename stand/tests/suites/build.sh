@@ -184,12 +184,48 @@ end
 
 # ---- ONE list of reserved names: parser.uc's RESERVED_TAGS must cover every outbound tag the
 # generator adds itself (build.sh keeps no copy of the rule) ----
+printf '%s\n' "$GOOD" > "$SUB"
+run_build "$SUB"
+_cfg=$(cat /etc/vpnpool/sing-box.json 2>/dev/null)
 sed -n "s/^let RESERVED_TAGS = {\(.*\)};.*/\1/p" /usr/libexec/vpnpool/parser.uc | tr ',' '\n' \
 	| sed "s/:.*//; s/[' ]//g" | grep -v '^$' | sort -u > "$T_STATE/build/reserved"
-printf '%s' "$_cfg" | jq -r '.outbounds[] | select(.type=="urltest" or .type=="selector" or .type=="direct" or .type=="block") | .tag' \
-	| sort -u > "$T_STATE/build/gen-tags"
+# by PROPERTY, not by type: every outbound/endpoint tag of the config that is not a node tag
+printf '%s' "$_cfg" | jq -r --slurpfile n /tmp/vpnpool/nodes.json \
+	'([.outbounds[].tag] + [(.endpoints // [])[].tag]) - [$n[0][].tag] | .[]' | sort -u > "$T_STATE/build/gen-tags"
 begin "build/generator-tags-reserved-in-parser"
 expect_true "parser list read (positive control: has auto)" grep -qx auto "$T_STATE/build/reserved"
 expect_true "generator tags read (positive control: has proxy)" grep -qx proxy "$T_STATE/build/gen-tags"
 expect_eq "generator tags missing from parser RESERVED_TAGS" "$(grep -vxF -f "$T_STATE/build/reserved" "$T_STATE/build/gen-tags" | tr '\n' ' ')" ''
+end
+
+# ---- the tag safety net (lib.sh config_tag_guard) on a config that bypasses the parser ----
+cat > "$T_STATE/build/dups.json" <<'JSON'
+{"outbounds":[
+ {"type":"urltest","tag":"auto","outbounds":["A","A","B","direct"]},
+ {"type":"selector","tag":"proxy","outbounds":["auto","A","A","B"]},
+ {"type":"vless","tag":"A","server":"203.0.113.1","server_port":443,"uuid":"x"},
+ {"type":"vless","tag":"A","server":"203.0.113.2","server_port":443,"uuid":"y"},
+ {"type":"vless","tag":"B","server":"203.0.113.3","server_port":443,"uuid":"z"},
+ {"type":"vless","tag":"direct","server":"203.0.113.4","server_port":443,"uuid":"w"},
+ {"type":"direct","tag":"direct"}],
+ "endpoints":[{"type":"wireguard","tag":"B"},{"type":"wireguard","tag":"C"}]}
+JSON
+cp "$T_STATE/build/dups.json" "$T_STATE/build/g.json"
+printf '. /usr/libexec/vpnpool/lib.sh\n"$@"\nrc=$?\necho "rc=$rc dropped=$TAG_GUARD_DROPPED"\n' > "$T_STATE/build/guard.sh"
+sh "$T_STATE/build/guard.sh" config_tag_guard "$T_STATE/build/g.json" > "$T_STATE/build/g.out" 2>&1
+_g=$(cat "$T_STATE/build/g.json")
+begin "build/tag-guard-drops-repeated-nodes"
+expect_eq "result" "$(tail -1 "$T_STATE/build/g.out")" "rc=0 dropped=3"
+expect_jq "all tags unique now" "$_g" '([.outbounds[].tag] + [.endpoints[].tag]) | length == (unique | length)'
+expect_jq "first A kept, the structural direct kept" "$_g" '([.outbounds[] | select(.tag=="A")][0].server=="203.0.113.1") and ([.outbounds[] | select(.tag=="direct")][0].type=="direct")'
+expect_jq "endpoint C kept, repeated B dropped" "$_g" '[.endpoints[].tag] == ["C"]'
+expect_jq "group lists de-duplicated" "$_g" '(.outbounds[0].outbounds == ["A","B","direct"]) and (.outbounds[1].outbounds == ["auto","A","B"])'
+end
+printf '{"outbounds":[{"type":"direct","tag":"direct"},{"type":"direct","tag":"direct"}]}\n' > "$T_STATE/build/own.json"
+printf '{"outbounds":[{"type":"direct","tag":"direct"},{"type":"vless","tag":"A"}]}\n' > "$T_STATE/build/clean.json"
+cp "$T_STATE/build/clean.json" "$T_STATE/build/clean.orig"
+begin "build/tag-guard-own-repeat-refused-clean-untouched"
+expect_eq "two own outbounds share a tag -> rc 1" "$(sh "$T_STATE/build/guard.sh" config_tag_guard "$T_STATE/build/own.json" 2>&1 | tail -1)" "rc=1 dropped=0"
+expect_eq "clean config -> rc 0, nothing dropped" "$(sh "$T_STATE/build/guard.sh" config_tag_guard "$T_STATE/build/clean.json" 2>&1 | tail -1)" "rc=0 dropped=0"
+expect_true "clean config left byte-identical" cmp -s "$T_STATE/build/clean.json" "$T_STATE/build/clean.orig"
 end
