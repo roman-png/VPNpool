@@ -61,6 +61,28 @@ UI text guard
                                                    (fails on NEW lines AND on stale baseline lines)
   stand/tests/ui-text-guard.sh --update-baseline   after FIXING strings (refuses to grow the baseline)
   Stop-list: stand/tests/ui-text-stoplist.txt
+  Reads _() in views AND shared modules (resources/vpnpool/*.js), DICT of i18n.js, menu titles,
+  ACL descriptions and po/**/*.po (a po string already seen in an earlier source counts once).
+
+Translations (standard LuCI po: package/luci-app-vpnpool/po/templates/vpnpool.pot, po/ru/vpnpool.po)
+  stand/tests/ui-i18n.sh            check: pot = the sources, every msgid translated, same
+                                    %-placeholders, no msgid outside the BMP. "I18N: … failed=0"
+  stand/tests/ui-i18n.sh sync       after adding/changing _() strings: rewrite the pot, merge
+                                    into po/ru (new msgids empty) -> translate them -> check
+  stand/tests/ui-i18n.sh lmo <out>  po/ru -> .lmo (stand/tests/po2lmo.py, port of LuCI's po2lmo)
+  msgids are whitespace-normalized like LuCI's _() does (trim, runs of spaces -> one space).
+  The package luci-i18n-vpnpool-ru is built by luci.mk in the SDK (CI build job).
+
+UI components (vpnpool/common.js + the stand-only page view/vpnpool/_demo.js)
+  stand/tests/ui-components.sh      node: syntax + unit tests of common.js + their negative
+                                    controls; po check + lmo; LuCI stand: page under login,
+                                    module served, ru catalog loaded, menu, ubus paths.
+                                    "UI-COMPONENTS: passed=N failed=0"
+  IMAGE=vpnpool-stand-ui:25.12 stand/tests/ui-components.sh     same on OpenWrt 25.12
+  PORT=18081 KEEP=1 stand/tests/ui-components.sh  leave it running for a browser:
+    http://localhost:18081/cgi-bin/luci/admin/services/vpnpool/_demo (root / vpnpool);
+    window.vpDemo.selfTest() in the console = platform probe; docker rm -f vpnpool-ui-components
+  node stand/tests/ui-common.test.js [--negative]   the unit tests alone
 
 LuCI stand
   stand/tests/ui-smoke.sh       starts vpnpool-stand-ui on 127.0.0.1:18080, logs in, opens

@@ -60,6 +60,8 @@ ctl() {
 		            line=$(grep '^UI-SMOKE: ' "$d.log" | tail -1) ;;
 		deploy-tar) REPO_DIR="$d" sh "$HERE/deploy-tar-test.sh" > "$d.log" 2>&1
 		            line=$(grep '^DEPLOY-TAR: ' "$d.log" | tail -1) ;;
+		ui-i18n)    REPO_DIR="$d" sh "$HERE/ui-i18n.sh" check > "$d.log" 2>&1
+		            line=$(grep '^I18N: ' "$d.log" | tail -1) ;;
 		*)          REPO_DIR="$d" sh "$HERE/run-in-docker.sh" "$suite" > "$d.log" 2>&1
 		            line=$(grep '^TESTS: ' "$d.log" | tail -1) ;;
 	esac
@@ -252,6 +254,24 @@ ctl status-delay-lost status fail 'status/300-nodes-daemon-up-valid ' \
 	"$LIBX/status.sh" 'map(select(. != null and . > 0))' 'map(select(. != null and . > 100000))'
 ctl uitext-new-technical-string uitext fail 'uitext/real-app-no-new-violations ;uitext/baseline-gates-new-violations ;uitext/stale-baseline-line-fails ' \
 	"$VIEW/dashboard.js" "_('Cancel')" "_('Cancel via rpcd')"
+# ui0: the guard reads the shared modules (vpnpool/common.js) and po, counts a po msgid once
+ctl uitext-views-only uitext fail 'uitext/positive-control-bad-fixture-caught ' \
+	stand/tests/ui-text-guard.uc "walk(ROOT + '/files/www/luci-static/resources', '.js', [])" "walk(ROOT + '/files/www/luci-static/resources/view', '.js', [])"
+ctl uitext-po-counted-twice uitext fail 'uitext/positive-control-bad-fixture-caught ;uitext/real-app-no-new-violations ;uitext/baseline-gates-new-violations ;uitext/stale-baseline-line-fails ' \
+	stand/tests/ui-text-guard.uc '(catalog && seen_text[text])' '(false)'
+ctl uitext-po-header-scanned uitext fail 'uitext/positive-control-bad-fixture-caught ' \
+	stand/tests/ui-text-guard.uc "if (!(substr(cur, 0, 6) == 'msgstr' && id == ''))" 'if (true)'
+ctl uitext-common-js-technical uitext fail 'uitext/real-app-no-new-violations ;uitext/baseline-gates-new-violations ;uitext/stale-baseline-line-fails ' \
+	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "_('More actions')" "_('More actions (watchdog)')"
+# ui0: po completeness (ui-i18n.sh check)
+ctl i18n-untranslated ui-i18n fail 'FAIL untranslated ru: More actions' \
+	package/luci-app-vpnpool/po/ru/vpnpool.po 'msgstr "Ещё действия"' 'msgstr ""'
+ctl i18n-new-string-not-in-po ui-i18n fail 'FAIL pot-missing-msgid A new string;FAIL po-missing-msgid ru: A new string;FAIL pot-stale More actions;FAIL po-obsolete ru: More actions' \
+	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "_('More actions')" "_('A new string')"
+ctl i18n-placeholder-mismatch ui-i18n fail 'FAIL placeholders ru: "Switched to %s"' \
+	package/luci-app-vpnpool/po/ru/vpnpool.po 'msgstr "Переключено на %s"' 'msgstr "Переключено на %d"'
+ctl i18n-nonbmp-msgid ui-i18n fail 'FAIL nonbmp More actions 📌;FAIL pot-missing-msgid More actions 📌;FAIL po-missing-msgid ru: More actions 📌;FAIL pot-stale More actions;FAIL po-obsolete ru: More actions' \
+	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "_('More actions')" "_('More actions 📌')"
 ctl ui-smoke-status-broken ui-smoke fail 'ubus vpnpool.status via /ubus' \
 	"$RPCD" '		/usr/libexec/vpnpool/status.sh' '		echo not-json'
 # runner: a suite that silently stops early must fail the run (min-cases.txt), not shrink total

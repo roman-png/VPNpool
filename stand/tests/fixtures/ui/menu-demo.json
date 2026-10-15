@@ -1,0 +1,7 @@
+{
+	"admin/services/vpnpool/_demo": {
+		"title": "Components",
+		"order": 99,
+		"action": { "type": "view", "path": "vpnpool/_demo" }
+	}
+}
