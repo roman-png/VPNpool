@@ -299,7 +299,7 @@ PKG_I18N="$(ls "$TMP"/$I18N_GLOB 2>/dev/null | head -n1)"
 install_i18n() {   # $1 = extra opkg flag (--nodeps in the small-flash flow)
 	[ -n "$PKG_I18N" ] || return 0
 	if [ "$PM" = apk ]; then pm_add_files "$PKG_I18N" >/dev/null 2>&1
-	else opkg install $1 --force-reinstall "$PKG_I18N" >/dev/null 2>&1; fi \
+	else opkg install ${1:-} --force-reinstall "$PKG_I18N" >/dev/null 2>&1; fi \
 		|| say "warning: the Russian translation of the web interface was not installed (the interface stays in English)"
 }
 [ -n "$PKG_BASE" ] || die "vpnpool .$EXT package not found"
