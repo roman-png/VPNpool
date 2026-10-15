@@ -134,10 +134,10 @@ ctl parser-hy2-port-not-hopped parser fail 'parser/hy2-port-hopping ' \
 ctl parser-unknown-transport-kept parser fail 'parser/vless-xhttp-refused ;parser/vless-splithttp-refused ;parser/vless-kcp-refused ;parser/trojan-xhttp-refused ;parser/vmess-xhttp-refused ;parser/report-reasons ' \
 	"$LIBX/parser.uc" "	return 'unsupported_transport';" "	return { type: t };"
 # every case that inspects the installed config goes red
-ctl build-config-not-installed build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/json-source-long-short-id-no-panic ;build/awg-node-on-stock-engine-deferred ;build/unchanged-pool-no-flash-write ;build/changed-pool-flash-updated ;build/after-reboot-failed-build-keeps-flash-config ;build/node-test-selector-separate-from-proxy ;build/poison-json-source-unknown-field ;build/generator-tags-reserved-in-parser ;build/status-file-lists-engine-drop ;build/nodes-carry-id-config-does-not ' \
+ctl build-config-not-installed build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/json-source-long-short-id-no-panic ;build/awg-node-on-stock-engine-deferred ;build/unchanged-pool-no-flash-write ;build/changed-pool-flash-updated ;build/after-reboot-failed-build-keeps-flash-config ;build/node-test-selector-separate-from-proxy ;build/poison-json-source-unknown-field ;build/generator-tags-reserved-in-parser ;build/status-file-lists-engine-drop ;build/nodes-carry-id-config-does-not ;build/log-counts-the-final-pool ;build/term-writes-interrupted ' \
 	"$LIBX/build.sh" 'mv "$SB_CONF.new" "$SB_CONF"' 'rm -f "$SB_CONF.new"'
 # add / add_node write but never signal (and say n/a instead of not_running)
-ctl rpcd-add_node-no-signal rpcd fail 'rpcd/add_node/ok ;rpcd/add_node/no-daemon-reported ;rpcd/add/ok ;rpcd/add/no-daemon-reported ' \
+ctl rpcd-add_node-no-signal rpcd fail 'rpcd/add_node/ok ;rpcd/add_node/no-daemon-reported ;rpcd/add_sub/ok ;rpcd/add_sub/no-daemon-reported ;rpcd/add/ok ;rpcd/add/no-daemon-reported ' \
 	"$RPCD" '		case "$a" in USR1|USR2) d=$(signal_word "$a") ;; esac' '		case "$a" in USR1|USR2) d=n/a ;; esac'
 ctl sched-old-block-kept sched fail 'sched/disabled-removes-block-keeps-user-jobs ' \
 	"$LIBX/sched.sh" 'inblk && $0 == e { inblk = 0; n = 0; next }' 'inblk && $0 == e { inblk = 0; for (i = 1; i <= n; i++) print buf[i]; print; n = 0; next }'
@@ -163,7 +163,7 @@ ctl fetch-cache-always-rewritten fetch fail 'fetch/unchanged-source-cache-not-re
 ctl fetch-no-throttle fetch fail 'fetch/fetch-due-throttle ' \
 	"$LIBX/lib.sh" '[ $(( now - t )) -ge "$INTERVAL_MIN" ]' 'true'
 # stage 2 (2.1 / 2.11): build
-ctl build-singular-regex-only build fail 'build/poison-json-source-unknown-field ;build/awg-node-on-stock-engine-deferred ;build/status-file-lists-engine-drop ' \
+ctl build-singular-regex-only build fail 'build/poison-json-source-unknown-field ;build/awg-node-on-stock-engine-deferred ;build/status-file-lists-engine-drop ;build/log-counts-the-final-pool ' \
 	"$LIBX/build.sh" "grep -oE '(outbound|endpoint)s?\[[0-9]+\]'" "grep -oE '(outbound|endpoint)\[[0-9]+\]'"
 # one owner of the reserved names: a generator tag missing from parser.uc's list is caught
 ctl parser-reserved-misses-generator-tag build fail 'build/generator-tags-reserved-in-parser ' \
@@ -283,16 +283,16 @@ ctl rpcd-restore-no-confirm rpcd fail 'rpcd/restore/without-confirm-changes-noth
 	"$RPCD" "		if [ \"\$(printf '%s' \"\$input\" | jq -r '.replace_all == true' 2>/dev/null)\" != true ]; then" '		if false; then'
 # restore takes any member of the archive
 ctl rpcd-restore-members-unchecked rpcd fail 'rpcd/restore/foreign-member-refused ' \
-	"$RPCD" "' \"\$D/list\" | grep -q .; then" "' \"\$D/list\" | grep -q NEVER-MATCHES; then"
+	"$RPCD" '			  if (NF != 6 || (t != "-" && t != "d") || $6 !~ re) { bad = "invalid_archive"; exit }' '			  if (NF != 6 || (t != "-" && t != "d")) { bad = "invalid_archive"; exit }'
 # restore takes an uploaded file from anywhere
-ctl rpcd-restore-any-path rpcd fail 'rpcd/restore/path-outside-tmp-refused ' \
-	"$RPCD" "			case \"\$src\" in /tmp/*) ;; *) bad invalid '{\"errors\":{\"path\":\"bad_value\"}}' ;; esac" '			:'
+ctl rpcd-restore-any-path rpcd fail 'rpcd/restore/path-outside-tmp-refused ;rpcd/restore/path-escaping-tmp-refused-_tmp_vpnpool_lnk_up_tgz_;rpcd/restore/path-escaping-tmp-refused-_tmp____etc_vpnpool_up_tgz_' \
+	"$RPCD" "			case \"\$real\" in /tmp/?*) ;; *) bad invalid '{\"errors\":{\"path\":\"bad_value\"}}' ;; esac" '			:'
 # a subscription named by its status key is not found
 ctl api-resolve-no-key rpcd fail 'rpcd/del_sub/by-status-key ' \
 	"$LIBX/api.uc" '	for (let x in all) if (str_key(x) == val) return x;' '	;'
 # backup without the AWG files
 ctl rpcd-backup-no-awg rpcd fail 'rpcd/backup/full-copy-with-secrets ;rpcd/restore/without-confirm-changes-nothing ;rpcd/restore/replace-all ' \
-	"$RPCD" '	ls /etc/vpnpool/awg/*.conf >/dev/null 2>&1 && echo etc/vpnpool/awg' '	:'
+	"$RPCD" '	for f in /etc/vpnpool/awg/* /etc/vpnpool/$BACKUP_MAPS; do' '	for f in /etc/vpnpool/$BACKUP_MAPS; do'
 # status: the token / the subscription URL in clear
 ctl status-token-unmasked status fail 'status/telegram-token-masked ' \
 	"$LIBX/status.uc" '		telegram_token: mask_token(token),' '		telegram_token: token,'
@@ -442,6 +442,74 @@ ctl engine-fork-not-recognised engine fail 'engine/stock-fork-detected-opkg ;eng
 ctl engine-installer-leaks-codes engine fail 'engine/install-sh-awg1-unsupported-arch ;engine/install-sh-update-without-engine ;engine/install-sh-ram-small-memory ' \
 	install.sh 'say "AmneziaWG: $(awg_explain "$code" "$pa").' 'say "AmneziaWG: $res $(awg_explain "$code" "$pa").'
 
+# ---- review fixes (REVIEW_stage3) ----
+# V1: backup packs every file of awg/ -> its own archive is refused by restore
+ctl review-v1-backup-ignores-rule rpcd fail 'rpcd/backup/members-by-the-restore-rule ;rpcd/restore/own-backup-round-trip ' \
+	"$RPCD" 'printf '"'"'%s\n'"'"' "$rel" | grep -Eq "$MEMBER_RE"; then' 'true; then'
+# V2: restore / import without the value check
+ctl review-v2-restore-values-unchecked rpcd fail 'rpcd/restore/bad-values-refused ' \
+	"$RPCD" '		CC=$(ucode "$API" check_config "$D/root/etc/config" "$D/save" 2>/dev/null)' "		CC='{\"ok\":true}'"
+ctl review-v2-import-values-unchecked rpcd fail 'rpcd/import/bad-values-refused ' \
+	"$RPCD" '		CC=$(ucode "$API" check_config "$D" "$D/save" 2>/dev/null)' "		CC='{\"ok\":true}'"
+# V3: no size/count check on the listing -> the archive is unpacked first
+ctl review-v3-no-precheck rpcd fail 'rpcd/restore/oversized-content-refused ' \
+	"$RPCD" '			      else if (n > maxn || sum > maxb) print "too_large"; else print "ok" }' '			      else print "ok" }'
+# M1: member types not checked (listing and disk) -> symlink, hardlink, device, fifo get in
+ctl review-m1-types-unchecked rpcd fail 'rpcd/restore/member-type-symlink-refused ;rpcd/restore/member-type-hardlink-refused ;rpcd/restore/member-type-device-refused ;rpcd/restore/member-type-fifo-refused ' \
+	"$RPCD" '			  if (NF != 6 || (t != "-" && t != "d") || $6 !~ re) { bad = "invalid_archive"; exit }' '			  if ($6 !~ re) { bad = "invalid_archive"; exit }' \
+	"$RPCD" '		[ -z "$(find "$D/root" ! -type f ! -type d 2>/dev/null)" ] || bad invalid_archive' '		:'
+# M2: the path checked as written, not after resolving symlinks / ".."
+ctl review-m2-path-not-resolved rpcd fail 'rpcd/restore/path-escaping-tmp-refused-_tmp_vpnpool_lnk_up_tgz_;rpcd/restore/path-escaping-tmp-refused-_tmp____etc_vpnpool_up_tgz_' \
+	"$RPCD" '			real=$(readlink -f "$src" 2>/dev/null)' '			real=$src'
+# V4: no rollback of the moved files / no verified copy before
+ctl review-v4-no-rollback rpcd fail 'rpcd/restore/failed-step-rolls-back ' \
+	"$RPCD" '			while IFS= read -r rel; do mv -f "$OLD/$rel" "/etc/vpnpool/$rel" || rb=0; done < "$OLD/.moved"' '			:'
+ctl review-v4-copy-before-unchecked rpcd fail 'rpcd/restore/no-copy-before-no-replace ' \
+	"$RPCD" "			|| { rm -f \"\$PRE\"; bad write_failed '{\"step\":\"pre_copy\"}'; }" '			|| :'
+# V5: no trap -> a killed build / fetch leaves the previous result
+ctl review-v5-build-no-trap build fail 'build/term-writes-interrupted ' \
+	"$LIBX/build.sh" 'trap on_signal INT TERM HUP' ':'
+ctl review-v5-fetch-no-trap fetch fail 'fetch/term-records-interrupted ' \
+	"$LIBX/fetch.sh" 'trap on_signal INT TERM HUP' ':'
+# V6: a mask that does not resolve is used as the address; masks looked up in every list
+ctl review-v6-mask-used-as-url rpcd fail 'rpcd/probe_source/unknown-mask-refused ' \
+	"$RPCD" "	case \"\$2\" in *'***'*) rep false not_found; exit 0 ;; esac" '	:'
+ctl review-v6-mask-any-list rpcd fail 'rpcd/probe_source/mask-resolved-in-sources-only ' \
+	"$RPCD" '		need_url source "$(printf' '		need_url source,extra_sub,subscription_url "$(printf'
+ctl review-v6-is-url-takes-mask rpcd fail 'rpcd/add_sub/mask-literal-refused ' \
+	"$LIBX/api.uc" "	if (index(s, '***') >= 0) return false;" '	;'
+# V7: add stores a URL without the trial download; add_node takes a URL
+ctl review-v7-add-no-trial rpcd fail 'rpcd/add/url-without-nodes-not-stored ;rpcd/add_sub/bad-input ' \
+	"$LIBX/api.uc" '			if (pr.n < 1) {' '			if (false) {'
+ctl review-v7-add_node-takes-url rpcd fail 'rpcd/add_node/url-refused ' \
+	"$RPCD" "			http://*|https://*) rep false invalid n/a '{\"errors\":{\"link\":\"bad_value\"}}'; exit 0 ;;" '			NEVER-MATCHES) ;;'
+# M3: running = "some command line mentions vpnpoold"
+ctl review-m3-running-by-mention status fail 'status/running-not-fooled-by-a-mention ' \
+	"$LIBX/status.uc" "let running = match(dpid, /^[0-9]+\$/) ? runs_script(argv_of(dpid), 'usr/libexec/vpnpool/vpnpoold') : false;" \
+	"let running = false; for (let c in (lsdir('/proc') ?? [])) { let a = argv_of(c); if (a && index(join(' ', a), '/usr/libexec/vpnpool/vpnpoold') >= 0) running = true; }"
+# M4: a fixed temp file name, left behind (overlapping polls share it)
+ctl review-m4-shared-temp status fail 'status/overlapping-polls-no-shared-temp-files ' \
+	"$LIBX/status.uc" "	let p = sprintf('%s/.archive.links.%d.%d', SB, time(), rand());" "	let p = SB + '/.archive.links';"
+# M5: cache key without the inode / without the parser's signature
+ctl review-m5-no-inode status fail 'status/cache-sees-same-size-same-second-rewrite ' \
+	"$LIBX/common.uc" "	return s ? (s.inode + ':' + s.mtime + ':' + s.size) : '-';" "	return s ? (s.mtime + ':' + s.size) : '-';"
+ctl review-m5-no-parser-sig status fail 'status/cache-invalidated-by-another-parser ' \
+	"$LIBX/status.uc" 'let PARSER_SIG = file_sig(PARSER);' "let PARSER_SIG = 'OLD-PARSER';"
+# M6: set_url "" refused again
+ctl review-m6-empty-url-refused rpcd fail 'rpcd/set_url/empty-clears ' \
+	"$LIBX/api.uc" "c: (v) => chk_url(v, true), a: 'USR2', secret: 'url' }," "c: (v) => chk_url(v, false), a: 'USR2', secret: 'url' },"
+# M7: the missing section created with the wrong type
+ctl review-m7-section-type rpcd fail 'rpcd/set_config/creates-main-of-type-vpnpool ' \
+	"$LIBX/api.uc" "[ 'main', 'vpnpool' ]" "[ 'main', 'main' ]"
+# M8: the build log subtracts the dropped nodes twice
+ctl review-m8-log-double-subtract build fail 'build/log-counts-the-final-pool ' \
+	"$LIBX/build.sh" 'log "build: ok ($CNT nodes; dropped $dropped unsupported)"' 'log "build: ok ($((CNT - dropped)) nodes; dropped $dropped unsupported)"'
+# M9: a crontab failure after the write answers "nothing saved"
+ctl review-m9-sched-false-failure rpcd fail 'rpcd/set_schedule/cron-failure-is-a-warning ' \
+	"$RPCD" "			res=\$(printf '%s' \"\$res\" | jq -c --arg m \"sched.sh exit \$rc\" '. + {warning:\"schedule_failed\", message:\$m}')" '			rep false script_failed; return'
+# test gap: probe sources in status not masked
+ctl review-status-sources-unmasked status fail 'status/subscription-urls-masked ;status/source-urls-masked ' \
+	"$LIBX/status.uc" '	sources: map(as_list(M.source, true), mask_url),' '	sources: as_list(M.source, true),'
 wait
 for n in $NC_ORDER; do
 	o="$TMPBASE/$n.out"
