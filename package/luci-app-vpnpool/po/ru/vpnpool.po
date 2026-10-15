@@ -1,0 +1,1681 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Project-Id-Version: luci-app-vpnpool\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:63
+msgid "down"
+msgstr "недоступен"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:67
+msgid "unknown"
+msgstr "неизвестно"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:69
+msgid "days"
+msgstr "дн."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:69
+msgid "expired"
+msgstr "истекла"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:86
+msgid "Please wait"
+msgstr "Подождите…"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:86
+msgid "Stopping…"
+msgstr "Остановка…"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:86
+msgid "Starting…"
+msgstr "Запуск…"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:93
+msgid "Switched to %s"
+msgstr "Переключено на %s"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:102
+msgid "Preferred node cleared (auto)"
+msgstr "Предпочитаемый узел снят (авто)"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:102
+msgid "Preferred node: %s"
+msgstr "Предпочитаемый узел: %s"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:107
+msgid "Updating subscription…"
+msgstr "Обновляю подписку…"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:111
+msgid "Pinging all nodes…"
+msgstr "Пингую все узлы…"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:120
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:537
+msgid "No nodes yet (waiting for subscription / pings)…"
+msgstr "Пока нет узлов (ждём подписку / пинги)…"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:131
+msgid "Auto-switch pool"
+msgstr "Пул авто-переключения"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:132
+msgid "Select which nodes take part in automatic switching (urltest). Unchecked nodes stay available for manual selection only."
+msgstr "Выберите узлы, участвующие в авто-переключении (urltest). Невыбранные останутся доступны только для ручного выбора."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:135
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:357
+#: files/www/luci-static/resources/view/vpnpool/sources.js:250
+#: files/www/luci-static/resources/vpnpool/common.js:605
+msgid "Cancel"
+msgstr "Отмена"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:137
+#: files/www/luci-static/resources/view/vpnpool/settings.js:175
+#: files/www/luci-static/resources/view/vpnpool/settings.js:179
+#: files/www/luci-static/resources/view/vpnpool/settings.js:183
+#: files/www/luci-static/resources/view/vpnpool/settings.js:200
+#: files/www/luci-static/resources/view/vpnpool/settings.js:208
+#: files/www/luci-static/resources/view/vpnpool/settings.js:212
+#: files/www/luci-static/resources/view/vpnpool/settings.js:220
+#: files/www/luci-static/resources/view/vpnpool/settings.js:223
+#: files/www/luci-static/resources/view/vpnpool/settings.js:238
+#: files/www/luci-static/resources/view/vpnpool/settings.js:250
+#: files/www/luci-static/resources/view/vpnpool/settings.js:263
+#: files/www/luci-static/resources/view/vpnpool/sources.js:314
+msgid "Save"
+msgstr "Сохранить"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:148
+msgid "Select at least one node for auto-switching."
+msgstr "Выберите хотя бы один узел для авто-переключения."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:155
+msgid "Auto-switch pool saved."
+msgstr "Пул авто-переключения сохранён."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:163
+msgid "Node saved: %s"
+msgstr "Узел сохранён: %s"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:169
+msgid "Node removed from saved: %s"
+msgstr "Узел убран из сохранённых: %s"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:175
+msgid "Added to the active pool: %s"
+msgstr "Добавлен в активный пул: %s"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:181
+msgid "Removed from the active pool: %s"
+msgstr "Убран из активного пула: %s"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:187
+msgid "Returned to the auto-pool: %s"
+msgstr "Возвращён в авто-пул: %s"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:193
+msgid "Node is back under the service filter: %s"
+msgstr "Узел снова под сервис-фильтром: %s"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:203
+msgid "Added to the auto-pool: %s"
+msgstr "Добавлен в авто-пул: %s"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:214
+msgid "%s: %s Mbit/s"
+msgstr "%s: %s Мбит/с"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:216
+msgid "Speed test failed for %s."
+msgstr "Тест скорости не удался для %s."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:224
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:247
+msgid "Not enough free memory for a speed test: %s MB free, need ≥ %s MB. Skipped to keep the VPN stable."
+msgstr "Недостаточно свободной памяти для теста скорости: свободно %s МБ, нужно ≥ %s МБ. Пропущено ради стабильности VPN."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:227
+msgid "Speed-testing %s… (router traffic briefly uses this node)"
+msgstr "Тест скорости %s… (трафик роутера ненадолго пойдёт через этот узел)"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:237
+msgid "Unlock test done for %s."
+msgstr "Проверка разблокировки выполнена для %s."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:240
+msgid "Unlock test failed for %s."
+msgstr "Проверка разблокировки не удалась для %s."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:250
+msgid "Testing what %s unblocks… (router traffic briefly uses this node)"
+msgstr "Проверка разблокировки %s… (трафик роутера ненадолго пойдёт через этот узел)"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:272
+msgid "QR library unavailable."
+msgstr "QR-библиотека недоступна."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:278
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:294
+msgid "No shareable link for this node."
+msgstr "Для этого узла нет ссылки для шеринга."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:283
+msgid "Share node"
+msgstr "Поделиться узлом"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:284
+msgid "Scan the QR with your phone VPN app, or copy the link."
+msgstr "Отсканируйте QR в VPN-приложении на телефоне или скопируйте ссылку."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:287
+msgid "Copy link"
+msgstr "Копировать ссылку"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:289
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:385
+msgid "Close"
+msgstr "Закрыть"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:299
+msgid "Delete node \"%s\"? A subscription node is hidden until you delete the subscription; a manual/imported/saved node is removed permanently."
+msgstr "Удалить узел «%s»? Узел подписки скрывается до удаления подписки; ручной/импортированный/сохранённый удаляется навсегда."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:301
+msgid "Node deleted: %s"
+msgstr "Узел удалён: %s"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:302
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:304
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:316
+msgid "Could not delete node: %s"
+msgstr "Не удалось удалить узел: %s"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:304
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:373
+msgid "try re-logging into LuCI (permissions update on login)."
+msgstr "попробуйте выйти и снова войти в LuCI (права обновляются при входе)."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:310
+msgid "Select node(s) with the checkboxes first."
+msgstr "Сначала отметьте узлы галочками."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:311
+msgid "Delete %d selected node(s)? Subscription nodes are hidden until you delete the subscription; manual/imported/saved are removed permanently."
+msgstr "Удалить выбранные узлы (%d)? Узлы подписки скрываются до удаления подписки; ручные/импортированные/сохранённые удаляются навсегда."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:314
+msgid "Deleted %d node(s)."
+msgstr "Удалено узлов: %d"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:321
+msgid "Select node(s) first."
+msgstr "Сначала выберите узлы."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:324
+msgid "Deactivated %d node(s)."
+msgstr "Деактивировано узлов: %d"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:328
+msgid "Select exactly one node for the speed test."
+msgstr "Выберите ровно один узел для теста скорости."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:333
+msgid "Select exactly one node for the unblock test."
+msgstr "Выберите ровно один узел для теста разблокировки."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:340
+#: files/www/luci-static/resources/view/vpnpool/sources.js:295
+msgid "or a base64 subscription"
+msgstr "или base64-подписка"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:340
+#: files/www/luci-static/resources/view/vpnpool/sources.js:295
+msgid "or an AmneziaWG .conf / vpn:// link"
+msgstr "или AmneziaWG .conf / ссылку vpn://"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:346
+#: files/www/luci-static/resources/view/vpnpool/sources.js:182
+msgid "Could not read the file."
+msgstr "Не удалось прочитать файл."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:349
+msgid "Import nodes"
+msgstr "Импорт узлов"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:350
+msgid "Paste node links (one per line) or a whole base64 subscription, or load a .txt file. New links are added to your manual nodes."
+msgstr "Вставьте ссылки на узлы (по одной в строке) или целую base64-подписку, либо загрузите файл .txt. Новые ссылки добавятся в ручные узлы."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:351
+msgid "AmneziaWG: paste an AmneziaWG .conf or an AmneziaVPN vpn:// link here too — it joins the same pool."
+msgstr "AmneziaWG: сюда также можно вставить .conf или ссылку vpn:// — узел войдёт в тот же пул."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:354
+#: files/www/luci-static/resources/view/vpnpool/sources.js:350
+msgid "Load file…"
+msgstr "Загрузить файл…"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:358
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:520
+#: files/www/luci-static/resources/view/vpnpool/settings.js:272
+#: files/www/luci-static/resources/view/vpnpool/sources.js:348
+msgid "Import"
+msgstr "Импорт"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:365
+msgid "Paste links or load a file first."
+msgstr "Сначала вставьте ссылки или загрузите файл."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:369
+#: files/www/luci-static/resources/view/vpnpool/sources.js:164
+msgid "AmneziaWG node imported."
+msgstr "Узел AmneziaWG импортирован."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:369
+#: files/www/luci-static/resources/view/vpnpool/sources.js:164
+msgid "Imported %d new node(s) (manual list: %d)."
+msgstr "Импортировано новых узлов: %d (ручной список: %d)."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:370
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:373
+#: files/www/luci-static/resources/view/vpnpool/sources.js:167
+msgid "Import failed"
+msgstr "Импорт не удался"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:381
+msgid "Export nodes as subscription"
+msgstr "Экспорт узлов как подписки"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:382
+msgid "Pick which nodes to export. You get the raw vless:// links and a base64 subscription you can import elsewhere."
+msgstr "Выберите узлы для экспорта. Получите готовые vless://-ссылки и base64-подписку для импорта в другом месте."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:383
+msgid "Saved"
+msgstr "Сохранён"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:383
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:639
+msgid "Manual"
+msgstr "Ручные"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:383
+msgid "All nodes"
+msgstr "Все узлы"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:393
+msgid "Nothing to export in this set."
+msgstr "В этом наборе нечего экспортировать."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:406
+msgid "Copy"
+msgstr "Копировать"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:409
+msgid "Download"
+msgstr "Скачать"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:414
+#: files/www/luci-static/resources/view/vpnpool/sources.js:242
+msgid "%d nodes"
+msgstr "%d узлов"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:415
+msgid "vless:// links"
+msgstr "vless://-ссылки"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:416
+msgid "base64 subscription"
+msgstr "base64-подписка"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:420
+msgid "Export failed"
+msgstr "Экспорт не удался"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:464
+msgid "Turn OFF"
+msgstr "Выключить"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:464
+msgid "Turn ON"
+msgstr "Включить"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:465
+msgid "running"
+msgstr "работает"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:465
+msgid "stopped"
+msgstr "выключено"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:466
+msgid "routing up"
+msgstr "маршрутизация активна"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:466
+msgid "no routing"
+msgstr "без маршрутизации"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:467
+msgid "all except lists"
+msgstr "всё кроме списков"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:467
+msgid "only lists"
+msgstr "только списки"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:469
+msgid "Active node"
+msgstr "Активный узел"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:470
+msgid "auto / urltest"
+msgstr "авто / urltest"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:475
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:582
+msgid "Traffic"
+msgstr "Трафик"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:477
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:667
+msgid "connections"
+msgstr "соединений"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:478
+msgid "total"
+msgstr "всего"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:481
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:639
+msgid "Subscription"
+msgstr "Подписка"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:482
+msgid "expires %s"
+msgstr "истекает %s"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:484
+#: files/www/luci-static/resources/view/vpnpool/sources.js:310
+msgid "Update now"
+msgstr "Обновить сейчас"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:493
+msgid "Data quota"
+msgstr "Объём трафика"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:494
+msgid "%s left"
+msgstr "осталось %s"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:507
+msgid "Search node / server…"
+msgstr "Поиск узла / сервера…"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:510
+msgid "Sort: ping"
+msgstr "Сортировка: пинг"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:511
+msgid "Sort: name"
+msgstr "Сортировка: имя"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:512
+msgid "Sort: traffic"
+msgstr "Сортировка: трафик"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:518
+msgid "Ping all nodes"
+msgstr "Пинговать все узлы"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:519
+#: files/www/luci-static/resources/view/vpnpool/settings.js:271
+msgid "Export"
+msgstr "Экспорт"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:522
+msgid "reachable only"
+msgstr "только доступные"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:525
+msgid "Selected"
+msgstr "Выбрано"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:527
+msgid "Speed test the selected node"
+msgstr "Тест скорости выбранного узла"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:528
+msgid "Unblock-test the selected node"
+msgstr "Тест разблокировки выбранного узла"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:529
+msgid "Deactivate selected (remove from active pool, keep saved)"
+msgstr "Деактивировать выбранные (убрать из активного пула, оставить сохранёнными)"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:530
+msgid "Delete the selected nodes"
+msgstr "Удалить выбранные узлы"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:530
+msgid "Delete"
+msgstr "Удалить"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:531
+msgid "Clear selection"
+msgstr "Снять выделение"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:531
+msgid "Clear"
+msgstr "Снять"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:535
+msgid "Service is stopped — start it to see live node pings."
+msgstr "Служба выключена — включите, чтобы видеть пинги узлов."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:576
+msgid "all nodes"
+msgstr "все узлы"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:580
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:688
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:747
+msgid "Node"
+msgstr "Узел"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:581
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:688
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:747
+msgid "Server"
+msgstr "Сервер"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:581
+msgid "Ping"
+msgstr "Пинг"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:582
+msgid "Speed"
+msgstr "Скорость"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:583
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:688
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:747
+msgid "Actions"
+msgstr "Действия"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:587
+msgid "AUTO (urltest)"
+msgstr "АВТО (urltest)"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:588
+msgid "auto-ping + failover"
+msgstr "авто-пинг + переключение"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:588
+msgid "pool"
+msgstr "пул"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:592
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:623
+msgid "Use"
+msgstr "Выбрать"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:594
+msgid "Configure auto-switch pool"
+msgstr "Настроить пул авто-переключения"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:595
+msgid "Configure"
+msgstr "Настроить"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:605
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:742
+msgid "Select for bulk actions"
+msgstr "Выбрать для массовых действий"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:611
+msgid "Preferred node (soft pin with switch-back)"
+msgstr "Предпочитаемый узел (мягкий пин с возвратом)"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:612
+msgid "A saved node you promoted into the active pool"
+msgstr "Сохранённый узел, добавленный в активный пул"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:614
+msgid "Excluded from auto-switching (manual only)"
+msgstr "Не участвует в авто-переключении (только вручную)"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:614
+msgid "manual"
+msgstr "вручную"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:619
+msgid "Mbit/s"
+msgstr "Мбит/с"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:626
+msgid "Preferred node — click to unpin (back to auto)"
+msgstr "Предпочитаемый узел — нажмите, чтобы снять (обратно в авто)"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:626
+msgid "Make preferred (soft pin: used while reachable, auto-failover if it dies, switch back on recovery)"
+msgstr "Сделать предпочитаемым (мягкий пин: используется пока доступен, авто-переключение при падении, возврат при восстановлении)"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:629
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:703
+msgid "Remove from saved"
+msgstr "Убрать из сохранённых"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:629
+msgid "Save node (keep after subscription expires)"
+msgstr "Сохранить узел (останется после окончания подписки)"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:632
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:700
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:735
+msgid "Share link / QR"
+msgstr "Ссылка / QR"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:639
+msgid "Imported"
+msgstr "Импортированные"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:639
+msgid "AmneziaWG"
+msgstr "AmneziaWG"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:647
+msgid "No nodes match the filter."
+msgstr "Нет узлов по фильтру."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:664
+msgid "No active client connections."
+msgstr "Нет активных подключений устройств."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:666
+msgid "Device"
+msgstr "Устройство"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:666
+msgid "IP"
+msgstr "IP"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:686
+msgid "No inactive saved nodes. Star a node to keep it here after the subscription drops it."
+msgstr "Нет неактивных сохранённых узлов. Отметьте узел звездой ⭐, чтобы он остался здесь после исчезновения из подписки."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:697
+msgid "Add this saved node to the active pool"
+msgstr "Добавить этот сохранённый узел в активный пул"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:698
+msgid "Add to active"
+msgstr "В активные"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:730
+msgid "No nodes outside the auto-pool — every node is auto-managed."
+msgstr "Все узлы в авто-пуле — вне него никого нет."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:753
+msgid "service down"
+msgstr "сервис недоступен"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:756
+msgid "Force this node back into auto-switching (keeps it even if the service check fails)"
+msgstr "Принудительно вернуть узел в авто-переключение (останется даже если сервис-проверка падает)"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:757
+msgid "Return to auto"
+msgstr "Вернуть в авто"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:765
+msgid "excluded manually"
+msgstr "исключён вручную"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:768
+msgid "Add this node back to auto-switching"
+msgstr "Вернуть узел в авто-переключение"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:769
+msgid "Add to auto-pool"
+msgstr "В авто-пул"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:777
+msgid "forced"
+msgstr "принудительно"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:780
+msgid "Stop forcing — let the service filter manage this node again"
+msgstr "Снять принудительное удержание — пусть сервис-фильтр снова решает по этому узлу"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:781
+msgid "Re-enable filter"
+msgstr "Снова фильтровать"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:792
+msgid "VPN Pool — Dashboard"
+msgstr "VPN Pool — Дашборд"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:795
+msgid "Nodes"
+msgstr "Узлы"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:800
+msgid "Saved from subscription (inactive)"
+msgstr "Сохранённые из подписки (неактивные)"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:801
+msgid "Saved nodes are kept here even after the subscription drops them. They are NOT in the active pool until you add them."
+msgstr "Сохранённые узлы остаются здесь даже после того, как подписка их убрала. В активный пул они не входят, пока вы их не добавите."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:805
+msgid "Out of the auto-pool"
+msgstr "Вне авто-пула"
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:806
+msgid "Nodes not used for auto-switching: ones that can’t open the configured services (service down), ones you excluded manually, and ones you force-kept. Each stays manually selectable and can be brought back with one button."
+msgstr "Узлы, не участвующие в авто-переключении: те, что не открывают заданные сервисы (сервис недоступен), исключённые вами вручную и принудительно удерживаемые. Каждый можно выбрать вручную и вернуть одной кнопкой."
+
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:810
+msgid "Per-client traffic"
+msgstr "Трафик по устройствам"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:26
+msgid "Testing exit via VPN…"
+msgstr "Проверяю выход через VPN…"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:29
+msgid "VPN exit: %s (IP %s)"
+msgstr "Выход через VPN: %s  (IP %s)"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:31
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:33
+msgid "VPN exit test failed — is the service running?"
+msgstr "Тест выхода не удался — служба запущена?"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:44
+msgid "Service"
+msgstr "Служба"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:45
+msgid "Enabled"
+msgstr "Включена"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:45
+msgid "Daemon running"
+msgstr "Демон работает"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:46
+msgid "Routing active"
+msgstr "Маршрутизация активна"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:46
+msgid "Autostart on boot"
+msgstr "Автозапуск при загрузке"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:47
+msgid "sing-box PID"
+msgstr "PID sing-box"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:47
+msgid "Clash API reachable"
+msgstr "Clash API доступен"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:50
+msgid "Coexistence"
+msgstr "Сосуществование"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:51
+msgid "podkop running"
+msgstr "podkop работает"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:51
+msgid "podkop nft table"
+msgstr "nft-таблица podkop"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:52
+msgid "zapret nft table"
+msgstr "nft-таблица zapret"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:55
+msgid "Network (direct / ISP path)"
+msgstr "Сеть (прямой / ISP-путь)"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:56
+msgid "Internet (direct)"
+msgstr "Интернет (напрямую)"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:57
+msgid "WAN interface"
+msgstr "WAN-интерфейс"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:57
+msgid "Gateway"
+msgstr "Шлюз"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:58
+msgid "Direct egress IP"
+msgstr "Выходной IP (прямой)"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:58
+msgid "Direct egress country"
+msgstr "Страна выхода (прямой)"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:59
+msgid "This is your ISP exit (traffic NOT via VPN). Proxied nodes exit elsewhere — see Dashboard pings."
+msgstr "Это выход через провайдера (НЕ через VPN). Проксированные узлы выходят иначе — см. пинги на Дашборде."
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:61
+msgid "Test exit via VPN"
+msgstr "Проверить выход через VPN"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:64
+msgid "Community rule-sets"
+msgstr "Списки сообществ (rule-set)"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:65
+msgid "Lists configured"
+msgstr "Списков настроено"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:66
+msgid "SRS cache present"
+msgstr "SRS-кэш есть"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:67
+msgid "SRS cache size (KB)"
+msgstr "Размер SRS-кэша (КБ)"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:70
+msgid "Resources"
+msgstr "Ресурсы"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:71
+#: files/www/luci-static/resources/view/vpnpool/settings.js:279
+msgid "sing-box version"
+msgstr "версия sing-box"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:71
+#: files/www/luci-static/resources/view/vpnpool/settings.js:280
+msgid "tproxy port"
+msgstr "порт tproxy"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:72
+msgid "fwmark / table"
+msgstr "fwmark / таблица"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:72
+#: files/www/luci-static/resources/view/vpnpool/settings.js:283
+msgid "Clash API"
+msgstr "Clash API"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:75
+msgid "Recent logs"
+msgstr "Последние логи"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:77
+msgid "(no logs)"
+msgstr "(логов нет)"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:85
+msgid "VPN Pool — Diagnostics"
+msgstr "VPN Pool — Диагностика"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:87
+msgid "Refresh"
+msgstr "Обновить"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:26
+msgid "Save failed: %s"
+msgstr "Не удалось сохранить: %s"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:30
+msgid "Routing mode saved and applied."
+msgstr "Режим сохранён и применён."
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:39
+msgid "Community lists saved and applied."
+msgstr "Списки сообществ сохранены и применены."
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:44
+msgid "Domains saved and applied."
+msgstr "Домены сохранены и применены."
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:50
+msgid "Per-client routing saved and applied."
+msgstr "Маршрутизация по устройствам сохранена и применена."
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:63
+msgid "Proxy only the selected lists/domains (rest direct)"
+msgstr "Проксировать только выбранные списки/домены (остальное напрямую)"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:64
+msgid "Proxy everything EXCEPT the selected lists/domains"
+msgstr "Проксировать всё, КРОМЕ выбранных списков/доменов"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:79
+msgid "All LAN clients"
+msgstr "Все клиенты сети"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:80
+msgid "All except the listed clients (listed bypass VPN)"
+msgstr "Все, кроме перечисленных (перечисленные мимо VPN)"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:81
+msgid "Only the listed clients use the VPN"
+msgstr "Только перечисленные клиенты через VPN"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:98
+msgid "offline"
+msgstr "офлайн"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:103
+msgid "No devices seen yet (DHCP leases are empty)."
+msgstr "Устройства пока не обнаружены (список DHCP пуст)."
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:107
+msgid "VPN Pool — Routing"
+msgstr "VPN Pool — Маршрутизация"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:110
+msgid "Routing mode"
+msgstr "Режим маршрутизации"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:113
+msgid "Save mode"
+msgstr "Сохранить режим"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:117
+msgid "Community lists (itdoginfo/allow-domains, auto-updated SRS)"
+msgstr "Списки сообществ (itdoginfo/allow-domains, авто-SRS)"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:120
+msgid "Save lists"
+msgstr "Сохранить списки"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:124
+msgid "Custom domains (one per line)"
+msgstr "Свои домены (по одному в строке)"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:127
+msgid "Save domains"
+msgstr "Сохранить домены"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:131
+msgid "Per-client routing"
+msgstr "Маршрутизация по устройствам"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:133
+msgid "Devices on the network (matched by MAC — survives IP changes):"
+msgstr "Устройства в сети (сопоставление по MAC — переживает смену IP):"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:135
+msgid "Extra IPv4 addresses, one per line (for static / unknown hosts):"
+msgstr "Дополнительные IPv4-адреса, по одному в строке (для статических / неизвестных хостов):"
+
+#: files/www/luci-static/resources/view/vpnpool/routing.js:138
+msgid "Save per-client"
+msgstr "Сохранить"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:23
+msgid "Saved: %s"
+msgstr "Сохранено: %s"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:32
+msgid "Adjusted to %s (allowed: %s–%s)."
+msgstr "Скорректировано до %s (допустимо: %s–%s)."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:49
+msgid "Node-check settings saved — re-checking nodes."
+msgstr "Настройки проверки сохранены — перепроверяю узлы."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:60
+#: files/www/luci-static/resources/view/vpnpool/sources.js:54
+#: files/www/luci-static/resources/view/vpnpool/sources.js:66
+#: files/www/luci-static/resources/view/vpnpool/sources.js:108
+#: files/www/luci-static/resources/view/vpnpool/sources.js:125
+#: files/www/luci-static/resources/view/vpnpool/sources.js:141
+msgid "Remove"
+msgstr "Удалить"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:65
+msgid "(none yet — detected blocked sites will appear here)"
+msgstr "(пока пусто — найденные заблокированные сайты появятся здесь)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:74
+msgid "Enter a domain first."
+msgstr "Сначала введите домен."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:76
+msgid "Domain added to VPN route."
+msgstr "Домен добавлен в VPN-маршрут."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:79
+msgid "Adaptive scan started…"
+msgstr "Адаптивное сканирование запущено…"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:84
+msgid "Auto-snapshot settings saved."
+msgstr "Настройки авто-снимка сохранены."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:89
+msgid "Schedule saved."
+msgstr "Расписание сохранено."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:98
+msgid "Telegram settings saved."
+msgstr "Настройки Telegram сохранены."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:101
+msgid "Sending test message…"
+msgstr "Отправляю тестовое сообщение…"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:104
+msgid "Test sent — check Telegram."
+msgstr "Отправлено — проверьте Telegram."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:106
+#: files/www/luci-static/resources/view/vpnpool/settings.js:108
+msgid "Telegram send failed (HTTP %s) — check token/chat id."
+msgstr "Не удалось отправить (HTTP %s) — проверьте токен/chat id."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:116
+msgid "Replace the current vpnpool configuration with the pasted backup?"
+msgstr "Заменить текущую конфигурацию vpnpool вставленным бэкапом?"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:117
+msgid "Configuration imported. Reloading…"
+msgstr "Конфигурация импортирована. Перезагрузка…"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:142
+msgid "off"
+msgstr "выкл"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:143
+msgid "on — fragment TLS handshake"
+msgstr "вкл — фрагментировать TLS-хендшейк"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:144
+msgid "aggressive — also record fragmentation"
+msgstr "агрессивно — плюс фрагментация TLS-записей"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:169
+msgid "VPN Pool — Settings"
+msgstr "VPN Pool — Настройки"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:172
+msgid "Auto-ping & failover"
+msgstr "Автопинг и переключение"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:174
+msgid "Auto-ping interval (sec)"
+msgstr "Интервал автопинга (сек)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:178
+msgid "Switch tolerance (ms)"
+msgstr "Допуск переключения (мс)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:182
+msgid "Auto-switch to a working node (urltest)"
+msgstr "Авто-переключение на рабочий узел (urltest)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:185
+msgid "Preferred node is now set right on the Dashboard — click 📌 on any node to pin it (used while reachable, auto-failover if it dies, switch back on recovery)."
+msgstr "Предпочитаемый узел теперь задаётся прямо на Дашборде — нажмите 📌 у любого узла (используется пока доступен, авто-переключение при падении, возврат при восстановлении)."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:189
+msgid "Node check (does the service actually work?)"
+msgstr "Проверка узлов (реально ли работает сервис?)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:190
+msgid "The single, accurate node check. List the services the VPN must really open through a node — usually the blocked ones (one per line). A node is used for auto-switching ONLY if it opens EVERY one of them; nodes that ping but can’t reach the service (over-quota / blocked exits) are dropped from the auto-pool but stay manually selectable. Active-node selection, failover and self-heal all use this list."
+msgstr "Единственная точная проверка узлов. Перечислите сервисы, которые VPN должен реально открывать через узел — обычно заблокированные (по одному в строке). Узел участвует в авто-переключении, ТОЛЬКО если открывает КАЖДЫЙ из них; узлы, которые пингуются, но до сервиса не достают (исчерпанная квота / заблокированный выход), убираются из авто-пула, но остаются доступны для ручного выбора. Выбор активного узла, переключение и самовосстановление используют этот список."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:191
+msgid "Services to verify (one per line)"
+msgstr "Сервисы для проверки (по одному в строке)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:192
+msgid "A bare host is probed as http://host/generate_204; a full URL is used as-is. Leave empty to fall back to a generic connectivity check."
+msgstr "Голый хост проверяется как http://host/generate_204; полный URL используется как есть. Пусто — откат к обычной проверке связи."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:194
+msgid "Drop nodes that ping but can’t reach the services (dead-node filter)"
+msgstr "Убирать узлы, которые пингуются, но не достают до сервисов (фильтр мёртвых узлов)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:196
+msgid "Failures in a row before dropping"
+msgstr "Неудач подряд до отсева"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:197
+msgid "Retries per check"
+msgstr "Повторов на проверку"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:198
+msgid "A node counts as reaching a service if any of these back-to-back attempts succeeds — absorbs the intermittent cold-handshake flakiness of Reality/Vision nodes so a usable node isn’t wrongly dropped. Default 3."
+msgstr "Узел считается достигшим сервиса, если успешна хотя бы одна из попыток подряд — сглаживает перемежающуюся флакость «холодного» хендшейка Reality/Vision-узлов, чтобы рабочий узел не отсеялся по ошибке. По умолчанию 3."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:205
+msgid "Security / leak protection"
+msgstr "Безопасность / защита от утечек"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:207
+msgid "Kill-switch (block all traffic if VPN is down)"
+msgstr "Kill-switch (блокировать весь трафик, если VPN недоступен)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:211
+msgid "DNS-leak protection (route LAN DNS through the tunnel)"
+msgstr "Защита от DNS-утечек (DNS из LAN через туннель)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:214
+msgid "Kill-switch fails closed in full-tunnel (exclude) mode. DNS protection sends LAN DNS queries through the VPN so they can’t leak to your ISP."
+msgstr "Kill-switch работает в режиме полного туннеля (исключения): при падении VPN трафик не уходит напрямую. Защита DNS отправляет DNS-запросы LAN через VPN, чтобы они не утекали провайдеру."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:218
+msgid "Anti-DPI & adaptive routing"
+msgstr "Анти-DPI и адаптивная маршрутизация"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:219
+msgid "Anti-DPI (TLS fragmentation)"
+msgstr "Анти-DPI (фрагментация TLS)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:221
+msgid "Splits the TLS handshake so plaintext-SNI DPI can not match it. Defeats BASIC filtering only — not robust censorship (for TSPU/strong DPI use zapret). Needs sing-box ≥ 1.12; ignored if unsupported."
+msgstr "Разбивает TLS-хендшейк, чтобы DPI по открытому SNI не мог его сопоставить. Помогает только против БАЗОВОЙ фильтрации — не против устойчивой цензуры (для TSPU/сильного DPI нужен zapret). Требуется sing-box ≥ 1.12; игнорируется, если не поддерживается."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:222
+msgid "Adaptive routing: auto-route sites that are blocked for a direct connection"
+msgstr "Адаптивная маршрутизация: авто-направлять в VPN сайты, заблокированные напрямую"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:224
+msgid "Scan now"
+msgstr "Сканировать сейчас"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:226
+msgid "Site is blocked?"
+msgstr "Сайт заблокирован?"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:227
+msgid "Route via VPN"
+msgstr "Направить в VPN"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:229
+msgid "Auto-routed domains"
+msgstr "Авто-маршрутизированные домены"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:234
+msgid "Auto-save working nodes"
+msgstr "Авто-сохранение рабочих узлов"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:235
+msgid "Periodically snapshot reachable nodes to the saved store"
+msgstr "Периодически сохранять доступные узлы в постоянную память"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:236
+msgid "Keep at most (nodes)"
+msgstr "Хранить не более (узлов)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:240
+msgid "Builds a fallback set that survives subscription expiry. Manual ⭐ saves are never evicted."
+msgstr "Формирует резервный набор, который остаётся после окончания подписки. Ручные ⭐ никогда не вытесняются."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:244
+msgid "Schedule"
+msgstr "Расписание"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:245
+msgid "Enable schedule"
+msgstr "Включить расписание"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:246
+msgid "Turn ON at (HH:MM)"
+msgstr "Включать в (ЧЧ:ММ)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:247
+msgid "Turn OFF at (HH:MM)"
+msgstr "Выключать в (ЧЧ:ММ)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:248
+msgid "Refresh subscription at (HH:MM)"
+msgstr "Обновлять подписку в (ЧЧ:ММ)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:252
+msgid "Router local time. Leave a field empty to skip that action. Uses cron."
+msgstr "Локальное время роутера. Пустое поле — действие пропускается. Использует cron."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:256
+msgid "Telegram alerts & control"
+msgstr "Telegram: уведомления и управление"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:257
+msgid "Enable Telegram notifications"
+msgstr "Включить уведомления в Telegram"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:258
+msgid "Bot token"
+msgstr "Токен бота"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:259
+msgid "Chat ID"
+msgstr "Chat ID"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:260
+msgid "Two-way control bot (/status, /nodes, /switch, /on, /off, /refresh)"
+msgstr "Двусторонний бот управления (/status, /nodes, /switch, /on, /off, /refresh)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:261
+msgid "Reach Telegram through the tunnel (needed where Telegram is blocked)"
+msgstr "Доступ к Telegram через туннель (нужно там, где Telegram заблокирован)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:264
+msgid "Send test"
+msgstr "Тест"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:266
+msgid "Create a bot via @BotFather, get your chat id (e.g. @userinfobot). Alerts: failover, subscription expiry, start/stop. The control bot only obeys your chat id."
+msgstr "Создайте бота через @BotFather, узнайте chat id (напр. @userinfobot). Алерты: переключение узла, истечение подписки, старт/стоп. Бот управления слушает только ваш chat id."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:269
+msgid "Backup / Restore"
+msgstr "Бэкап / Восстановление"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:275
+msgid "Export fills the box with your config — copy it somewhere safe. Paste a backup and Import to restore."
+msgstr "Экспорт заполнит поле вашей конфигурацией — сохраните её. Вставьте бэкап и нажмите Импорт для восстановления."
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:278
+msgid "Technical (read-only)"
+msgstr "Технические (только чтение)"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:281
+msgid "fwmark"
+msgstr "fwmark"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:282
+msgid "route table"
+msgstr "таблица маршрутов"
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:284
+msgid "These coexist with podkop (mark 0x100000, table podkop, :1602) and must not collide."
+msgstr "Сосуществуют с podkop (mark 0x100000, table podkop, :1602) и не должны пересекаться."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:51
+msgid "Re-fetch this source and pick nodes"
+msgstr "Перезагрузить источник и выбрать узлы"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:52
+msgid "Update"
+msgstr "Обновить"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:59
+msgid "(no saved sources yet)"
+msgstr "(пока нет сохранённых источников)"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:71
+msgid "(no extra subscriptions)"
+msgstr "(нет дополнительных подписок)"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:74
+msgid "Enter a subscription URL first."
+msgstr "Сначала введите URL подписки."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:80
+msgid "Extra subscription added — %d node(s) fetched."
+msgstr "Доп. подписка добавлена — получено узлов: %d."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:82
+msgid "Extra subscription added, but NO nodes were fetched (HTTP %s). Is the URL reachable from the router? Check the port/firewall on the server."
+msgstr "Доп. подписка добавлена, но узлы НЕ получены (HTTP %s). Доступен ли URL с роутера? Проверьте порт/файрвол на сервере."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:85
+msgid "Could not add subscription: %s"
+msgstr "Не удалось добавить подписку: %s"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:88
+msgid "Extra subscription removed."
+msgstr "Доп. подписка удалена."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:102
+msgid "active"
+msgstr "активен"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:102
+msgid "idle"
+msgstr "простаивает"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:106
+msgid "Deactivate"
+msgstr "Деактивировать"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:107
+msgid "Activate"
+msgstr "Активировать"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:113
+msgid "(no saved nodes yet — star nodes on the dashboard; they also land here automatically when you delete the subscription)"
+msgstr "(пока нет сохранённых — отмечайте ⭐ на дашборде; они также попадут сюда при удалении подписки)"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:115
+msgid "Activating saved node…"
+msgstr "Активирую сохранённый узел…"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:115
+msgid "Saved node activated."
+msgstr "Сохранённый узел активирован."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:116
+msgid "Saved node deactivated."
+msgstr "Сохранённый узел деактивирован."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:117
+msgid "Remove this node from the saved archive?"
+msgstr "Удалить этот узел из архива сохранённых?"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:117
+msgid "Saved node removed."
+msgstr "Сохранённый узел удалён."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:128
+msgid "(no manual nodes)"
+msgstr "(нет ручных узлов)"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:144
+msgid "(no AmneziaWG nodes)"
+msgstr "(нет узлов AmneziaWG)"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:146
+msgid "AmneziaWG node removed."
+msgstr "Узел AmneziaWG удалён."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:148
+msgid "Subscription URL saved."
+msgstr "URL подписки сохранён."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:149
+msgid "Delete the subscription? All saved nodes will be auto-activated so you stay connected."
+msgstr "Удалить подписку? Все сохранённые узлы будут авто-активированы, чтобы связь не пропала."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:149
+msgid "Subscription deleted — %d saved node(s) kept active."
+msgstr "Подписка удалена — сохранённых узлов оставлено активными: %d."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:151
+msgid "Node added."
+msgstr "Узел добавлен."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:159
+msgid "Paste node links (or load a file) first."
+msgstr "Сначала вставьте ссылки (или загрузите файл)."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:160
+msgid "Importing nodes…"
+msgstr "Импортирую узлы…"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:180
+msgid "File loaded — review and press Import."
+msgstr "Файл загружен — проверьте и нажмите Импорт."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:185
+msgid "Update interval saved."
+msgstr "Интервал обновления сохранён."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:186
+msgid "Updating from all sources…"
+msgstr "Обновляю из всех источников…"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:191
+msgid "Enter a source URL first."
+msgstr "Сначала введите URL источника."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:193
+msgid "Fetching source…"
+msgstr "Загрузка источника…"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:194
+msgid "Fetching and pinging nodes — this can take up to a minute on slow routers."
+msgstr "Загрузка и пинг узлов — до минуты на медленных роутерах."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:199
+msgid "No usable nodes from this source"
+msgstr "Из этого источника нет пригодных узлов"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:209
+msgid "Probe timed out."
+msgstr "Проба не уложилась во время."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:217
+msgid "Probe failed"
+msgstr "Ошибка загрузки"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:238
+msgid "(showing first %d of %d — narrow the source if you need more)"
+msgstr "(показаны первые %d из %d — сузьте источник, если нужно больше)"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:239
+msgid "Pick nodes to import"
+msgstr "Выберите узлы для импорта"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:240
+msgid "Selected nodes join the auto-switch pool and appear in the dashboard under this source."
+msgstr "Выбранные узлы войдут в авто-пул и появятся в дашборде отдельным разделом."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:241
+msgid "Ping is ICMP (a server may block it — you can still pick it; the real latency shows in the dashboard)."
+msgstr "Пинг — ICMP (сервер может его блокировать; узел всё равно можно выбрать — реальная задержка появится в дашборде)."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:244
+msgid "All reachable"
+msgstr "Все доступные"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:245
+msgid "All"
+msgstr "Все"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:246
+msgid "None"
+msgstr "Никакие"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:252
+msgid "Save selection"
+msgstr "Сохранить выбор"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:276
+msgid "Importing %d nodes…"
+msgstr "Импортирую %d узлов…"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:278
+msgid "Imported %d nodes from this source."
+msgstr "Импортировано %d узлов из источника."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:302
+msgid "VPN Pool — Sources"
+msgstr "VPN Pool — Источники"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:305
+msgid "Main subscription"
+msgstr "Основная подписка"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:308
+msgid "Save URL"
+msgstr "Сохранить URL"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:309
+msgid "Delete subscription"
+msgstr "Удалить подписку"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:313
+msgid "Auto-update interval"
+msgstr "Интервал автообновления"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:315
+msgid "e.g. 6h, 30m, 12h"
+msgstr "напр. 6h, 30m, 12h"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:320
+msgid "Extra subscriptions"
+msgstr "Дополнительные подписки"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:321
+msgid "Additional full subscriptions are bulk-merged into the pool alongside the main one (quota/expiry come only from the main subscription)."
+msgstr "Дополнительные полные подписки целиком подмешиваются в пул вместе с основной (квота/срок берутся только из основной подписки)."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:324
+msgid "Add subscription"
+msgstr "Добавить подписку"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:329
+msgid "Import from a source list"
+msgstr "Импорт из списка-источника"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:330
+msgid "Paste a URL with a vless:// list or base64 subscription, fetch it, then pick the nodes you want. Picked nodes join the pool and show under their own group in the dashboard."
+msgstr "Вставьте URL со списком vless:// или base64-подпиской, загрузите и выберите нужные узлы. Выбранные войдут в пул и появятся в дашборде отдельной группой."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:333
+msgid "Fetch & pick"
+msgstr "Загрузить и выбрать"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:334
+msgid "Saved sources"
+msgstr "Сохранённые источники"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:339
+msgid "Manual VLESS nodes"
+msgstr "Ручные VLESS-узлы"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:341
+msgid "Add node"
+msgstr "Добавить узел"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:343
+msgid "Bulk import"
+msgstr "Массовый импорт"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:344
+msgid "Paste many node links (one per line) or a whole base64 subscription, or load them from a file. New links are added to the manual list above."
+msgstr "Вставьте много ссылок (по одной в строке) или целую base64-подписку, либо загрузите из файла. Новые ссылки добавятся в ручной список выше."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:345
+msgid "AmneziaWG: paste an AmneziaWG .conf or an AmneziaVPN vpn:// link here (not in the single field above) — it joins the same pool. The single field above is for vless:// / vmess:// / trojan:// / ss:// links only."
+msgstr "AmneziaWG: вставляйте .conf или ссылку vpn:// сюда (не в одиночное поле выше) — узел войдёт в тот же пул. Одиночное поле выше — только для ссылок vless:// / vmess:// / trojan:// / ss://."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:357
+msgid "AmneziaWG nodes"
+msgstr "Узлы AmneziaWG"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:358
+msgid "Imported AmneziaWG nodes (from a .conf or vpn:// link). They join the same auto-failover pool as other nodes and are service-checked the same way."
+msgstr "Импортированные узлы AmneziaWG (из .conf или ссылки vpn://). Они входят в общий пул авто-переключения и проверяются на сервисы так же, как остальные."
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:363
+msgid "Saved nodes"
+msgstr "Сохранённые узлы"
+
+#: files/www/luci-static/resources/view/vpnpool/sources.js:364
+msgid "A persistent archive separate from manual nodes. Star nodes on the dashboard to save them; they survive subscription expiry. ACTIVE = in the live pool, IDLE = kept for later. Deleting the subscription auto-activates all of them so you stay connected."
+msgstr "Постоянный архив отдельно от ручных узлов. Отмечайте узлы ⭐ на дашборде, чтобы сохранить — они переживают окончание подписки. ACTIVE = в живом пуле, IDLE = про запас. Удаление подписки авто-активирует их все, чтобы связь не пропала."
+
+#: files/www/luci-static/resources/vpnpool/common.js:94
+msgid "No permission for this action. Log out and log in again: permissions are refreshed at login."
+msgstr "Нет прав на это действие. Выйдите и войдите снова: права обновляются при входе."
+
+#: files/www/luci-static/resources/vpnpool/common.js:95
+msgid "This action is not supported by the installed version of the service. Update VPN Pool."
+msgstr "Установленная версия службы не умеет это действие. Обновите VPN Pool."
+
+#: files/www/luci-static/resources/vpnpool/common.js:96
+msgid "The router did not answer in time. Try again in a moment."
+msgstr "Роутер не ответил вовремя. Попробуйте ещё раз чуть позже."
+
+#: files/www/luci-static/resources/vpnpool/common.js:97
+msgid "No connection to the router. Check the connection and try again."
+msgstr "Нет связи с роутером. Проверьте подключение и попробуйте ещё раз."
+
+#: files/www/luci-static/resources/vpnpool/common.js:98
+msgid "The router sent an unexpected answer. Try again; if it repeats, open Diagnostics."
+msgstr "Роутер ответил непонятно. Попробуйте ещё раз; если повторится — откройте «Диагностику»."
+
+#: files/www/luci-static/resources/vpnpool/common.js:99
+msgid "The router did not accept the request: some values are invalid."
+msgstr "Роутер не принял запрос: некоторые значения неверны."
+
+#: files/www/luci-static/resources/vpnpool/common.js:100
+msgid "The action failed. Try again; if it repeats, open Diagnostics."
+msgstr "Не получилось. Попробуйте ещё раз; если повторится — откройте «Диагностику»."
+
+#: files/www/luci-static/resources/vpnpool/common.js:102
+msgid "Not found: it may have been removed already."
+msgstr "Не найдено: возможно, уже удалено."
+
+#: files/www/luci-static/resources/vpnpool/common.js:103
+msgid "No node is chosen."
+msgstr "Узел не выбран."
+
+#: files/www/luci-static/resources/vpnpool/common.js:104
+msgid "Enter an address first."
+msgstr "Сначала введите адрес."
+
+#: files/www/luci-static/resources/vpnpool/common.js:105
+msgid "Nothing to process: the field is empty."
+msgstr "Нечего обрабатывать: поле пустое."
+
+#: files/www/luci-static/resources/vpnpool/common.js:106
+msgid "The value is not valid."
+msgstr "Неверное значение."
+
+#: files/www/luci-static/resources/vpnpool/common.js:107
+msgid "Some values are not valid. Check the highlighted fields."
+msgstr "Некоторые значения неверны. Проверьте выделенные поля."
+
+#: files/www/luci-static/resources/vpnpool/common.js:108
+msgid "This setting is not supported by the installed version of the service."
+msgstr "Установленная версия службы не знает эту настройку."
+
+#: files/www/luci-static/resources/vpnpool/common.js:109
+msgid "The value is too small."
+msgstr "Слишком маленькое значение."
+
+#: files/www/luci-static/resources/vpnpool/common.js:110
+msgid "The time is not valid. Use hours and minutes, for example 07:30."
+msgstr "Неверное время. Укажите часы и минуты, например 07:30."
+
+#: files/www/luci-static/resources/vpnpool/common.js:111
+msgid "The schedule could not be saved."
+msgstr "Не удалось сохранить расписание."
+
+#: files/www/luci-static/resources/vpnpool/common.js:112
+msgid "There are no nodes yet."
+msgstr "Узлов пока нет."
+
+#: files/www/luci-static/resources/vpnpool/common.js:113
+msgid "The service is off. Turn it on and try again."
+msgstr "Служба выключена. Включите её и попробуйте ещё раз."
+
+#: files/www/luci-static/resources/vpnpool/common.js:114
+msgid "The VPN engine did not accept the command. Try again in a moment."
+msgstr "Движок VPN не принял команду. Попробуйте ещё раз чуть позже."
+
+#: files/www/luci-static/resources/vpnpool/common.js:115
+msgid "The link could not be recognized."
+msgstr "Не удалось распознать ссылку."
+
+#: files/www/luci-static/resources/vpnpool/common.js:116
+msgid "The AmneziaWG settings could not be recognized."
+msgstr "Не удалось распознать настройки AmneziaWG."
+
+#: files/www/luci-static/resources/vpnpool/common.js:117
+msgid "No nodes were found in the text."
+msgstr "В тексте не найдено ни одного узла."
+
+#: files/www/luci-static/resources/vpnpool/common.js:118
+msgid "Another operation is still running. Wait until it finishes."
+msgstr "Ещё идёт другая операция. Дождитесь её окончания."
+
+#: files/www/luci-static/resources/vpnpool/common.js:119
+msgid "This feature is turned off in the settings."
+msgstr "Эта функция выключена в настройках."
+
+#: files/www/luci-static/resources/vpnpool/common.js:120
+msgid "This is already added."
+msgstr "Это уже добавлено."
+
+#: files/www/luci-static/resources/vpnpool/common.js:121
+msgid "This type of node is not supported."
+msgstr "Такой тип узла не поддерживается."
+
+#: files/www/luci-static/resources/vpnpool/common.js:122
+msgid "Saved. AmneziaWG nodes wait until the AmneziaWG engine is installed."
+msgstr "Сохранено. Узлы AmneziaWG ждут установки движка AmneziaWG."
+
+#: files/www/luci-static/resources/vpnpool/common.js:123
+msgid "This file is not a VPN Pool backup or it is damaged."
+msgstr "Это не резервная копия VPN Pool, или файл повреждён."
+
+#: files/www/luci-static/resources/vpnpool/common.js:124
+msgid "The subscription could not be downloaded. Check the address and the internet connection."
+msgstr "Не удалось скачать подписку. Проверьте адрес и подключение к интернету."
+
+#: files/www/luci-static/resources/vpnpool/common.js:126
+msgid "Done."
+msgstr "Готово."
+
+#: files/www/luci-static/resources/vpnpool/common.js:127
+msgid "Applied."
+msgstr "Применено."
+
+#: files/www/luci-static/resources/vpnpool/common.js:128
+msgid "Saved."
+msgstr "Сохранено."
+
+#: files/www/luci-static/resources/vpnpool/common.js:129
+msgid "Saved. It takes effect when the service starts."
+msgstr "Сохранено. Вступит в силу при запуске службы."
+
+#: files/www/luci-static/resources/vpnpool/common.js:130
+msgid "Started."
+msgstr "Запущено."
+
+#: files/www/luci-static/resources/vpnpool/common.js:131
+msgid "Already running."
+msgstr "Уже выполняется."
+
+#: files/www/luci-static/resources/vpnpool/common.js:132
+msgid "VPN is on."
+msgstr "VPN включён."
+
+#: files/www/luci-static/resources/vpnpool/common.js:133
+msgid "VPN is off."
+msgstr "VPN выключен."
+
+#: files/www/luci-static/resources/vpnpool/common.js:363
+msgid "The service is off: the change takes effect after it is turned on."
+msgstr "Служба выключена: изменение вступит в силу после включения."
+
+#: files/www/luci-static/resources/vpnpool/common.js:523
+msgid "More actions"
+msgstr "Ещё действия"
+
+#: files/www/luci-static/resources/vpnpool/common.js:607
+msgid "Continue"
+msgstr "Продолжить"
+
+#: files/www/luci-static/resources/vpnpool/common.js:609
+msgid "Are you sure?"
+msgstr "Вы уверены?"
+
+#: files/www/luci-static/resources/vpnpool/common.js:630
+msgid "Select"
+msgstr "Выбрать"
+
+#: files/usr/share/luci/menu.d/luci-app-vpnpool.json
+msgid "VPN Pool"
+msgstr "VPN Pool"
+
+#: files/usr/share/luci/menu.d/luci-app-vpnpool.json
+msgid "Dashboard"
+msgstr "Дашборд"
+
+#: files/usr/share/luci/menu.d/luci-app-vpnpool.json
+msgid "Diagnostics"
+msgstr "Диагностика"
+
+#: files/usr/share/luci/menu.d/luci-app-vpnpool.json
+msgid "Routing"
+msgstr "Маршрутизация"
+
+#: files/usr/share/luci/menu.d/luci-app-vpnpool.json
+msgid "Settings"
+msgstr "Настройки"
+
+#: files/usr/share/luci/menu.d/luci-app-vpnpool.json
+msgid "Sources"
+msgstr "Источники"
+
+#: files/usr/share/rpcd/acl.d/luci-app-vpnpool.json
+msgid "Grant access to vpnpool dashboard"
+msgstr "Доступ к панели VPN Pool"

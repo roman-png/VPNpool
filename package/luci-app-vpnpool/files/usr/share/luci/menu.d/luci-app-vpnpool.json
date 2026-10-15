@@ -6,27 +6,27 @@
 		"depends": { "acl": [ "luci-app-vpnpool" ] }
 	},
 	"admin/services/vpnpool/dashboard": {
-		"title": "Дашборд",
+		"title": "Dashboard",
 		"order": 1,
 		"action": { "type": "view", "path": "vpnpool/dashboard" }
 	},
 	"admin/services/vpnpool/sources": {
-		"title": "Источники",
+		"title": "Sources",
 		"order": 2,
 		"action": { "type": "view", "path": "vpnpool/sources" }
 	},
 	"admin/services/vpnpool/routing": {
-		"title": "Маршрутизация",
+		"title": "Routing",
 		"order": 3,
 		"action": { "type": "view", "path": "vpnpool/routing" }
 	},
 	"admin/services/vpnpool/settings": {
-		"title": "Настройки",
+		"title": "Settings",
 		"order": 4,
 		"action": { "type": "view", "path": "vpnpool/settings" }
 	},
 	"admin/services/vpnpool/diagnostics": {
-		"title": "Диагностика",
+		"title": "Diagnostics",
 		"order": 5,
 		"action": { "type": "view", "path": "vpnpool/diagnostics" }
 	}
