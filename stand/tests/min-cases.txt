@@ -10,5 +10,5 @@ status 6
 uitext 6
 daemon 38
 tgbot 18
-awgdecode 53
-engine 54
+awgdecode 74
+engine 71
