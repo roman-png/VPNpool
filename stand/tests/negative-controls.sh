@@ -134,11 +134,11 @@ ctl parser-hy2-port-not-hopped parser fail 'parser/hy2-port-hopping ' \
 ctl parser-unknown-transport-kept parser fail 'parser/vless-xhttp-refused ;parser/vless-splithttp-refused ;parser/vless-kcp-refused ;parser/trojan-xhttp-refused ;parser/vmess-xhttp-refused ;parser/report-reasons ' \
 	"$LIBX/parser.uc" "	return 'unsupported_transport';" "	return { type: t };"
 # every case that inspects the installed config goes red
-ctl build-config-not-installed build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/json-source-long-short-id-no-panic ;build/awg-node-on-stock-engine-deferred ;build/unchanged-pool-no-flash-write ;build/changed-pool-flash-updated ;build/after-reboot-failed-build-keeps-flash-config ;build/node-test-selector-separate-from-proxy ;build/poison-json-source-unknown-field ;build/generator-tags-reserved-in-parser ' \
+ctl build-config-not-installed build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/json-source-long-short-id-no-panic ;build/awg-node-on-stock-engine-deferred ;build/unchanged-pool-no-flash-write ;build/changed-pool-flash-updated ;build/after-reboot-failed-build-keeps-flash-config ;build/node-test-selector-separate-from-proxy ;build/poison-json-source-unknown-field ;build/generator-tags-reserved-in-parser ;build/status-file-lists-engine-drop ;build/nodes-carry-id-config-does-not ' \
 	"$LIBX/build.sh" 'mv "$SB_CONF.new" "$SB_CONF"' 'rm -f "$SB_CONF.new"'
-ctl rpcd-add_node-no-signal rpcd fail 'rpcd/add_node/ok ' \
-	"$RPCD" 'uci add_list vpnpool.main.manual_node="$l"; uci commit vpnpool; signal_reload' \
-	'uci add_list vpnpool.main.manual_node="$l"; uci commit vpnpool'
+# add / add_node write but never signal (and say n/a instead of not_running)
+ctl rpcd-add_node-no-signal rpcd fail 'rpcd/add_node/ok ;rpcd/add_node/no-daemon-reported ;rpcd/add/ok ;rpcd/add/no-daemon-reported ' \
+	"$RPCD" '		case "$a" in USR1|USR2) d=$(signal_word "$a") ;; esac' '		case "$a" in USR1|USR2) d=n/a ;; esac'
 ctl sched-old-block-kept sched fail 'sched/disabled-removes-block-keeps-user-jobs ' \
 	"$LIBX/sched.sh" 'inblk && $0 == e { inblk = 0; n = 0; next }' 'inblk && $0 == e { inblk = 0; for (i = 1; i <= n; i++) print buf[i]; print; n = 0; next }'
 # stage 2 (2.6): the old busybox-invalid 10# arithmetic back -> no job is ever written
@@ -163,7 +163,7 @@ ctl fetch-cache-always-rewritten fetch fail 'fetch/unchanged-source-cache-not-re
 ctl fetch-no-throttle fetch fail 'fetch/fetch-due-throttle ' \
 	"$LIBX/lib.sh" '[ $(( now - t )) -ge "$INTERVAL_MIN" ]' 'true'
 # stage 2 (2.1 / 2.11): build
-ctl build-singular-regex-only build fail 'build/poison-json-source-unknown-field ;build/awg-node-on-stock-engine-deferred ' \
+ctl build-singular-regex-only build fail 'build/poison-json-source-unknown-field ;build/awg-node-on-stock-engine-deferred ;build/status-file-lists-engine-drop ' \
 	"$LIBX/build.sh" "grep -oE '(outbound|endpoint)s?\[[0-9]+\]'" "grep -oE '(outbound|endpoint)\[[0-9]+\]'"
 # one owner of the reserved names: a generator tag missing from parser.uc's list is caught
 ctl parser-reserved-misses-generator-tag build fail 'build/generator-tags-reserved-in-parser ' \
@@ -248,12 +248,75 @@ ctl initd-no-bot-signature tgbot fail 'tgbot/initd-bot-instance ' \
 # stage 2: rpcd methods touched here
 ctl rpcd-refresh-wrong-signal rpcd fail 'rpcd/refresh/ok ' \
 	"$RPCD" 'd=$(signal_word USR2)' 'd=$(signal_word USR1)'
-ctl rpcd-interval-unchecked rpcd fail 'rpcd/set_option/interval-below-10m-rejected ;rpcd/set_option/interval-malformed-rejected ' \
-	"$RPCD" '[ "$s" -ge "$INTERVAL_MIN" ] || {' 'true || {'
-ctl rpcd-telegram-no-reload rpcd fail 'rpcd/set_option/telegram-token-change-reloads-bot ;rpcd/set_option/telegram_chat-change-reloads-bot ;rpcd/set_option/telegram_via_proxy-change-reloads-bot ' \
-	"$RPCD" '[ "$old" = "$v" ] || /etc/init.d/vpnpool reload' '[ "$old" = "$v" ] || :'
+ctl rpcd-interval-unchecked rpcd fail 'rpcd/set_option/interval-below-10m-rejected ;rpcd/set_option/interval-malformed-rejected ;rpcd/set_config/every-check-names-its-code ' \
+	"$LIBX/api.uc" "if (n < INTERVAL_MIN) return [ null, 'too_small' ];" "if (false) return [ null, 'too_small' ];"
+ctl rpcd-telegram-no-reload rpcd fail 'rpcd/set_option/telegram-token-change-reloads-bot ;rpcd/set_option/telegram_chat-change-reloads-bot ;rpcd/set_option/telegram_via_proxy-change-reloads-bot ;rpcd/set_config/ok ' \
+	"$RPCD" '			bot) /etc/init.d/vpnpool reload >/dev/null 2>&1 ;;' '			bot) : ;;'
 ctl status-delay-lost status fail 'status/300-nodes-daemon-up-valid ' \
-	"$LIBX/status.sh" 'map(select(. != null and . > 0))' 'map(select(. != null and . > 100000))'
+	"$LIBX/status.uc" 'if (h?.delay != null && h.delay > 0) delay = h.delay;' 'if (h?.delay != null && h.delay > 100000) delay = h.delay;'
+# ---- stage 3 (ROADMAP §6): honest API, one validator, secrets, analyze/add, backup/restore, status ----
+# set_config writes the valid part of a refused save
+ctl api-config-partial-write rpcd fail 'rpcd/set_config/bad-input ;rpcd/set_config/all-or-nothing ;rpcd/set_schedule/bad-input ;rpcd/set_schedule/bad-minute-not-stored ' \
+	"$LIBX/api.uc" '	if (length(errors)) {' '	if (length(errors) && !length(plan)) {'
+# both daemon signals for one save (USR2 already rebuilds)
+ctl api-config-two-signals rpcd fail 'rpcd/set_config/one-signal-only ;rpcd/add/ok ' \
+	"$LIBX/api.uc" "	if (acts.USR2) push(actions, 'USR2'); else if (acts.USR1) push(actions, 'USR1');" "	if (acts.USR2) push(actions, 'USR2'); if (acts.USR1) push(actions, 'USR1');" \
+	"$LIBX/api.uc" "	let actions = acts.USR2 ? [ 'USR2' ] : (acts.USR1 ? [ 'USR1' ] : []);" "	let actions = []; if (acts.USR2) push(actions, 'USR2'); if (acts.USR1) push(actions, 'USR1');"
+# the masked value the status reply shows is stored as the new secret
+ctl api-masked-secret-overwrites rpcd fail 'rpcd/set_config/masked-token-sent-back-keeps-the-real-one ;rpcd/set_url/masked-url-sent-back-unchanged ' \
+	"$LIBX/api.uc" "		if (d.secret && type(v) == 'string' && v == masked_of(d, cur)) continue;" "		if (false) continue;"
+# analyze: no duplicate detection against the existing pool
+ctl api-analyze-no-dup-check rpcd fail 'rpcd/analyze/statuses ' \
+	"$LIBX/api.uc" "				if (exist_ids[r.id]) { it.status = 'dup'; it.reason = 'exists'; }" "				if (false) { it.status = 'dup'; it.reason = 'exists'; }" \
+	"$LIBX/api.uc" "				it.reason = exist_tags[r.dup_of] ? 'exists' : 'repeated';" "				it.reason = 'repeated';"
+# a "not found" answered as success again
+ctl rpcd-del_sub-not-found-ok rpcd fail 'rpcd/del_sub/bad-input ' \
+	"$RPCD" '		u=$(resolve_url extra_sub "$u") || { rep false not_found; exit 0; }' '		u=$(resolve_url extra_sub "$u") || { rep true deleted; exit 0; }'
+# export hands out the token / subscription URL in clear
+ctl rpcd-export-unmasked rpcd fail 'rpcd/export/telegram-token-masked ;rpcd/export/subscription-url-masked ;rpcd/import/masked-export-refused ' \
+	"$RPCD" '		if ucode "$API" export > /tmp/vpnpool/.export.txt 2>/dev/null; then' '		if uci export vpnpool > /tmp/vpnpool/.export.txt 2>/dev/null; then'
+# import without the completeness check: a partial text wipes the rest of the config
+ctl rpcd-import-unchecked rpcd fail 'rpcd/import/partial-config-refused ' \
+	"$RPCD" '		if ! check_uci_dir "$D" "$D/save"; then rm -rf "$D"; rep false incomplete_config; exit 0; fi' '		:'
+# restore replaces without the explicit "replace everything"
+ctl rpcd-restore-no-confirm rpcd fail 'rpcd/restore/without-confirm-changes-nothing ' \
+	"$RPCD" "		if [ \"\$(printf '%s' \"\$input\" | jq -r '.replace_all == true' 2>/dev/null)\" != true ]; then" '		if false; then'
+# restore takes any member of the archive
+ctl rpcd-restore-members-unchecked rpcd fail 'rpcd/restore/foreign-member-refused ' \
+	"$RPCD" "' \"\$D/list\" | grep -q .; then" "' \"\$D/list\" | grep -q NEVER-MATCHES; then"
+# restore takes an uploaded file from anywhere
+ctl rpcd-restore-any-path rpcd fail 'rpcd/restore/path-outside-tmp-refused ' \
+	"$RPCD" "			case \"\$src\" in /tmp/*) ;; *) bad invalid '{\"errors\":{\"path\":\"bad_value\"}}' ;; esac" '			:'
+# a subscription named by its status key is not found
+ctl api-resolve-no-key rpcd fail 'rpcd/del_sub/by-status-key ' \
+	"$LIBX/api.uc" '	for (let x in all) if (str_key(x) == val) return x;' '	;'
+# backup without the AWG files
+ctl rpcd-backup-no-awg rpcd fail 'rpcd/backup/full-copy-with-secrets ;rpcd/restore/without-confirm-changes-nothing ;rpcd/restore/replace-all ' \
+	"$RPCD" '	ls /etc/vpnpool/awg/*.conf >/dev/null 2>&1 && echo etc/vpnpool/awg' '	:'
+# status: the token / the subscription URL in clear
+ctl status-token-unmasked status fail 'status/telegram-token-masked ' \
+	"$LIBX/status.uc" '		telegram_token: mask_token(token),' '		telegram_token: token,'
+ctl status-url-unmasked status fail 'status/subscription-urls-masked ' \
+	"$LIBX/status.uc" '	subscription: { url: mask_url(sub_url),' '	subscription: { url: sub_url,'
+# status: 20 extra processes per poll -> the process threshold must catch it
+ctl status-process-burst status fail 'status/300-nodes-daemon-down-at-most-15-processes ;status/300-nodes-daemon-up-at-most-15-processes ' \
+	"$LIBX/status.uc" "let routing = length(run('nft list table inet vpnpool 2>/dev/null')) > 0;" "for (let i = 0; i < 20; i++) run('true'); let routing = length(run('nft list table inet vpnpool 2>/dev/null')) > 0;"
+# status: no mtime cache -> the small link files are re-parsed on every poll
+ctl status-no-cache status fail 'status/link-parse-cached-by-mtime ' \
+	"$LIBX/status.uc" '	if (c && c.sig == sig) return c.v;' '	if (false) return c.v;'
+# status: a dead lock owner counted as busy
+ctl status-busy-ignores-owner status fail 'status/build-busy-pause-progress ' \
+	"$LIBX/status.uc" "	if (match(pid, /^[0-9]+\$/)) return !!access('/proc/' + pid);" "	if (match(pid, /^[0-9]+\$/)) return true;"
+# generator: the node id (nodes.json carries it since stage 3) reaches the sing-box config
+# (sing-box refuses the unknown field: EVERY build that installs a config goes red)
+ctl generator-keeps-id build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/poison-json-source-unknown-field ;build/status-file-lists-engine-drop ;build/json-source-long-short-id-no-panic ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/awg-node-on-stock-engine-deferred ;build/unchanged-pool-no-flash-write ;build/changed-pool-flash-updated ;build/after-reboot-failed-build-keeps-flash-config ;build/node-test-selector-separate-from-proxy ;build/generator-tags-reserved-in-parser ;build/status-file-success ;build/nodes-carry-id-config-does-not ' \
+	"$LIBX/generator.uc" '	delete n.id;' '	n.id = n.id;'
+# build: no build_status.json on success
+ctl build-status-not-written build fail 'build/status-file-success ;build/status-file-lists-engine-drop ' \
+	"$LIBX/build.sh" 'build_status true ""' ':'
+# fetch: a failed run forgets the last successful fetch time
+ctl fetch-status-forgets-last-ok fetch fail 'fetch/status-per-source ' \
+	"$LIBX/fetch.sh" 'else ($p[$r[0]].last_ok_at // null) end' 'else null end'
 ctl uitext-new-technical-string uitext fail 'uitext/real-app-no-new-violations ;uitext/baseline-gates-new-violations ;uitext/stale-baseline-line-fails ' \
 	"$VIEW/dashboard.js" "_('Cancel')" "_('Cancel via rpcd')"
 # ui0: the guard reads the shared modules (vpnpool/common.js) and po, counts a po msgid once
