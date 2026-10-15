@@ -300,6 +300,8 @@ c_analyze() {
 M analyze "$(jarg --arg t "$L1
 https://new.example.com/s" '{text:$t}')" - - c_analyze '{"text":5}' -
 
+# the new subscription URL answers the trial download with two nodes (add takes a URL only then)
+s_add() { mock_on; printf '%s\n%s\n' "$L1" "$L2" > "$FXR/newsub.txt"; mock_rule 'GET https://new.example.com/s' 200 "$FXR/newsub.txt"; }
 c_add() {
 	expect_jq "added 2" "$R" '.added==2 and .dup==0 and .failed==[]'
 	expect_eq "manual_node" "$(ulist vpnpool.main.manual_node)" "$L1"
@@ -520,7 +522,7 @@ end
 uci add_list vpnpool.main.extra_sub='https://e1.example.com/a/ONE'; uci add_list vpnpool.main.extra_sub='https://e1.example.com/b/TWO'; uci commit vpnpool
 rcall del_sub '{"url":"https://e1.example.com/***"}'
 begin "rpcd/del_sub/ambiguous-mask-refused"
-expect_jq "not_found" "$R" '.ok==false and .code=="not_found"'
+expect_jq "ambiguous (not a silent pick of one)" "$R" '.ok==false and .code=="ambiguous"'
 expect_eq "both kept" "$(ulist vpnpool.main.extra_sub | wc -l)" 2
 end
 rcall status
@@ -654,6 +656,217 @@ expect_jq "invalid path" "$R" '.ok==false and .code=="invalid" and .errors.path=
 expect_eq "config untouched" "$(uci -q get vpnpool.main.telegram_token)" ''
 end
 rm -f /tmp/vpnpool-upload.tgz
+
+# ---------------- review fixes (REVIEW_stage3 V1..V7, M1..M9) ----------------
+# helper: a backup of the CURRENT config as a directory tree in $1 (to change and repack)
+bk_tree() {   # $1=dir
+	rcall backup; rm -rf "$1"; mkdir -p "$1"
+	printf '%s' "$R" | jq -r '.data' | base64 -d > "$1.tgz" 2>/dev/null
+	tar -xzf "$1.tgz" -C "$1"; mkdir -p "$1/etc/vpnpool/awg"
+}
+restore_tgz() {   # $1=tar.gz file [replace_all true|false]
+	rcall restore "$(jq -nc --arg d "$(base64 -w0 "$1")" --argjson r "${2:-true}" '{data:$d, replace_all:$r}')"
+}
+
+# V1: our own backup is always accepted back — files outside the rule are left out (and listed)
+reset_state; daemon_start
+mkdir -p /etc/vpnpool/awg
+cp "$T_DIR/fixtures/awg/awg2.conf" /etc/vpnpool/awg/good.conf
+cp "$T_DIR/fixtures/awg/awg2.conf" "/etc/vpnpool/awg/my node.conf"
+cp "$T_DIR/fixtures/awg/awg2.conf" /etc/vpnpool/awg/good.conf.bak
+rcall backup
+BKV1=$(printf '%s' "$R" | jq -r '.data')
+begin "rpcd/backup/members-by-the-restore-rule"
+expect_jq "the two odd files listed as skipped" "$R" '(.report.skipped|sort)==["etc/vpnpool/awg/good.conf.bak","etc/vpnpool/awg/my node.conf"] and .report.awg==1'
+end
+rm -f /etc/vpnpool/awg/good.conf
+rcall restore "$(jq -nc --arg d "$BKV1" '{data:$d, replace_all:true}')"
+begin "rpcd/restore/own-backup-round-trip"
+expect_jq "restored" "$R" '.ok==true and .code=="restored"'
+expect_true "good.conf back" [ -f /etc/vpnpool/awg/good.conf ]
+expect_true "the user's other files untouched" [ -f "/etc/vpnpool/awg/my node.conf" ]
+expect_true "... both" [ -f /etc/vpnpool/awg/good.conf.bak ]
+end
+
+# V2: values go through the set_config schema (restore and import)
+reset_state
+bk_tree "$FXR/v2"
+sed -i "s/option failover_interval '60'/option failover_interval 'abc; reboot'/; s/option fwmark '0x400000'/option fwmark 'x'/" "$FXR/v2/etc/config/vpnpool"
+tar -czf "$FXR/v2bad.tgz" -C "$FXR/v2" etc
+restore_tgz "$FXR/v2bad.tgz"
+begin "rpcd/restore/bad-values-refused"
+expect_jq "invalid, both fields named" "$R" '.ok==false and .code=="invalid" and .errors.failover_interval=="bad_value" and .errors.fwmark=="bad_mark"'
+expect_eq "config untouched" "$(uci -q get vpnpool.main.failover_interval)" 60
+end
+rcall import "$(jq -nc --rawfile c "$FXR/v2/etc/config/vpnpool" '{config:$c}')"
+begin "rpcd/import/bad-values-refused"
+expect_jq "invalid, field named" "$R" '.ok==false and .code=="invalid" and .errors.failover_interval=="bad_value"'
+expect_eq "config untouched" "$(uci -q get vpnpool.main.failover_interval)" 60
+end
+
+# V3: limits checked on the listing, before anything is unpacked
+reset_state
+bk_tree "$FXR/v3"
+dd if=/dev/zero bs=1024 count=5000 2>/dev/null | tr '\0' ' ' > "$FXR/v3/etc/vpnpool/z.map.json"
+tar -czf "$FXR/v3big.tgz" -C "$FXR/v3" etc
+# observer: every tar run by the rpcd children that UNPACKS is logged (the refusal must come first)
+printf '#!/bin/sh\ncase "$1" in -x*) echo "$*" >> /tmp/vpnpool-tar-x.log ;; esac\nexec /bin/tar "$@"\n' > /opt/stand/tests-bin/tar
+chmod +x /opt/stand/tests-bin/tar; rm -f /tmp/vpnpool-tar-x.log
+restore_tgz "$FXR/v3big.tgz"
+begin "rpcd/restore/oversized-content-refused"
+expect_true "positive control: the archive is small, its content is not" [ "$(wc -c < "$FXR/v3big.tgz")" -lt 100000 ]
+expect_jq "too_large" "$R" '.ok==false and .code=="too_large"'
+expect_eq "refused BEFORE unpacking (no tar -x ran)" "$(gcount . /tmp/vpnpool-tar-x.log)" 0
+end
+restore_tgz "$FXR/v3.tgz"
+begin "rpcd/restore/observer-sees-an-unpack"   # positive control for the observer above
+expect_jq "a normal archive restores" "$R" '.ok==true'
+expect_true "and its tar -x was logged" [ "$(gcount . /tmp/vpnpool-tar-x.log)" -ge 1 ]
+end
+rm -f /opt/stand/tests-bin/tar /tmp/vpnpool-tar-x.log
+rm -f "$FXR/v3/etc/vpnpool/z.map.json"
+i=0; while [ $i -lt 501 ]; do echo '{}' > "$FXR/v3/etc/vpnpool/m$i.map.json"; i=$((i + 1)); done
+tar -czf "$FXR/v3many.tgz" -C "$FXR/v3" etc
+restore_tgz "$FXR/v3many.tgz"
+begin "rpcd/restore/too-many-files-refused"
+expect_jq "too_large" "$R" '.ok==false and .code=="too_large"'
+end
+
+# M1: only regular files and directories — symlink, hardlink, device, fifo refused
+reset_state
+for kind in symlink hardlink device fifo; do
+	bk_tree "$FXR/m1"
+	case $kind in
+		symlink)  ln -s /tmp "$FXR/m1/etc/vpnpool/s.map.json" ;;
+		hardlink) echo '{}' > "$FXR/m1/etc/vpnpool/a.map.json"; ln "$FXR/m1/etc/vpnpool/a.map.json" "$FXR/m1/etc/vpnpool/b.map.json" ;;
+		device)   mknod "$FXR/m1/etc/vpnpool/d.map.json" c 1 3 ;;
+		fifo)     mkfifo "$FXR/m1/etc/vpnpool/f.map.json" ;;
+	esac
+	tar -czf "$FXR/m1.tgz" -C "$FXR/m1" etc
+	restore_tgz "$FXR/m1.tgz"
+	begin "rpcd/restore/member-type-$kind-refused"
+	expect_true "positive control: the archive has the $kind" sh -c "tar -tvzf '$FXR/m1.tgz' | grep -Eq '^[lcp]|-> '"
+	expect_jq "invalid_archive" "$R" '.ok==false and .code=="invalid_archive"'
+	end
+done
+
+# M2: the uploaded file must be in /tmp after resolving symlinks and ".."
+reset_state
+bk_tree "$FXR/m2"; cp "$FXR/m2.tgz" /etc/vpnpool/up.tgz
+rm -rf /tmp/vpnpool-lnk; ln -s /etc/vpnpool /tmp/vpnpool-lnk
+for pth in /tmp/vpnpool-lnk/up.tgz /tmp/../etc/vpnpool/up.tgz; do
+	rcall restore "$(jq -nc --arg p "$pth" '{path:$p, replace_all:true}')"
+	begin "rpcd/restore/path-escaping-tmp-refused-$(echo "$pth" | tr -c 'a-z0-9' '_')"
+	expect_jq "invalid path" "$R" '.ok==false and .code=="invalid" and .errors.path=="bad_value"'
+	end
+done
+rm -f /tmp/vpnpool-lnk
+
+# V4: the swap is atomic — a failure of the LAST step rolls everything back
+reset_state; daemon_start
+mkdir -p /etc/vpnpool/awg; cp "$T_DIR/fixtures/awg/awg2.conf" /etc/vpnpool/awg/old.conf
+echo '{"Old":"x"}' > /etc/vpnpool/saved.map.json
+uci set vpnpool.main.failover_interval=61; uci commit vpnpool
+bk_tree "$FXR/v4"
+rm -f "$FXR/v4/etc/vpnpool/awg/old.conf"; cp "$T_DIR/fixtures/awg/wg-plain.conf" "$FXR/v4/etc/vpnpool/awg/new.conf"
+echo '{"New":"y"}' > "$FXR/v4/etc/vpnpool/saved.map.json"
+sed -i "s/option failover_interval '61'/option failover_interval '62'/" "$FXR/v4/etc/config/vpnpool"
+tar -czf "$FXR/v4.tgz" -C "$FXR/v4" etc
+# fault injection: the rpcd children see the tests-bin PATH; this mv refuses the config's rename
+printf '#!/bin/sh\nfor a; do l=$a; done\n[ -f /tmp/vpnpool-fail-mv ] && [ "$l" = "$(cat /tmp/vpnpool-fail-mv)" ] && exit 1\nexec /bin/mv "$@"\n' > /opt/stand/tests-bin/mv
+chmod +x /opt/stand/tests-bin/mv; echo /etc/config/vpnpool > /tmp/vpnpool-fail-mv
+restore_tgz "$FXR/v4.tgz"
+rm -f /tmp/vpnpool-fail-mv /opt/stand/tests-bin/mv
+begin "rpcd/restore/failed-step-rolls-back"
+expect_jq "restore_failed, rolled back" "$R" '.ok==false and .code=="restore_failed" and .rolled_back==true'
+expect_eq "config as before" "$(uci -q get vpnpool.main.failover_interval)" 61
+expect_true "old AWG file back" [ -f /etc/vpnpool/awg/old.conf ]
+expect_true "new AWG file not left" [ ! -f /etc/vpnpool/awg/new.conf ]
+expect_jq "saved map as before" "$(cat /etc/vpnpool/saved.map.json)" '.==({"Old":"x"})'
+end
+restore_tgz "$FXR/v4.tgz"
+begin "rpcd/restore/same-archive-without-the-fault"   # positive control for the case above
+expect_jq "restored" "$R" '.ok==true and .code=="restored"'
+expect_eq "config replaced" "$(uci -q get vpnpool.main.failover_interval)" 62
+expect_true "new AWG file in place, old one gone" sh -c '[ -f /etc/vpnpool/awg/new.conf ] && [ ! -f /etc/vpnpool/awg/old.conf ]'
+end
+# the copy "before" cannot be made -> nothing is replaced
+reset_state; uci set vpnpool.main.failover_interval=61; uci commit vpnpool
+printf '#!/bin/sh\ncase "$*" in *pre-restore*) [ -f /tmp/vpnpool-fail-tar ] && exit 1 ;; esac\nexec /bin/tar "$@"\n' > /opt/stand/tests-bin/tar
+chmod +x /opt/stand/tests-bin/tar; : > /tmp/vpnpool-fail-tar
+restore_tgz "$FXR/v4.tgz"
+rm -f /tmp/vpnpool-fail-tar /opt/stand/tests-bin/tar
+begin "rpcd/restore/no-copy-before-no-replace"
+expect_jq "write_failed at the copy step" "$R" '.ok==false and .code=="write_failed" and .step=="pre_copy"'
+expect_eq "config untouched" "$(uci -q get vpnpool.main.failover_interval)" 61
+end
+
+# V6: a mask never travels on as an address; looked up in the method's own list only
+reset_state; daemon_start; mock_on
+uci add_list vpnpool.main.source='https://h.example/AAA'; uci add_list vpnpool.main.source='https://h.example/BBB'; uci commit vpnpool
+rcall probe_source '{"url":"https://h.example/***"}'
+begin "rpcd/probe_source/ambiguous-mask-refused"
+expect_jq "ambiguous" "$R" '.ok==false and .code=="ambiguous"'
+expect_eq "no request to the mask" "$(mock_calls 'h.example/\*\*\*')" 0
+end
+rcall probe_source '{"url":"https://other.example/***"}'
+begin "rpcd/probe_source/unknown-mask-refused"
+expect_jq "not_found" "$R" '.ok==false and .code=="not_found"'
+end
+reset_state; daemon_start; mock_on
+uci add_list vpnpool.main.source='https://h.example/AAA'; uci add_list vpnpool.main.extra_sub='https://h.example/BBB'; uci commit vpnpool
+printf '%s\n' "$L1" > "$FXR/src1.txt"; mock_rule 'GET https://h.example/AAA' 200 "$FXR/src1.txt"
+rcall probe_source '{"url":"https://h.example/***"}'
+begin "rpcd/probe_source/mask-resolved-in-sources-only"
+expect_jq "started (the subscription on the same host does not make it ambiguous)" "$R" '.ok==true and .code=="started"'
+_i=0; while [ $_i -lt 20 ] && [ -f /tmp/vpnpool/.probe-running ]; do sleep 1; _i=$((_i+1)); done
+expect_true "the real source was fetched" [ "$(mock_calls 'GET https://h.example/AAA')" -ge 1 ]
+end
+rcall add_sub '{"url":"https://h.example/***"}'
+begin "rpcd/add_sub/mask-literal-refused"
+expect_jq "invalid url, nothing stored" "$R" '.ok==false and .code=="invalid"'
+expect_eq "extra_sub unchanged" "$(ulist vpnpool.main.extra_sub)" 'https://h.example/BBB'
+end
+
+# V7: add with a URL = the add_sub rule (trial download, 0 nodes -> not stored)
+reset_state; daemon_start; mock_on; mock_rule 'GET https://dead.example.com/s' 500
+rcall add "$(jarg --arg t "$L1
+https://dead.example.com/s" '{text:$t}')"
+begin "rpcd/add/url-without-nodes-not-stored"
+expect_jq "the link added, the URL failed with fetch_failed" "$R" '.ok==true and .added==1 and .failed==[{line:2,reason:"fetch_failed",http:"500"}]'
+expect_eq "extra_sub empty" "$(ulist vpnpool.main.extra_sub)" ''
+expect_eq "the trial download happened" "$(mock_calls 'GET https://dead.example.com/s')" 1
+end
+rcall add_node '{"link":"https://evil.example/sub"}'
+begin "rpcd/add_node/url-refused"
+expect_jq "invalid" "$R" '.ok==false and .code=="invalid"'
+expect_eq "no subscription created" "$(ulist vpnpool.main.extra_sub)" ''
+end
+
+# M6: set_url "" clears the subscription again
+reset_state; uci set vpnpool.main.subscription_url='https://sub.example.com/s'; uci commit vpnpool
+rcall set_url '{"url":""}'
+begin "rpcd/set_url/empty-clears"
+expect_jq "saved" "$R" '.ok==true and .code=="saved"'
+expect_eq "cleared" "$(uci -q get vpnpool.main.subscription_url)" ''
+end
+
+# M7: a missing section is created with the type the package expects
+reset_state; uci delete vpnpool.main; uci commit vpnpool
+rcall set_config '{"settings":{"failover_interval":"90"}}'
+begin "rpcd/set_config/creates-main-of-type-vpnpool"
+expect_jq "saved" "$R" '.ok==true'
+expect_eq "section type" "$(uci -q get vpnpool.main)" vpnpool
+end
+
+# M9: settings stored but the crontab rewrite failed -> ok:true + a warning, not "nothing saved"
+reset_state; daemon_start; rm -rf /etc/crontabs; : > /etc/crontabs
+rcall set_schedule '{"enabled":true,"on":"07:00","off":"","refresh":""}'
+rm -f /etc/crontabs
+begin "rpcd/set_schedule/cron-failure-is-a-warning"
+expect_jq "ok + warning" "$R" '.ok==true and .warning=="schedule_failed"'
+expect_eq "stored" "$(uci -q get vpnpool.main.sched_on)" '07:00'
+end
 
 # ---------------- coverage: ACL <-> rpcd list <-> this suite ----------------
 begin "rpcd/coverage-acl-methods"

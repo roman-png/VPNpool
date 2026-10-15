@@ -28,12 +28,18 @@
 #             nothing_added      add: every item was a duplicate or failed
 #             decode_failed      an AmneziaVPN vpn:// link could not be decoded
 #             incomplete_config  import/restore: not a full vpnpool config (sections missing)
+#             (import/restore also answer invalid + errors when a VALUE fails the set_config schema)
+#             too_large          restore: the archive / its content exceeds the limits below
+#             restore_failed     restore: a step failed; .rolled_back says whether the state
+#                                before is in place again (.backup = the copy taken before)
+#             ambiguous          a masked URL fits several configured ones (use the status key)
 #             masked_values      import: the text carries masked secrets (use restore)
 #             invalid_archive    restore: not a vpnpool backup archive
 #             confirm_required   restore without replace_all:true (the reply has the report)
 #             write_failed unknown_option unknown_method
 #             (set_option / set_schedule / set_url keep the single field's code instead of
 #              invalid: bad_value too_small too_large bad_time bad_url ...)
+#   warnings (ok:true): warning:"schedule_failed" — settings saved, the crontab rewrite failed
 . /usr/libexec/vpnpool/lib.sh 2>/dev/null
 CLASH=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH" ] || CLASH=127.0.0.1:9091
 API=/usr/libexec/vpnpool/api.uc
@@ -83,8 +89,12 @@ apply_cfg() {
 	done
 	if [ "$sched" = 1 ]; then
 		/usr/libexec/vpnpool/sched.sh >/dev/null 2>&1; rc=$?
-		if [ "$rc" -ne 0 ]; then rep false script_failed "$d" "$(jq -nc --arg m "sched.sh exit $rc" '{message:$m}')"; return; fi
-		res=$(printf '%s' "$res" | jq -c 'if .code == "unchanged" then .code = "applied" else . end')
+		if [ "$rc" -ne 0 ]; then
+			# the settings ARE stored (and the daemon signalled): say so, plus the warning
+			res=$(printf '%s' "$res" | jq -c --arg m "sched.sh exit $rc" '. + {warning:"schedule_failed", message:$m}')
+		else
+			res=$(printf '%s' "$res" | jq -c 'if .code == "unchanged" then .code = "applied" else . end')
+		fi
 	fi
 	printf '%s' "$res" | finish "$d"
 }
@@ -98,9 +108,22 @@ apply_add() {   # $1=JSON {text?|items?, lines?, options?}
 	done
 	printf '%s' "$res" | finish "$d"
 }
-# A configured URL by the value the UI shows (full, or masked scheme://host/*** when unique).
-resolve_url() {   # $1=uci options (comma-separated) $2=value -> real URL on stdout, rc 1 if none
+# A configured URL by the value the UI shows: full, the status key, or masked scheme://host/***
+# when unique. rc 1 = not found, rc 3 = the mask fits several.
+resolve_url() {   # $1=uci options (comma-separated) $2=value -> real URL on stdout
 	ucode "$API" resolve_url "$1" "$2" 2>/dev/null
+}
+# need_url <uci options> <value> <must_exist 0|1> -> U = the URL to use, or reply + exit.
+# Looked up ONLY in the method's own list(s). A value that is (or looks like) a mask and does not
+# resolve is never used as an address: not_found / ambiguous. must_exist=0: a new full URL passes.
+need_url() {
+	local r rc
+	r=$(resolve_url "$1" "$2"); rc=$?
+	if [ "$rc" -eq 0 ]; then U=$r; return 0; fi
+	[ "$rc" -eq 3 ] && { rep false ambiguous; exit 0; }
+	case "$2" in *'***'*) rep false not_found; exit 0 ;; esac
+	[ "$3" = 1 ] && { rep false not_found; exit 0; }
+	U=$2
 }
 # Background job results (probe/speedtest/unlock): one shape for running / done / failed / idle.
 job_result() {   # $1=running-lock $2=result file
@@ -134,12 +157,28 @@ cfg_report() {   # $1=confdir $2=savedir $3=awg dir
 	jq -nc --argjson n "${n:-0}" --argjson e "${e:-0}" --argjson s "${s:-0}" --argjson a "${a:-0}" --argjson set "${set:-0}" \
 		'{nodes:$n, subscriptions:$e, saved:$s, awg:$a, settings:$set}'
 }
+# THE rule for what a backup holds — backup() packs only files that match it, restore() accepts
+# only members that match it (one rule: our own backup can never be refused). Regular files only.
+MEMBER_RE='^(etc/?|etc/config/?|etc/config/vpnpool|etc/vpnpool/?|etc/vpnpool/awg/?|etc/vpnpool/awg/[A-Za-z0-9._-]+\.conf|etc/vpnpool/[A-Za-z0-9._-]+\.map\.json)$'
 BACKUP_MAPS='*.map.json'
-backup_members() {   # archive member list (relative to /) of the live config
-	echo etc/config/vpnpool
-	ls /etc/vpnpool/awg/*.conf >/dev/null 2>&1 && echo etc/vpnpool/awg
-	for f in /etc/vpnpool/$BACKUP_MAPS; do [ -f "$f" ] && echo "${f#/}"; done
+# Limits of a restore (the unpacked archive lives in /tmp = RAM): checked on the archive's own
+# listing BEFORE anything is unpacked, and again on disk after.
+RESTORE_MAX_BYTES=4194304      # archive file and the sum of member sizes: 4 MiB
+RESTORE_MAX_FILES=500
+backup_scan() {   # "ok <rel>" / "skip <rel>" for every candidate file of the live config
+	local f rel
+	echo "ok etc/config/vpnpool"
+	for f in /etc/vpnpool/awg/* /etc/vpnpool/$BACKUP_MAPS; do
+		[ -e "$f" ] || [ -L "$f" ] || continue
+		rel=${f#/}
+		if [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$rel" | grep -Eq "$MEMBER_RE"; then
+			echo "ok $rel"
+		else
+			echo "skip $rel"
+		fi
+	done
 }
+backup_members() { backup_scan | sed -n 's/^ok //p'; }   # names never contain spaces (MEMBER_RE)
 
 # Drop a tag from the dashboard's node list (nodes.json) RIGHT NOW. signal_reload only
 # rebuilds asynchronously (USR1), and a full rebuild of a big pool takes several seconds —
@@ -239,6 +278,11 @@ call)
 		if [ ! -s "$D/vpnpool" ]; then rm -rf "$D"; rep false invalid n/a '{"errors":{"config":"bad_value"}}'; exit 0; fi
 		if ! check_uci_dir "$D" "$D/save"; then rm -rf "$D"; rep false incomplete_config; exit 0; fi
 		if ucode "$API" has_masked "$D/vpnpool"; then rm -rf "$D"; rep false masked_values; exit 0; fi
+		CC=$(ucode "$API" check_config "$D" "$D/save" 2>/dev/null)
+		if [ "$(printf '%s' "$CC" | jq -r '.ok' 2>/dev/null)" != true ]; then
+			[ -n "$CC" ] || CC='{"ok":false,"code":"invalid"}'
+			rm -rf "$D"; printf '%s' "$CC" | finish n/a; exit 0
+		fi
 		uci -q revert vpnpool
 		if ! uci import vpnpool < "$D/vpnpool" || ! uci commit vpnpool; then rm -rf "$D"; rep false write_failed; exit 0; fi
 		rm -rf "$D"
@@ -375,8 +419,7 @@ call)
 		# rpcd's exec timeout, so run it in the BACKGROUND and let the UI poll
 		# probe_result. Read-only w.r.t. the live config. A listed (masked) source URL is
 		# resolved to the configured one.
-		u=$(printf '%s' "$input" | jq -r '.url // ""')
-		r=$(resolve_url source,extra_sub,subscription_url "$u") && u=$r
+		need_url source "$(printf '%s' "$input" | jq -r '.url // ""')" 0; u=$U
 		case "$u" in
 			http://*|https://*) case "$u" in *[[:space:]]*) rep false invalid n/a '{"errors":{"url":"bad_url"}}'; exit 0 ;; esac ;;
 			*) rep false invalid n/a '{"errors":{"url":"bad_url"}}'; exit 0 ;;
@@ -399,8 +442,7 @@ call)
 		# never uploads hundreds of links (that large request never reached rpcd).
 		# imported_node := (current - scopeOfThisSource) + picked, so re-probing
 		# ("Update") and re-selecting cleanly replaces just this source's contribution.
-		u=$(printf '%s' "$input" | jq -r '.url // ""')
-		r=$(resolve_url source "$u") && u=$r
+		need_url source "$(printf '%s' "$input" | jq -r '.url // ""')" 0; u=$U
 		IX=$(printf '%s' "$input" | jq -c '.idx // []')
 		printf '%s' "$IX" | jq -e 'type=="array"' >/dev/null 2>&1 || { rep false invalid n/a '{"errors":{"idx":"bad_type"}}'; exit 0; }
 		CACHE=/tmp/vpnpool/.probe-cache.json
@@ -426,8 +468,7 @@ call)
 	del_source)
 		# forget the source URL AND drop the nodes imported from it (they must leave
 		# the pool / dashboard, not linger).
-		u=$(printf '%s' "$input" | jq -r '.url // ""')
-		u=$(resolve_url source "$u") || { rep false not_found; exit 0; }
+		need_url source "$(printf '%s' "$input" | jq -r '.url // ""')" 1; u=$U
 		MAP=/etc/vpnpool/imported.map.json
 		uci del_list vpnpool.main.source="$u" 2>/dev/null
 		[ -f "$MAP" ] && { jq --arg u "$u" 'del(.[$u])' "$MAP" > "$MAP.tmp" 2>/dev/null && mv "$MAP.tmp" "$MAP"; }
@@ -500,6 +541,9 @@ call)
 		# junk is refused, an existing node is not added twice (a double-click).
 		l=$(printf '%s' "$input" | jq -r '.link // ""')
 		[ -n "$l" ] || { rep false invalid n/a '{"errors":{"link":"bad_value"}}'; exit 0; }
+		case "$(printf '%s' "$l" | tr 'A-Z' 'a-z')" in
+			http://*|https://*) rep false invalid n/a '{"errors":{"link":"bad_value"}}'; exit 0 ;;
+		esac
 		res=$(apply_add "$(jq -nc --arg l "$l" '{items:[$l]}')")
 		if printf '%s' "$res" | jq -e '.ok == false and .code == "nothing_added" and .dup > 0' >/dev/null 2>&1; then
 			rep true already_exists
@@ -770,22 +814,16 @@ call)
 			http://*|https://*) case "$u" in *[[:space:]]*) rep false invalid n/a '{"errors":{"url":"bad_url"}}'; exit 0 ;; esac ;;
 			*) rep false invalid n/a '{"errors":{"url":"bad_url"}}'; exit 0 ;;
 		esac
-		mkdir -p /tmp/vpnpool
-		B=/tmp/vpnpool/.subcheck.raw
-		code=$(curl -sfL --connect-timeout 4 -m 9 -A 'v2rayNG/1.9.5' "$u" -o "$B" -w '%{http_code}' 2>/dev/null)
-		cnt=0
-		[ -s "$B" ] && cnt=$(ucode "$PARSER" "$B" 2>/dev/null | jq 'length' 2>/dev/null)
-		case "$cnt" in (''|*[!0-9]*) cnt=0 ;; esac
-		rm -f "$B"
-		X=$(jq -nc --argjson n "$cnt" --arg http "${code:-000}" '{fetched:$n, http:$http}')
-		[ "$cnt" -gt 0 ] || { rep false fetch_failed n/a "$X"; exit 0; }
-		if in_list vpnpool.main.extra_sub "$u"; then rep true already_exists n/a "$X"; exit 0; fi
-		uci add_list vpnpool.main.extra_sub="$u"; uci commit vpnpool
-		rep true added "$(signal_word USR2)" "$X"
+		apply_add "$(jq -nc --arg u "$u" '{items:[$u]}')" | jq -c '
+			(.probes[0] // {fetched:0, http:"000"}) as $p
+			| {fetched: $p.fetched, http: $p.http, daemon}
+			+ (if .added > 0 then {ok:true, code:"added"}
+			   elif .dup > 0 then {ok:true, code:"already_exists"}
+			   elif (.failed[0].reason // "") == "fetch_failed" then {ok:false, code:"fetch_failed", error:"fetch_failed"}
+			   else {ok:false, code:"invalid", error:"invalid", errors:{url:"bad_url"}} end)'
 		;;
 	del_sub)
-		u=$(printf '%s' "$input" | jq -r '.url // ""')
-		u=$(resolve_url extra_sub "$u") || { rep false not_found; exit 0; }
+		need_url extra_sub "$(printf '%s' "$input" | jq -r '.url // ""')" 1; u=$U
 		uci del_list vpnpool.main.extra_sub="$u" 2>/dev/null; uci commit vpnpool
 		rep true deleted "$(signal_word USR2)"
 		;;
@@ -870,7 +908,10 @@ call)
 		if ! tar -czf "$D/b.tar.gz" -C / $(backup_members) 2>/dev/null; then
 			rm -rf "$D"; rep false script_failed n/a '{"message":"tar"}'; exit 0
 		fi
-		REP=$(cfg_report /etc/config "$D/save" /etc/vpnpool/awg)
+		# report = what IS in the archive (awg: its members), plus what was left out (skipped)
+		REP=$(cfg_report /etc/config "$D/save" /etc/vpnpool/awg | jq -c --arg s "$(backup_scan | sed -n 's/^skip //p')" \
+			--argjson a "$(backup_members | grep -c '^etc/vpnpool/awg/')" \
+			'. + {awg: $a, skipped: ($s | split("\n") | map(select(length > 0)))}')
 		ucode "$API" backup_reply "$D/b.tar.gz" "vpnpool-backup-$(date +%Y%m%d-%H%M).tar.gz" "$REP" 2>/dev/null \
 			|| rep false script_failed n/a '{"message":"api.uc backup_reply"}'
 		rm -rf "$D"
@@ -887,25 +928,43 @@ call)
 		D=/tmp/vpnpool/.restore; rm -rf "$D"; mkdir -p "$D/root" "$D/save"
 		bad() { rm -rf "$D"; rep false "$1" n/a "${2:-null}"; exit 0; }
 		# the archive: inline base64 (.data) or a file LuCI uploaded to /tmp (.path, e.g. via
-		# cgi-upload — for archives too big for one JSON-RPC request)
+		# cgi-upload — for archives too big for one JSON-RPC request). The path must be IN /tmp
+		# after every symlink is resolved.
 		src=$(printf '%s' "$input" | jq -r '.path // ""')
 		if [ -n "$src" ]; then
-			case "$src" in /tmp/*) ;; *) bad invalid '{"errors":{"path":"bad_value"}}' ;; esac
-			case "$src" in *..*|*[!A-Za-z0-9._/-]*) bad invalid '{"errors":{"path":"bad_value"}}' ;; esac
-			[ -f "$src" ] && [ ! -L "$src" ] || bad invalid '{"errors":{"path":"bad_value"}}'
-			cp "$src" "$D/a.tar.gz" || bad invalid '{"errors":{"path":"bad_value"}}'
+			real=$(readlink -f "$src" 2>/dev/null)
+			case "$real" in /tmp/?*) ;; *) bad invalid '{"errors":{"path":"bad_value"}}' ;; esac
+			[ -f "$real" ] || bad invalid '{"errors":{"path":"bad_value"}}'
+			[ "$(wc -c < "$real")" -le "$RESTORE_MAX_BYTES" ] || bad too_large
+			cp "$real" "$D/a.tar.gz" || bad invalid '{"errors":{"path":"bad_value"}}'
 		else
 			printf '%s' "$input" | ucode "$API" b64dec_field data "$D/a.tar.gz" 2>/dev/null || bad invalid '{"errors":{"data":"bad_value"}}'
+			[ "$(wc -c < "$D/a.tar.gz")" -le "$RESTORE_MAX_BYTES" ] || bad too_large
 		fi
-		tar -tzf "$D/a.tar.gz" > "$D/list" 2>/dev/null || bad invalid_archive
-		[ -s "$D/list" ] || bad invalid_archive
-		if grep -vE '^(etc/?|etc/config/?|etc/config/vpnpool|etc/vpnpool/?|etc/vpnpool/awg/?|etc/vpnpool/awg/[A-Za-z0-9._-]+\.conf|etc/vpnpool/[A-Za-z0-9._-]+\.map\.json)$' "$D/list" | grep -q .; then
-			bad invalid_archive
-		fi
+		# BEFORE unpacking: every member must be a regular file or a directory (no symlink,
+		# hardlink, device, fifo), named by MEMBER_RE; count and total size within the limits.
+		tar -tvzf "$D/a.tar.gz" > "$D/listv" 2>/dev/null || bad invalid_archive
+		v=$(MEMBER_RE="$MEMBER_RE" awk -v maxb="$RESTORE_MAX_BYTES" -v maxn="$RESTORE_MAX_FILES" '
+			BEGIN { re = ENVIRON["MEMBER_RE"]; bad = "" }
+			{ n++; t = substr($1, 1, 1)
+			  if (NF != 6 || (t != "-" && t != "d") || $6 !~ re) { bad = "invalid_archive"; exit }
+			  sum += $3 }
+			END { if (bad != "") print bad; else if (n == 0) print "invalid_archive";
+			      else if (n > maxn || sum > maxb) print "too_large"; else print "ok" }' "$D/listv")
+		[ "$v" = ok ] || bad "$v"
 		tar -xzf "$D/a.tar.gz" -C "$D/root" 2>/dev/null || bad invalid_archive
-		[ -z "$(find "$D/root" -type l 2>/dev/null)" ] || bad invalid_archive
+		# and AFTER: what is on disk is what the listing promised
+		[ -z "$(find "$D/root" ! -type f ! -type d 2>/dev/null)" ] || bad invalid_archive
+		[ "$(find "$D/root" | wc -l)" -le "$((RESTORE_MAX_FILES + 1))" ] || bad too_large
+		[ "$(du -sk "$D/root" | cut -f1)" -le "$((RESTORE_MAX_BYTES / 1024 + RESTORE_MAX_FILES * 4))" ] || bad too_large
 		[ -f "$D/root/etc/config/vpnpool" ] || bad invalid_archive
 		check_uci_dir "$D/root/etc/config" "$D/save" || bad incomplete_config
+		# every VALUE through the set_config schema: a restored config must not break the daemon
+		CC=$(ucode "$API" check_config "$D/root/etc/config" "$D/save" 2>/dev/null)
+		if [ "$(printf '%s' "$CC" | jq -r '.ok' 2>/dev/null)" != true ]; then
+			[ -n "$CC" ] || CC='{"ok":false,"code":"invalid"}'
+			rm -rf "$D"; printf '%s' "$CC" | finish n/a; exit 0
+		fi
 		for f in "$D"/root/etc/vpnpool/*.map.json; do
 			[ -f "$f" ] || continue
 			jq -e 'type=="object"' "$f" >/dev/null 2>&1 || bad invalid_archive
@@ -918,16 +977,53 @@ call)
 		if [ "$(printf '%s' "$input" | jq -r '.replace_all == true' 2>/dev/null)" != true ]; then
 			rm -rf "$D"; rep false confirm_required n/a "{\"report\":$REP}"; exit 0
 		fi
+		# 1. the state before, VERIFIED — without it nothing is replaced
+		PRE=/tmp/vpnpool/pre-restore.tar.gz; rm -f "$PRE"
 		# shellcheck disable=SC2046
-		tar -czf /tmp/vpnpool/pre-restore.tar.gz -C / $(backup_members) 2>/dev/null
-		uci -q revert vpnpool
-		cp "$D/root/etc/config/vpnpool" /etc/config/vpnpool.restore && mv -f /etc/config/vpnpool.restore /etc/config/vpnpool \
-			|| bad write_failed
-		mkdir -p /etc/vpnpool/awg
-		rm -f /etc/vpnpool/awg/*.conf /etc/vpnpool/$BACKUP_MAPS
-		for f in "$D"/root/etc/vpnpool/awg/*.conf; do [ -f "$f" ] && cp "$f" /etc/vpnpool/awg/; done
-		for f in "$D"/root/etc/vpnpool/$BACKUP_MAPS; do [ -f "$f" ] && cp "$f" /etc/vpnpool/; done
-		rm -rf "$D"
+		{ tar -czf "$PRE" -C / $(backup_members) 2>/dev/null && tar -tzf "$PRE" >/dev/null 2>&1; } \
+			|| { rm -f "$PRE"; bad write_failed '{"step":"pre_copy"}'; }
+		# 2. stage the new files on the SAME file system as their targets (the renames below are
+		#    atomic); nothing live is touched yet
+		NEW=/etc/vpnpool/.restore-new; OLD=/etc/vpnpool/.restore-old
+		rm -rf "$NEW" "$OLD"; ok=1
+		mkdir -p "$NEW/awg" "$OLD/awg" /etc/vpnpool/awg || ok=0
+		for f in "$D"/root/etc/vpnpool/awg/*.conf; do [ -f "$f" ] || continue; cp "$f" "$NEW/awg/" || ok=0; done
+		for f in "$D"/root/etc/vpnpool/$BACKUP_MAPS; do [ -f "$f" ] || continue; cp "$f" "$NEW/" || ok=0; done
+		cp "$D/root/etc/config/vpnpool" "$NEW/config" || ok=0
+		if [ "$ok" = 0 ]; then
+			rm -rf "$NEW" "$OLD"; bad restore_failed "{\"step\":\"stage\",\"rolled_back\":true,\"backup\":\"$PRE\"}"
+		fi
+		# 3. swap: the live members aside (files other than backup members stay where they are),
+		#    the new ones in, the config LAST. Every move is recorded for the rollback.
+		: > "$OLD/.moved"; : > "$OLD/.placed"
+		for f in $(backup_members); do
+			[ "$f" = etc/config/vpnpool ] && continue
+			rel=${f#etc/vpnpool/}
+			if mv -f "/$f" "$OLD/$rel"; then echo "$rel" >> "$OLD/.moved"; else ok=0; break; fi
+		done
+		if [ "$ok" = 1 ]; then
+			for f in "$NEW"/awg/*.conf "$NEW"/$BACKUP_MAPS; do
+				[ -f "$f" ] || continue
+				rel=${f#"$NEW"/}
+				if mv -f "$f" "/etc/vpnpool/$rel"; then echo "$rel" >> "$OLD/.placed"; else ok=0; break; fi
+			done
+		fi
+		if [ "$ok" = 1 ]; then
+			uci -q revert vpnpool
+			mv -f "$NEW/config" /etc/config/vpnpool || ok=0
+		fi
+		if [ "$ok" = 0 ]; then
+			# rollback: take the placed files out, put the moved ones back; if that fails too,
+			# unpack the verified copy taken before. The config was not replaced (last step).
+			rb=1
+			while IFS= read -r rel; do rm -f "/etc/vpnpool/$rel" || rb=0; done < "$OLD/.placed"
+			while IFS= read -r rel; do mv -f "$OLD/$rel" "/etc/vpnpool/$rel" || rb=0; done < "$OLD/.moved"
+			[ "$rb" = 1 ] || { tar -xzf "$PRE" -C / 2>/dev/null && rb=1; }
+			rm -rf "$NEW" "$OLD" "$D"
+			rep false restore_failed n/a "$(jq -nc --argjson r "$([ "$rb" = 1 ] && echo true || echo false)" --arg b "$PRE" '{step:"swap", rolled_back:$r, backup:$b}')"
+			exit 0
+		fi
+		rm -rf "$NEW" "$OLD" "$D"
 		# enabled / Telegram may differ now: procd re-reads both instances; then refetch
 		/etc/init.d/vpnpool reload >/dev/null 2>&1
 		rep true restored "$(signal_word USR2)" "{\"report\":$REP}"

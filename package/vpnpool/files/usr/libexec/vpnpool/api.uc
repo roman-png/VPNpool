@@ -11,10 +11,17 @@
 //       the two — and/or "bot" (init.d reload: Telegram bot) / "sched" (rewrite the crontab).
 //   api.uc analyze                 stdin {text}  -> {ok, code, items:[{line, kind, status, ...}]}
 //   api.uc add                     stdin {text?, items?, lines?, options?} -> writes manual_node /
-//                                  extra_sub, {ok, code, added, dup, failed:[{line, reason}], actions}
+//                                  extra_sub, {ok, code, added, dup, failed:[{line, reason}], actions,
+//                                  probes:[{line, fetched, http}]}. A subscription URL is taken only
+//                                  after a trial download that yields nodes (else fetch_failed) —
+//                                  the same rule as add_sub (add_sub goes through here).
 //   api.uc resolve_url <opt[,opt]> <value>   the configured URL equal to <value>, or the one
 //                                  whose key (status subscriptions[].key) equals it, or the ONE
-//                                  whose masked form (scheme://host/***) equals it; rc 1 if none
+//                                  whose masked form (scheme://host/***) equals it; rc 1 if none,
+//                                  rc 3 if the masked form fits several (ambiguous)
+//   api.uc check_config <dir> <savedir>   check every VALUE of a uci config dir (import/restore)
+//                                  with the same schema as set_config: {ok} | {ok:false,
+//                                  code:"invalid", errors:{option: code}}
 //   api.uc check_domain <value>    the normalised domain (lower case, no scheme/path); rc 1 if bad
 //   api.uc export                  `uci export vpnpool` with the token and subscription URLs masked
 //   api.uc has_masked <file>       rc 0 if a uci export text carries masked secrets
@@ -31,6 +38,7 @@
 
 import { readfile, writefile, stdin, popen, unlink, mkdir, stat } from 'fs';
 import { cursor } from 'uci';
+import { rand } from 'math';
 import { VALID_COMMUNITY, read_json, mask_url, mask_token, str_key, as_list } from './common.uc';
 
 const SB = '/tmp/vpnpool';
@@ -121,6 +129,7 @@ function norm_domain(v) {
 }
 function is_url(s) {
 	if (type(s) != 'string' || length(s) > 2048 || match(s, /[[:space:]'"<>]/)) return false;
+	if (index(s, '***') >= 0) return false;   // a masked value (scheme://host/***) is never an address
 	let m = match(s, /^https?:\/\/([^\/?#@]*@)?([^\/?#:]+|\[[0-9a-fA-F:.]+\])(:[0-9]{1,5})?([\/?#].*)?$/i);
 	return !!m;
 }
@@ -214,7 +223,7 @@ const SCHEMA = {
 	test_port:             { s: 'main', c: I(1, 65535), a: 'USR1' },
 	node_test_port:        { s: 'main', c: I(1, 65535), a: 'USR1' },
 	subscription_interval: { s: 'main', c: chk_interval, a: 'none' },
-	subscription_url:      { s: 'main', c: (v) => chk_url(v, false), a: 'USR2', secret: 'url' },
+	subscription_url:      { s: 'main', c: (v) => chk_url(v, true), a: 'USR2', secret: 'url' },   // "" = no subscription
 	telegram_enabled:      { s: 'main', c: chk_bool, a: 'none' },
 	telegram_token:        { s: 'main', c: (v) => chk_re(v, /^[0-9]+:[A-Za-z0-9_-]+$/, 'bad_token', true), a: 'bot', secret: 'token' },
 	telegram_chat:         { s: 'main', c: (v) => chk_re(v, /^(-?[0-9]{1,20}|@[A-Za-z0-9_]{4,64})$/, 'bad_chat', true), a: 'bot' },
@@ -283,8 +292,9 @@ function set_config(input, single) {
 		return { ok: false, code: code, errors: errors };
 	}
 	if (!length(plan)) return { ok: true, code: 'unchanged', changed: [], actions: [] };
-	for (let sec in [ 'main', 'routing' ])
-		if (u.get('vpnpool', sec) == null) u.set('vpnpool', sec, sec);
+	// a missing section is created with the type the whole package expects (main: vpnpool)
+	for (let sec in [ [ 'main', 'vpnpool' ], [ 'routing', 'routing' ] ])
+		if (u.get('vpnpool', sec[0]) == null) u.set('vpnpool', sec[0], sec[1]);
 	let acts = {}, changed = [];
 	for (let p in plan) {
 		let opt = p.d.o ?? p.f, okw;
@@ -419,6 +429,22 @@ function analyze(text) {
 	return { items: items, lines: texts };
 }
 
+// Trial download of a subscription URL: does it give nodes at all? (a typo / a panel port blocked
+// from the router must not be stored silently). Short timeouts keep a call inside rpcd's budget.
+function sub_probe(url) {
+	mkdir(SB);
+	let f = sprintf('%s/.subcheck.%d.%d', SB, time(), rand());
+	let http = trim(run(sprintf("curl -sfL --connect-timeout 4 -m 9 -A 'v2rayNG/1.9.5' -o %s -w '%%{http_code}' %s 2>/dev/null", sq(f), sq(url))));
+	let n = 0;
+	if ((stat(f)?.size ?? 0) > 0) {
+		let v = null;
+		try { v = json(run(sprintf('ucode %s %s 2>/dev/null', PARSER, sq(f)))); } catch (e) { v = null; }
+		if (type(v) == 'array') n = length(v);
+	}
+	unlink(f);
+	return { n: n, http: length(http) ? http : '000' };
+}
+
 function add(input) {
 	if (type(input) != 'object') return { ok: false, code: 'invalid', errors: { '': 'bad_type' } };
 	let text = input.text;
@@ -437,14 +463,19 @@ function add(input) {
 	}
 	let a = analyze(text);
 	let u = cursor();
-	let added = 0, dup = 0, failed = [], acts = {}, addlinks = [], addurls = [];
+	let added = 0, dup = 0, failed = [], acts = {}, addlinks = [], addurls = [], probes = [];
 	for (let it in a.items) {
 		if (pick && !pick['' + it.line]) continue;
 		if (it.status == 'dup') { dup++; continue; }
 		if (it.status != 'add') { push(failed, { line: it.line, reason: it.reason ?? it.status }); continue; }
 		let line = a.lines[it.line];
-		if (it.kind == 'link') { push(addlinks, line); acts.USR1 = true; }
-		else if (it.kind == 'subscription_url') { push(addurls, line); acts.USR2 = true; }
+		if (it.kind == 'subscription_url') {
+			let pr = sub_probe(line);
+			push(probes, { line: it.line, fetched: pr.n, http: pr.http });
+			if (pr.n < 1) { push(failed, { line: it.line, reason: 'fetch_failed', http: pr.http }); continue; }
+			push(addurls, line); acts.USR2 = true;
+		} else if (it.kind == 'link') { push(addlinks, line); acts.USR1 = true; }
+		else { push(failed, { line: it.line, reason: 'unsupported' }); continue; }
 		added++;
 	}
 	if (added) {
@@ -460,7 +491,7 @@ function add(input) {
 	}
 	let actions = acts.USR2 ? [ 'USR2' ] : (acts.USR1 ? [ 'USR1' ] : []);
 	return { ok: added > 0, code: added > 0 ? 'added' : 'nothing_added', added: added, dup: dup,
-		failed: failed, actions: actions };
+		failed: failed, probes: probes, actions: actions };
 }
 
 // ---------------------------------------------------------------- misc
@@ -474,7 +505,54 @@ function resolve_url(opts, val) {
 	for (let x in all) if (str_key(x) == val) return x;
 	// two URLs on one host share the masked form: ambiguous -> nothing (use the key)
 	let hit = filter(all, (x) => mask_url(x) == val);
+	if (length(hit) > 1) return { ambiguous: true };
 	return (length(hit) == 1) ? hit[0] : null;
+}
+
+// ---------------------------------------------------------------- import / restore check
+// Options outside SCHEMA that a config may carry, with their check; anything else is kept as is
+// (old versions' options, e.g. subscription_ua) — unknown options are not used by the scripts.
+const EXTRA_CHECKS = {
+	enabled:        (v) => chk_bool(v),
+	clash_api:      (v) => chk_re(v, /^[A-Za-z0-9.-]+:[0-9]{1,5}$/, 'bad_value', false),
+	route_table:    (v) => chk_int(v, 1, 2147483647),
+	route_priority: (v) => chk_int(v, 1, 32767),
+	speedtest_url:  (v) => chk_url(v, true),
+	selected_node:  (v) => chk_tag(v),
+	probe_ua:       (v) => chk_re(v, /^[[:print:]]{1,1024}$/, 'bad_value', false)
+};
+const EXTRA_URL_LISTS = { extra_sub: 1, source: 1 };
+function check_config(dir, savedir) {
+	let u = cursor(dir, savedir);
+	let errors = {};
+	for (let f, d in SCHEMA) {
+		let v = u.get('vpnpool', d.s, d.o ?? f);
+		if (v == null) continue;
+		if (d.list) {
+			let r = chk_list(d.o ?? f, as_list(v, f != 'auto_members'), d.list);
+			if (r[1]) for (let k, c in r[1]) errors[k] = c;
+			continue;
+		}
+		if (type(v) == 'array') { errors[d.o ?? f] = 'bad_type'; continue; }
+		if (v == '') continue;                 // empty = unset = the default
+		let r = d.c(v);
+		if (r[1]) errors[d.o ?? f] = r[1];
+	}
+	for (let o, c in EXTRA_CHECKS) {
+		let v = u.get('vpnpool', 'main', o);
+		if (v == null || v == '') continue;
+		if (type(v) == 'array') { errors[o] = 'bad_type'; continue; }
+		let r = c(v);
+		if (r[1]) errors[o] = r[1];
+	}
+	for (let o in EXTRA_URL_LISTS) {
+		let i = 0;
+		for (let x in as_list(u.get('vpnpool', 'main', o), true)) {
+			if (!is_url(x)) errors[o + '[' + i + ']'] = 'bad_url';
+			i++;
+		}
+	}
+	return length(errors) ? { ok: false, code: 'invalid', errors: errors } : { ok: true, code: 'ok' };
 }
 
 const SECRET_URL_OPTS = { subscription_url: 1, extra_sub: 1, source: 1 };
@@ -521,7 +599,10 @@ if (cmd == 'set_config') {
 } else if (cmd == 'resolve_url') {
 	let r = resolve_url(ARGV[1] ?? '', ARGV[2] ?? '');
 	if (r == null) exit(1);
+	if (type(r) == 'object') exit(3);
 	print(r, '\n');
+} else if (cmd == 'check_config') {
+	out(check_config(ARGV[1], ARGV[2]));
 } else if (cmd == 'check_domain') {
 	let dd = norm_domain(ARGV[1] ?? '');
 	if (!dd) exit(1);
