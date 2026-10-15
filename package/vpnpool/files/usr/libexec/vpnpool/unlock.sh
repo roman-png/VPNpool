@@ -18,15 +18,15 @@ MINKB=$(uci -q get vpnpool.main.speedtest_min_mem_kb); [ -n "$MINKB" ] || MINKB=
 AVAIL=$(awk '/^MemAvailable:/{print $2; found=1} END{if(!found) exit 1}' /proc/meminfo 2>/dev/null)
 [ -n "$AVAIL" ] || AVAIL=$(awk '/^MemFree:/{f=$2}/^Buffers:/{b=$2}/^Cached:/{c=$2}END{print f+b+c}' /proc/meminfo 2>/dev/null)
 if [ -n "$AVAIL" ] && [ "$AVAIL" -lt "$MINKB" ]; then
-	echo "{\"ok\":false,\"lowmem\":true,\"avail_kb\":${AVAIL:-0},\"need_kb\":$MINKB}" > "$OUT"; exit 0
+	echo "{\"ok\":false,\"code\":\"low_memory\",\"error\":\"low_memory\",\"lowmem\":true,\"avail_kb\":${AVAIL:-0},\"need_kb\":$MINKB}" > "$OUT"; exit 0
 fi
 
-node_test_lock || { jq -nc --arg t "$TAG" '{ok:false, tag:$t, error:"another node test is running"}' > "$OUT"; exit 0; }
+node_test_lock || { jq -nc --arg t "$TAG" '{ok:false, tag:$t, code:"busy", error:"busy"}' > "$OUT"; exit 0; }
 trap node_test_unlock EXIT
 trap 'exit 1' INT TERM   # a killed test must stop, not carry on after releasing the lock
 
 if ! node_test_select "$TAG"; then
-	jq -nc --arg t "$TAG" '{ok:false, tag:$t, error:"node not available in the running config"}' > "$OUT"; exit 0
+	jq -nc --arg t "$TAG" '{ok:false, tag:$t, code:"not_found", error:"not_found"}' > "$OUT"; exit 0
 fi
 
 probe() {   # $1=url -> 1 if reachable (2xx/3xx and not 4xx/5xx), else 0
