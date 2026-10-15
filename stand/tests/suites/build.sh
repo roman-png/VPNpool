@@ -109,6 +109,9 @@ begin "build/status-file-lists-engine-drop"
 expect_jq "dropped by the engine, with its tag" "$(cat /tmp/vpnpool/build_status.json 2>/dev/null)" \
 	'.ok==true and .nodes==3 and ([.dropped[] | select(.tag=="JsonUnknownField" and .reason=="rejected_by_engine")] | length)==1'
 end
+begin "build/log-counts-the-final-pool"   # the log line once subtracted the dropped node twice
+expect_true "log: 3 nodes, 1 dropped" grep -q 'build: ok (3 nodes; dropped 1 unsupported)' "$T_STATE/build.out"
+end
 
 # a reality short_id longer than 8 bytes makes sing-box PANIC (no outbounds[N] in the message,
 # nothing for build.sh to prune) -> the parser must drop it from a JSON source too
@@ -259,4 +262,22 @@ begin "build/status-file-failure"
 expect_eq "build.sh failed" "$BRC" 1
 expect_jq "ok:false with a machine error code, the reason of the line kept" "$(cat /tmp/vpnpool/build_status.json 2>/dev/null)" \
 	'.ok==false and .error=="no_nodes" and .skipped==1 and .dropped[0].reason=="bad_port"'
+end
+
+# ---- review V5: a killed build says "interrupted", never the previous build's ok ----
+printf '%s\n' "$GOOD" > "$SUB"
+run_build "$SUB"                                   # a successful build first (ok:true on file)
+begin "build/before-kill-status-ok"                 # positive control for the case below
+expect_jq "ok" "$(cat /tmp/vpnpool/build_status.json 2>/dev/null)" '.ok==true'
+end
+mkdir -p /tmp/vpnpool/sources; cp "$SUB" /tmp/vpnpool/sources/000.raw
+mock_on; mock_rule 'GET https://203.0.113.4*' 000 - - 0 8   # the health prefilter hangs 8 s
+rm -f /tmp/curlmock/calls.log   # count only THIS run's requests
+sh /usr/libexec/vpnpool/build.sh > "$T_STATE/build.kill" 2>&1 & BP=$!
+_i=0; while [ $_i -lt 10 ] && [ "$(mock_calls 'GET https://203.0.113.4')" -lt 1 ]; do sleep 1; _i=$((_i + 1)); done
+kill -TERM "$BP"; wait "$BP"; KRC=$?
+begin "build/term-writes-interrupted"
+expect_eq "exit code 143" "$KRC" 143
+expect_jq "status: interrupted" "$(cat /tmp/vpnpool/build_status.json 2>/dev/null)" '.ok==false and .error=="interrupted"'
+expect_true "the live config of the earlier build kept" sing-box check -c /tmp/vpnpool/sing-box.json
 end
