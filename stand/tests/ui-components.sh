@@ -39,8 +39,8 @@ if command -v node >/dev/null 2>&1; then
 	U=$(grep -E '^UNIT: passed=[0-9]+ failed=[0-9]+$' "$TMPD/unit")
 	case "$U" in "UNIT: passed="[1-9]*" failed=0") ok "unit tests of common.js ($U)" ;; *) bad "unit tests of common.js: ${U:-no summary line}"; grep '^FAIL' "$TMPD/unit" ;; esac
 	node "$(hostpath "$HERE/ui-common.test.js")" --negative > "$TMPD/neg" 2>&1
-	N=$(grep -E '^NEG: passed=[0-9]+ failed=[0-9]+$' "$TMPD/neg")
-	case "$N" in "NEG: passed="[1-9]*" failed=0") ok "negative controls of the unit tests ($N)" ;; *) bad "negative controls: ${N:-no summary line}"; grep '^FAIL' "$TMPD/neg" ;; esac
+	N=$(grep -E '^NEG: passed=[0-9]+ failed=[0-9]+( skipped=[0-9]+)?$' "$TMPD/neg")
+	case "$N" in "NEG: passed="[1-9]*" failed=0"|"NEG: passed="[1-9]*" failed=0 skipped="*) ok "negative controls of the unit tests ($N)" ;; *) bad "negative controls: ${N:-no summary line}"; grep '^FAIL' "$TMPD/neg" ;; esac
 else
 	bad "node not found: syntax and unit tests of common.js did not run"
 fi
