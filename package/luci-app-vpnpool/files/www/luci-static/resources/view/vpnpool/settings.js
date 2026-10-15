@@ -4,8 +4,12 @@
 'require ui';
 'require dom';
 'require vpnpool.i18n as i18n';
+'require vpnpool.common as common';
 
 var _ = function(s) { return i18n.tr(s); };
+// LuCI E(tag, attrs, 'string') = innerHTML; node names and reply fields are foreign data,
+// so every string child goes in as text (common.E)
+var E = common.E;
 
 var callStatus = rpc.declare({ object: 'vpnpool', method: 'status' });
 var callDiag   = rpc.declare({ object: 'vpnpool', method: 'diag' });
@@ -179,7 +183,7 @@ return view.extend({
 					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleSaveTolerance', tol) }, _('Save'))
 				]),
 				E('div', { 'style': 'margin:6px 0' }, [
-					E('label', {}, [ auto, E('span', { 'style': 'margin-left:6px' }, _('Auto-switch to a working node (urltest)')) ]),
+					E('label', {}, [ auto, E('span', { 'style': 'margin-left:6px' }, _('Auto-switch to a working node')) ]),
 					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleToggleAuto', auto) }, _('Save'))
 				]),
 				E('p', { 'style': 'color:#888' }, _('Preferred node is now set right on the Dashboard — click 📌 on any node to pin it (used while reachable, auto-failover if it dies, switch back on recovery).'))
@@ -189,7 +193,7 @@ return view.extend({
 				E('h3', {}, _('Node check (does the service actually work?)')),
 				E('p', { 'style': 'color:#888;margin-top:0' }, _('The single, accurate node check. List the services the VPN must really open through a node — usually the blocked ones (one per line). A node is used for auto-switching ONLY if it opens EVERY one of them; nodes that ping but can’t reach the service (over-quota / blocked exits) are dropped from the auto-pool but stay manually selectable. Active-node selection, failover and self-heal all use this list.')),
 				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:block;margin-bottom:3px' }, _('Services to verify (one per line)')), chkSvc ]),
-				E('p', { 'style': 'color:#888' }, _('A bare host is probed as http://host/generate_204; a full URL is used as-is. Leave empty to fall back to a generic connectivity check.')),
+				E('p', { 'style': 'color:#888' }, _('Enter a site name (for example youtube.com) or a full address. Leave empty to use a general internet check.')),
 				E('div', { 'style': 'margin:6px 0' }, [
 					E('label', {}, [ deadFilterCb, E('span', { 'style': 'margin-left:6px' }, _('Drop nodes that ping but can’t reach the services (dead-node filter)')) ])
 				]),

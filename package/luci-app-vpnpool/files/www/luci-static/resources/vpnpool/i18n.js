@@ -23,17 +23,17 @@ var DICT = {
 		'routing up': 'маршрутизация активна', 'no routing': 'без маршрутизации',
 		'all except lists': 'всё кроме списков', 'only lists': 'только списки',
 		'Turn OFF': 'Выключить', 'Turn ON': 'Включить', 'Active node': 'Активный узел',
-		'auto / urltest': 'авто / urltest', 'Subscription': 'Подписка', 'expires %s': 'истекает %s',
+		'automatic choice': 'автовыбор', 'Subscription': 'Подписка', 'expires %s': 'истекает %s',
 		'Service is stopped — start it to see live node pings.': 'Служба выключена — включите, чтобы видеть пинги узлов.',
 		'No nodes yet (waiting for subscription / pings)…': 'Пока нет узлов (ждём подписку / пинги)…',
 		'Node': 'Узел', 'Server': 'Сервер', 'Ping': 'Пинг', 'Select': 'Выбор',
-		'AUTO (urltest)': 'АВТО (urltest)', 'auto-ping + failover': 'авто-пинг + переключение',
+		'AUTO (automatic choice)': 'АВТО (автовыбор)', 'auto-ping + failover': 'авто-пинг + переключение',
 		'Ping all nodes': 'Пинговать все узлы',
 		'Configure': 'Настроить', 'Cancel': 'Отмена', 'pool': 'пул', 'all nodes': 'все узлы', 'manual': 'вручную',
 		'Configure auto-switch pool': 'Настроить пул авто-переключения',
 		'Auto-switch pool': 'Пул авто-переключения', 'Auto-switch pool saved.': 'Пул авто-переключения сохранён.',
-		'Select which nodes take part in automatic switching (urltest). Unchecked nodes stay available for manual selection only.':
-			'Выберите узлы, участвующие в авто-переключении (urltest). Невыбранные останутся доступны только для ручного выбора.',
+		'Select which nodes take part in automatic switching. Unchecked nodes stay available for manual selection only.':
+			'Выберите узлы, участвующие в авто-переключении. Невыбранные останутся доступны только для ручного выбора.',
 		'Select at least one node for auto-switching.': 'Выберите хотя бы один узел для авто-переключения.',
 		'Excluded from auto-switching (manual only)': 'Не участвует в авто-переключении (только вручную)',
 		'Saved from subscription (kept after it expires)': 'Сохранён из подписки (остаётся после её окончания)',
@@ -68,7 +68,7 @@ var DICT = {
 		'Routing mode saved and applied.': 'Режим сохранён и применён.',
 		'Community lists saved and applied.': 'Списки сообществ сохранены и применены.',
 		'Domains saved and applied.': 'Домены сохранены и применены.',
-		'Community lists (itdoginfo/allow-domains, auto-updated SRS)': 'Списки сообществ (itdoginfo/allow-domains, авто-SRS)',
+		'Ready-made site lists (updated automatically)': 'Готовые списки сайтов (обновляются автоматически)',
 		'Save lists': 'Сохранить списки', 'Custom domains (one per line)': 'Свои домены (по одному в строке)',
 		'Save domains': 'Сохранить домены',
 		'Per-client routing': 'Маршрутизация по устройствам', 'All LAN clients': 'Все клиенты сети',
@@ -85,8 +85,8 @@ var DICT = {
 		'The single, accurate node check. List the services the VPN must really open through a node — usually the blocked ones (one per line). A node is used for auto-switching ONLY if it opens EVERY one of them; nodes that ping but can’t reach the service (over-quota / blocked exits) are dropped from the auto-pool but stay manually selectable. Active-node selection, failover and self-heal all use this list.':
 			'Единственная точная проверка узлов. Перечислите сервисы, которые VPN должен реально открывать через узел — обычно заблокированные (по одному в строке). Узел участвует в авто-переключении, ТОЛЬКО если открывает КАЖДЫЙ из них; узлы, которые пингуются, но до сервиса не достают (исчерпанная квота / заблокированный выход), убираются из авто-пула, но остаются доступны для ручного выбора. Выбор активного узла, переключение и самовосстановление используют этот список.',
 		'Services to verify (one per line)': 'Сервисы для проверки (по одному в строке)',
-		'A bare host is probed as http://host/generate_204; a full URL is used as-is. Leave empty to fall back to a generic connectivity check.':
-			'Голый хост проверяется как http://host/generate_204; полный URL используется как есть. Пусто — откат к обычной проверке связи.',
+		'Enter a site name (for example youtube.com) or a full address. Leave empty to use a general internet check.':
+			'Укажите сайт (например youtube.com) или полный адрес. Пусто — общая проверка интернета.',
 		'Drop nodes that ping but can’t reach the services (dead-node filter)': 'Убирать узлы, которые пингуются, но не достают до сервисов (фильтр мёртвых узлов)',
 		'Failures in a row before dropping': 'Неудач подряд до отсева',
 		'Retries per check': 'Повторов на проверку',
@@ -98,8 +98,8 @@ var DICT = {
 		'Export failed': 'Экспорт не удался',
 		'Auto-ping & failover': 'Автопинг и переключение', 'Auto-ping interval (sec)': 'Интервал автопинга (сек)',
 		'Switch tolerance (ms)': 'Допуск переключения (мс)',
-		'Auto-switch to a working node (urltest)': 'Авто-переключение на рабочий узел (urltest)',
-		'Preferred node': 'Предпочитаемый узел', '— auto (urltest) —': '— авто (urltest) —',
+		'Auto-switch to a working node': 'Авто-переключение на рабочий узел',
+		'Preferred node': 'Предпочитаемый узел',
 		'Preferred node: stick to it while it is reachable, hand over to auto if it dies, switch back when it recovers.':
 			'Предпочитаемый узел: держимся за него, пока он доступен; при падении передаём управление авто-режиму, а после восстановления возвращаемся обратно.',
 		'Preferred node is now set right on the Dashboard — click 📌 on any node to pin it (used while reachable, auto-failover if it dies, switch back on recovery).':
@@ -396,6 +396,6 @@ return baseclass.extend({
 	// Page header: just the localized title. Tab labels are set in menu.d (no JS
 	// DOM manipulation -> no fight with LuCI's rendering -> no flicker).
 	header: function (title) {
-		return E('h2', { 'style': 'margin:0 0 10px' }, title);
+		return E('h2', { 'style': 'margin:0 0 10px' }, [ title ]);
 	}
 });

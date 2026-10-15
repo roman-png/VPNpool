@@ -5,8 +5,12 @@
 'require poll';
 'require dom';
 'require vpnpool.i18n as i18n';
+'require vpnpool.common as common';
 
 var _ = function(s) { return i18n.tr(s); };
+// LuCI E(tag, attrs, 'string') = innerHTML; node names and reply fields are foreign data,
+// so every string child goes in as text (common.E)
+var E = common.E;
 
 var callStatus     = rpc.declare({ object: 'vpnpool', method: 'status' });
 var callSetEnabled = rpc.declare({ object: 'vpnpool', method: 'set_enabled', params: [ 'enabled' ] });
@@ -129,7 +133,7 @@ return view.extend({
 			]);
 		});
 		ui.showModal(_('Auto-switch pool'), [
-			E('p', {}, _('Select which nodes take part in automatic switching (urltest). Unchecked nodes stay available for manual selection only.')),
+			E('p', {}, _('Select which nodes take part in automatic switching. Unchecked nodes stay available for manual selection only.')),
 			E('div', { 'id': 'vp-auto-list', 'style': 'max-height:320px;overflow:auto;margin:8px 0;padding:6px;border:1px solid rgba(128,128,128,.3);border-radius:4px' }, checks),
 			E('div', { 'class': 'right' }, [
 				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
@@ -280,7 +284,7 @@ return view.extend({
 			}
 			var qr = E('div', { 'style': 'display:flex;justify-content:center;min-height:220px;margin:10px 0' }, E('em', { 'style': 'color:#888' }, '…'));
 			var ta = E('textarea', { 'rows': '4', 'readonly': 'readonly', 'style': 'width:100%;font-family:monospace;font-size:11px' }, r.link);
-			ui.showModal(_('Share node') + ': ' + tag, [
+			ui.showModal(common.txt(_('Share node') + ': ' + tag), [
 				E('p', {}, _('Scan the QR with your phone VPN app, or copy the link.')),
 				qr, ta,
 				E('div', { 'class': 'right', 'style': 'margin-top:8px' }, [
@@ -467,7 +471,7 @@ return view.extend({
 				badge(st.mode === 'exclude' ? _('all except lists') : _('only lists'), '#1565c0')
 			]),
 			E('div', { 'style': 'margin:4px 0' }, [ E('b', {}, _('Active node') + ': '), E('span', {}, using),
-				autoMode ? E('span', { 'style': 'color:#888' }, ' (' + _('auto / urltest') + (preferredTag ? ' · 📌 ' + (using||'') : '') + ')') : '' ])
+				autoMode ? E('span', { 'style': 'color:#888' }, ' (' + _('automatic choice') + (preferredTag ? ' · 📌 ' + (using||'') : '') + ')') : '' ])
 		];
 
 		if (on)
@@ -584,7 +588,7 @@ return view.extend({
 		]);
 		var autoRow = E('tr', { 'class': 'tr', 'style': autoMode ? 'background:rgba(21,101,192,.12)' : '' }, [
 			E('td', { 'class': 'td' }, autoMode ? '★' : ''),
-			E('td', { 'class': 'td' }, E('b', {}, _('AUTO (urltest)'))),
+			E('td', { 'class': 'td' }, E('b', {}, _('AUTO (automatic choice)'))),
 			E('td', { 'class': 'td', 'style': 'color:#666' }, _('auto-ping + failover') + ' · ' + _('pool') + ': ' + poolLabel),
 			E('td', { 'class': 'td' }, ''), E('td', { 'class': 'td' }, ''), E('td', { 'class': 'td' }, ''),
 			E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, [

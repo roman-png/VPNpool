@@ -4,8 +4,12 @@
 'require ui';
 'require dom';
 'require vpnpool.i18n as i18n';
+'require vpnpool.common as common';
 
 var _ = function(s) { return i18n.tr(s); };
+// LuCI E(tag, attrs, 'string') = innerHTML; node names and reply fields are foreign data,
+// so every string child goes in as text (common.E)
+var E = common.E;
 
 var callStatus   = rpc.declare({ object: 'vpnpool', method: 'status' });
 var callRefresh  = rpc.declare({ object: 'vpnpool', method: 'refresh' });

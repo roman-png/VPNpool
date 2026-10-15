@@ -3,8 +3,12 @@
 'require rpc';
 'require ui';
 'require vpnpool.i18n as i18n';
+'require vpnpool.common as common';
 
 var _ = function(s) { return i18n.tr(s); };
+// LuCI E(tag, attrs, 'string') = innerHTML; node names and reply fields are foreign data,
+// so every string child goes in as text (common.E)
+var E = common.E;
 
 var callStatus       = rpc.declare({ object: 'vpnpool', method: 'status' });
 var callSetOpt       = rpc.declare({ object: 'vpnpool', method: 'set_option',     params: [ 'name', 'value' ] });
@@ -114,7 +118,7 @@ return view.extend({
 			]),
 
 			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Community lists (itdoginfo/allow-domains, auto-updated SRS)')),
+				E('h3', {}, _('Ready-made site lists (updated automatically)')),
 				E('div', {}, checks),
 				E('div', { 'style': 'margin-top:8px' }, E('button', { 'class': 'btn cbi-button cbi-button-save',
 					'click': ui.createHandlerFn(this, 'handleSaveCommunities') }, _('Save lists')))
