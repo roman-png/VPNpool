@@ -37,6 +37,9 @@ m=$(modes /fr)
 [ "$(cat /fr/etc/config/vpnpool)" = LIVE ] && ok "live etc/config/vpnpool untouched" || bad "etc/config/vpnpool overwritten"
 [ -f /fr/usr/libexec/vpnpool/status.sh ] && [ -f /fr/usr/libexec/rpcd/vpnpool ] && [ -f /fr/www/luci-static/resources/view/vpnpool/dashboard.js ] \
 	&& ok "backend + rpcd plugin + luci views delivered" || bad "payload incomplete"
+[ -s /fr/usr/lib/lua/luci/i18n/vpnpool.ru.lmo ] && ok "Russian translation delivered (vpnpool.ru.lmo)" || bad "Russian translation missing"
+[ -f /fr/www/luci-static/resources/vpnpool/common.js ] && [ -z "$(find /fr/www -name '_*.js')" ] \
+	&& ok "shared module delivered, stand-only pages (_*.js) not" || bad "stand-only page delivered or common.js missing: $(find /fr/www -name '_*.js')"
 
 # negative control: the OLD way (tar of "." from a 0700 temp dir with a foreign uid, no -o)
 mkdir -p /old && tar xzf /w/new.tgz -C /old && chmod 700 /old && chown -R 1234:1234 /old

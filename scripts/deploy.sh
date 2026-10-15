@@ -51,13 +51,23 @@ ssh_router() { router_ssh "'$1'"; }
 # directories are 0755 and owned 0:0, and the router extracts with -o (don't restore owner).
 REMOTE_EXTRACT='tar xzof - -C /'
 
+# a path for a native tool (Git Bash on Windows: C:/... for python)
+hp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+
 # One tarball with both trees; ./etc/config excluded (never clobber the live uci config).
 make_tar() {   # $1 = output file
 	local tmp own
 	tmp=$(mktemp -d)
 	( cd "$SRC" && tar cf - --exclude=./etc/config . ) | ( cd "$tmp" && tar xf - )
 	if [ "$DEPLOY_LUCI" = "1" ]; then
-		( cd "$LUCI_SRC" && tar cf - --exclude=./etc/config . ) | ( cd "$tmp" && tar xf - )
+		# view/vpnpool/_*.js = stand-only pages (component showcase), never on a router
+		( cd "$LUCI_SRC" && tar cf - --exclude=./etc/config --exclude='./www/luci-static/resources/view/vpnpool/_*' . ) | ( cd "$tmp" && tar xf - )
+		# the Russian translation, as the luci-i18n-vpnpool-ru package installs it (po2lmo port;
+		# the router's LuCI shows it when its language is Russian or "auto" with a Russian browser)
+		local py; py=$(command -v python3 || command -v python || true)
+		if [ -n "$py" ] && mkdir -p "$tmp/usr/lib/lua/luci/i18n" \
+			&& "$py" -I "$(hp "$ROOT/stand/tests/po2lmo.py")" "$(hp "$ROOT/package/luci-app-vpnpool/po/ru/vpnpool.po")" "$(hp "$tmp/usr/lib/lua/luci/i18n/vpnpool.ru.lmo")" >/dev/null; then :
+		else echo "warning: no python3 — the Russian translation is not deployed" >&2; fi
 	fi
 	chmod 755 "$tmp"
 	find "$tmp" -type d -exec chmod 755 {} +

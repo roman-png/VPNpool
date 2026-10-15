@@ -39,6 +39,8 @@ endef
 override define Package/luci-app-vpnpool/install
 	$(INSTALL_DIR) $(1)
 	$(CP) ./files/* $(1)/
+	# view/vpnpool/_*.js = stand-only pages (component showcase), not for routers
+	rm -f $(1)/www/luci-static/resources/view/vpnpool/_*.js
 	chmod 0755 $(1)/usr/libexec/rpcd/vpnpool
 endef
 

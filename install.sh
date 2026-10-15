@@ -230,22 +230,25 @@ if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ ! -f /etc/ssl/certs/ca-bundl
 		say "warning: could not install CA bundle (HTTPS download may fail)"
 fi
 
-# Our package files, per format:
-#   .apk: vpnpool-1.5.0-r1.apk        luci-app-vpnpool-1.5.0-r1.apk
-#   .ipk: vpnpool_1.5.0-r1_all.ipk    luci-app-vpnpool_1.5.0-r1_all.ipk
+# Our package files, per format (+ the Russian translation of the web UI, built by LuCI's
+# luci.mk; its version is the date of the translation, not the app's):
+#   .apk: vpnpool-1.5.0-r1.apk        luci-app-vpnpool-1.5.0-r1.apk      luci-i18n-vpnpool-ru-<v>.apk
+#   .ipk: vpnpool_1.5.0-r1_all.ipk    luci-app-vpnpool_1.5.0-r1_all.ipk  luci-i18n-vpnpool-ru_<v>_all.ipk
+# The translation is always installed with the web UI (it is small): LuCI shows it when its
+# language is Russian, or "auto" with a Russian browser (as the UI's own dictionary did).
 if [ "$PM" = apk ]; then
-	BASE_GLOB="vpnpool-[0-9]*.apk"; LUCI_GLOB="luci-app-vpnpool-[0-9]*.apk"
-	ASSET_RE='/(vpnpool|luci-app-vpnpool)-[0-9][^/]*\.apk$'
+	BASE_GLOB="vpnpool-[0-9]*.apk"; LUCI_GLOB="luci-app-vpnpool-[0-9]*.apk"; I18N_GLOB="luci-i18n-vpnpool-ru-[0-9]*.apk"
+	ASSET_RE='/(vpnpool|luci-app-vpnpool|luci-i18n-vpnpool-ru)-[0-9][^/]*\.apk$'
 else
-	BASE_GLOB="vpnpool_*.ipk"; LUCI_GLOB="luci-app-vpnpool_*.ipk"
-	ASSET_RE='/(vpnpool|luci-app-vpnpool)_[^/]*\.ipk$'
+	BASE_GLOB="vpnpool_*.ipk"; LUCI_GLOB="luci-app-vpnpool_*.ipk"; I18N_GLOB="luci-i18n-vpnpool-ru_*.ipk"
+	ASSET_RE='/(vpnpool|luci-app-vpnpool|luci-i18n-vpnpool-ru)_[^/]*\.ipk$'
 fi
 
 if [ -n "$PKG_DIR" ]; then
 	# --- offline: files already copied to the router ---------------------------
 	[ -d "$PKG_DIR" ] || die "VPNPOOL_PKG_DIR=$PKG_DIR is not a directory"
 	say "using local package files from $PKG_DIR"
-	for f in "$PKG_DIR"/$BASE_GLOB "$PKG_DIR"/$LUCI_GLOB; do
+	for f in "$PKG_DIR"/$BASE_GLOB "$PKG_DIR"/$LUCI_GLOB "$PKG_DIR"/$I18N_GLOB; do
 		[ -f "$f" ] && cp "$f" "$TMP/"
 	done
 else
@@ -290,6 +293,15 @@ fi
 # The conffile /etc/config/vpnpool is kept by both opkg and apk.
 PKG_BASE="$(ls "$TMP"/$BASE_GLOB 2>/dev/null | head -n1)"
 PKG_LUCI="$(ls "$TMP"/$LUCI_GLOB 2>/dev/null | head -n1)"
+PKG_I18N="$(ls "$TMP"/$I18N_GLOB 2>/dev/null | head -n1)"
+[ -n "$PKG_LUCI" ] || PKG_I18N=""   # the translation needs the web UI
+# the Russian translation of the web UI; a failure only leaves the UI in English
+install_i18n() {   # $1 = extra opkg flag (--nodeps in the small-flash flow)
+	[ -n "$PKG_I18N" ] || return 0
+	if [ "$PM" = apk ]; then pm_add_files "$PKG_I18N" >/dev/null 2>&1
+	else opkg install $1 --force-reinstall "$PKG_I18N" >/dev/null 2>&1; fi \
+		|| say "warning: the Russian translation of the web interface was not installed (the interface stays in English)"
+}
 [ -n "$PKG_BASE" ] || die "vpnpool .$EXT package not found"
 
 write_ram_hook() {
@@ -367,6 +379,7 @@ if [ "$RAM_SINGBOX" = 1 ]; then
 		opkg install --nodeps --force-reinstall "$PKG_BASE" || die "failed to install vpnpool"
 		[ -n "$PKG_LUCI" ] && { opkg install --nodeps --force-reinstall "$PKG_LUCI" || say "warning: luci-app-vpnpool install failed (CLI still works)"; }
 	fi
+	install_i18n --nodeps
 
 	# Don't autostart at boot — sing-box isn't present until the WAN-up hook runs.
 	/etc/init.d/vpnpool disable >/dev/null 2>&1 || true
@@ -400,6 +413,7 @@ else
 		pm_add_files "$PKG_BASE" || die "failed to install vpnpool (dependencies missing? run 'opkg update')"
 		[ -n "$PKG_LUCI" ] && { pm_add_files "$PKG_LUCI" || say "warning: luci-app-vpnpool install failed (CLI still works)"; }
 	fi
+	install_i18n
 
 	# AmneziaWG build: a separate file /usr/bin/sing-box-awg; the stock sing-box is untouched.
 	if [ "$AWG" != 0 ]; then

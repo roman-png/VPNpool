@@ -74,16 +74,18 @@ jobs:
         run: |
           mkdir -p public/apk
           # --- opkg feed at the root (unchanged URL for existing users) ---
-          find out-ipk/bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' \) -exec cp {} public/ \;
+          find out-ipk/bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' -o -name 'luci-i18n-vpnpool-ru_*.ipk' \) -exec cp {} public/ \;
           find out-ipk/bin -path '*vpnpool*' \( -name 'Packages' -o -name 'Packages.gz' -o -name 'Packages.sig' \) -exec cp {} public/ \; || true
           cp keys/vpnpool-feed.pub public/vpnpool-feed.pub
           # --- apk feed under /apk/ ---
-          find out-apk/bin \( -name 'vpnpool-[0-9]*.apk' -o -name 'luci-app-vpnpool-[0-9]*.apk' \) -exec cp {} public/apk/ \;
+          find out-apk/bin \( -name 'vpnpool-[0-9]*.apk' -o -name 'luci-app-vpnpool-[0-9]*.apk' -o -name 'luci-i18n-vpnpool-ru-[0-9]*.apk' \) -exec cp {} public/apk/ \;
           find out-apk/bin -path '*vpnpool*' -name 'packages.adb' -exec cp {} public/apk/ \;
           cp keys/vpnpool-apk.pem public/apk/vpnpool-apk.pem
-          # both feeds must be complete, or the publish would silently ship a broken feed
-          [ "$(ls public/*.ipk | wc -l)" -eq 2 ] || { echo "opkg feed: expected 2 .ipk"; exit 1; }
-          [ "$(ls public/apk/*.apk | wc -l)" -eq 2 ] || { echo "apk feed: expected 2 .apk"; exit 1; }
+          # both feeds must be complete (base, web UI, its Russian translation built by luci.mk),
+          # or the publish would silently ship a broken feed
+          [ "$(ls public/*.ipk | wc -l)" -eq 3 ] || { echo "opkg feed: expected 3 .ipk"; exit 1; }
+          [ "$(ls public/apk/*.apk | wc -l)" -eq 3 ] || { echo "apk feed: expected 3 .apk"; exit 1; }
+          ls public/luci-i18n-vpnpool-ru_*.ipk public/apk/luci-i18n-vpnpool-ru-*.apk >/dev/null || { echo "translation package missing"; exit 1; }
           [ -f public/Packages ] || { echo "opkg feed: Packages index missing"; exit 1; }
           [ -f public/apk/packages.adb ] || { echo "apk feed: packages.adb missing"; exit 1; }
           # landing page
@@ -97,13 +99,13 @@ jobs:
           <pre>wget -O /etc/apk/keys/vpnpool-apk.pem https://roman-png.github.io/VPNpool/apk/vpnpool-apk.pem
           echo "https://roman-png.github.io/VPNpool/apk/packages.adb" &gt;&gt; /etc/apk/repositories.d/customfeeds.list
           apk update
-          apk add luci-app-vpnpool</pre>
+          apk add luci-app-vpnpool luci-i18n-vpnpool-ru</pre>
           <h2>OpenWrt 23.05 / 24.10 (opkg)</h2>
           <p>The feed is <b>signed</b> (usign, fingerprint 807479500e0ce219). Install the public key once, then add the feed:</p>
           <pre>wget -O /etc/opkg/keys/807479500e0ce219 https://roman-png.github.io/VPNpool/vpnpool-feed.pub
           echo "src/gz vpnpool https://roman-png.github.io/VPNpool" &gt;&gt; /etc/opkg/customfeeds.conf
           opkg update
-          opkg install luci-app-vpnpool</pre>
+          opkg install luci-app-vpnpool luci-i18n-vpnpool-ru</pre>
           <p><a href="https://github.com/roman-png/VPNpool">Project on GitHub</a></p>
           HTML
           echo "=== feed contents ==="; ls -l public public/apk
