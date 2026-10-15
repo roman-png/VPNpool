@@ -11,7 +11,7 @@ OUTU="$T_STATE/uitext"; mkdir -p "$OUTU"
 ucode "$G" "$FXU/bad" "$SL" - > "$OUTU/bad.out" 2>&1; GRC=$?
 begin "uitext/positive-control-bad-fixture-caught"
 expect_eq "exit code 1 (new violations)" "$GRC" 1
-expect_eq "strings extracted" "$(sed -n 's/^STRINGS //p' "$OUTU/bad.out")" 11
+expect_eq "strings extracted" "$(sed -n 's/^STRINGS //p' "$OUTU/bad.out")" 15
 expect_eq "urltest in a view" "$(gcount 'NEW .*bad.js	urltest	Restart the urltest group' "$OUTU/bad.out")" 1
 expect_eq "clash in a view" "$(gcount 'NEW .*bad.js	clash	Clash API is down' "$OUTU/bad.out")" 1
 expect_eq "uci option name" "$(gcount 'NEW .*bad.js	snake_case	Set check_services first' "$OUTU/bad.out")" 1
@@ -19,7 +19,11 @@ expect_eq "filesystem path" "$(gcount 'NEW .*bad.js	fs-path	Logs are in /tmp/vpn
 expect_eq "rpcd in the RU dictionary" "$(gcount 'NEW .*i18n.js	rpcd	Пинг через rpcd' "$OUTU/bad.out")" 1
 expect_eq "ubus in a menu title" "$(gcount 'NEW .*bad.json	ubus	ubus monitor' "$OUTU/bad.out")" 1
 expect_eq "non-gettext call ignored" "$(gcount 'non-gettext' "$OUTU/bad.out")" 0
-expect_eq "exactly 6 violations" "$(sed -n 's/^VIOLATIONS //p' "$OUTU/bad.out")" 6
+expect_eq "watchdog in a shared module (vpnpool/common.js)" "$(gcount 'NEW .*vpnpool/common.js	watchdog	The watchdog restarted the tunnel' "$OUTU/bad.out")" 1
+expect_eq "urltest in a po msgstr (continuation line joined)" "$(gcount 'NEW .*po/ru/vpnpool.po	urltest	Перезапустить группу urltest' "$OUTU/bad.out")" 1
+expect_eq "po msgid = view string counted once (under the view)" "$(gcount 'NEW .*vpnpool.po	urltest	Restart the urltest group' "$OUTU/bad.out")" 0
+expect_eq "po header is not UI text" "$(gcount 'tproxy header field' "$OUTU/bad.out")" 0
+expect_eq "exactly 8 violations" "$(sed -n 's/^VIOLATIONS //p' "$OUTU/bad.out")" 8
 end
 
 # ---- negative control: a clean fixture tree yields nothing ----
