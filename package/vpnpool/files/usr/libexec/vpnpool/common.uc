@@ -3,6 +3,7 @@
 'use strict';
 
 import { readfile, stat, open, rename, unlink } from 'fs';
+import { rand } from 'math';
 
 // Community rule-set names (itdoginfo/allow-domains SRS assets). The ONE list: generator.uc
 // builds the rule-sets from it, the settings validator (api.uc) refuses anything else.
@@ -24,7 +25,7 @@ function read_json(path, def) {
 
 // Atomic write (temp file in the same directory + rename) — readers never see half a file.
 function write_atomic(path, data) {
-	let t = path + '.tmp.' + time();
+	let t = sprintf('%s.tmp.%d.%d', path, time(), rand());   // own name: writers may overlap
 	let f = open(t, 'w');
 	if (!f) return false;
 	f.write(data);
@@ -34,10 +35,11 @@ function write_atomic(path, data) {
 	return false;
 }
 
-// "mtime:size" of a file ('-' when absent): cache key of a derived value.
+// "inode:mtime:size" of a file ('-' when absent): cache key of a derived value (a rewrite of the
+// same size in the same second still gets a new inode: write_atomic / mv replace the file).
 function file_sig(path) {
 	let s = stat(path);
-	return s ? (s.mtime + ':' + s.size) : '-';
+	return s ? (s.inode + ':' + s.mtime + ':' + s.size) : '-';
 }
 
 // Subscription URLs carry the access token: show scheme://host/*** only (same rule as
