@@ -18,6 +18,19 @@ LIBX=package/vpnpool/files/usr/libexec/vpnpool
 RPCD=package/luci-app-vpnpool/files/usr/libexec/rpcd/vpnpool
 VIEW=package/luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool
 OK=0; BAD=0
+# NC_JOBS: controls run in parallel (each in its own container); output stays in list order.
+NC_JOBS=${NC_JOBS:-3}
+NC_ORDER=""
+NC_PIDS=""
+_nc_throttle() {   # wait for a free slot (`jobs` inside $( ) sees no jobs in ash: track PIDs)
+	while :; do
+		_live=""; _nl=0
+		for _p in $NC_PIDS; do kill -0 "$_p" 2>/dev/null && { _live="$_live $_p"; _nl=$((_nl+1)); }; done
+		NC_PIDS=$_live
+		[ "$_nl" -lt "$NC_JOBS" ] && return 0
+		sleep 1
+	done
+}
 
 replace_once() {   # file needle replacement — fixed strings, first occurrence; 1 if absent
 	N="$2" R="$3" awk 'BEGIN{n=ENVIRON["N"]; r=ENVIRON["R"]; done=0}
@@ -39,6 +52,9 @@ ctl() {
 		fi
 		shift 3
 	done
+	NC_ORDER="$NC_ORDER $name"
+	_nc_throttle
+	(
 	case "$suite" in
 		ui-smoke)   REPO_DIR="$d" sh "$HERE/ui-smoke.sh" > "$d.log" 2>&1
 		            line=$(grep '^UI-SMOKE: ' "$d.log" | tail -1) ;;
@@ -66,8 +82,9 @@ ctl() {
 	[ "$nred" -eq "$nwant" ] || { verdict=BAD; why="$why; $nred red cases, expected exactly $nwant"; }
 	printf '%-5s %-30s suite=%-10s expect=%-5s | %s | %s%s\n' "$verdict" "$name" "$suite" "$expect" "${line:-no summary line}" \
 		"$(cut -c1-90 "$d.red" | tr '\n' ';')" "${why:+ | WHY:$why}"
-	if [ "$verdict" = OK ]; then OK=$((OK+1)); else BAD=$((BAD+1)); fi
 	rm -rf "$d" "$d.log" "$d.red"
+	) > "$TMPBASE/$name.out" 2>&1 &
+	NC_PIDS="$NC_PIDS $!"
 }
 
 SELECT="$*"
@@ -318,6 +335,12 @@ ctl engine-fork-not-recognised engine fail 'engine/stock-fork-detected-opkg ;eng
 ctl engine-installer-leaks-codes engine fail 'engine/install-sh-awg1-unsupported-arch ;engine/install-sh-update-without-engine ;engine/install-sh-ram-small-memory ' \
 	install.sh 'say "AmneziaWG: $(awg_explain "$code" "$pa").' 'say "AmneziaWG: $res $(awg_explain "$code" "$pa").'
 
+wait
+for n in $NC_ORDER; do
+	o="$TMPBASE/$n.out"
+	if [ -s "$o" ]; then cat "$o"; else echo "BAD   $n: no verdict (control run died)"; fi
+	case "$(head -c 5 "$o" 2>/dev/null)" in "OK   ") OK=$((OK+1)) ;; *) BAD=$((BAD+1)) ;; esac
+done
 rm -rf "$TMPBASE"
 echo "CONTROLS: ok=$OK bad=$BAD"
 [ "$BAD" -eq 0 ] && [ "$OK" -gt 0 ]
