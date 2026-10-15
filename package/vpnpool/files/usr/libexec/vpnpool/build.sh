@@ -193,8 +193,12 @@ VPNPOOL_PROBE_URL=$(primary_probe_url) ucode /usr/libexec/vpnpool/generator.uc "
 # the urltest/selector groups) and re-check, up to a bounded number of times.
 #   "outbounds[3].server_port: …" / "outbound[3]" / "endpoints[0]…" -> that array element
 # (Repeated / reserved names never get here: parser.uc makes every tag unique.)
-NODE_TYPES='["vless","vmess","trojan","shadowsocks","shadowtls","hysteria","hysteria2","tuic","wireguard","awg","socks","http","anytls"]'
-dropped=0; tries=0
+# Safety net before check (lib.sh config_tag_guard): a repeated name must not freeze the pool.
+if ! config_tag_guard "$SB_CONF.new"; then
+	log "build: the generated config repeats a name of its own outbounds — keeping previous config"
+	fail
+fi
+dropped=$TAG_GUARD_DROPPED; tries=0
 while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 	tries=$((tries + 1))
 	if [ "$tries" -gt 50 ]; then
@@ -241,7 +245,10 @@ persist_if_changed "$SB_CONF" "$SB_CONF_FLASH"
 if [ "$dropped" -gt 0 ]; then
 	CFGTAGS=$(jq -c '[.outbounds[].tag] + [(.endpoints//[])[].tag]' "$SB_CONF" 2>/dev/null)
 	if [ -n "$CFGTAGS" ]; then
-		jq --argjson ct "$CFGTAGS" 'map(select(.tag as $x | $ct | index($x)))' "$NB" > "$NB.x" 2>/dev/null \
+		jq --argjson ct "$CFGTAGS" --argjson own "$(jq -c --argjson nt "$NODE_TYPES" '[.outbounds[] | select(((.type) as $y | $nt | index($y)) == null) | .tag]' "$SB_CONF")" '
+			map(select(.tag as $x | ($ct | index($x)) and (($own | index($x)) == null)))
+			| reduce .[] as $n ({s:{}, o:[]}; if .s[$n.tag] then . else (.s[$n.tag] = true | .o += [$n]) end) | .o' \
+			"$NB" > "$NB.x" 2>/dev/null \
 			&& mv "$NB.x" "$NB"
 	fi
 fi
