@@ -144,7 +144,7 @@ s_ping() {
 }
 c_ping() {
 	expect_jq "started" "$R" '.ok==true and .code=="started"'
-	_i=0; while [ $_i -lt 20 ]; do jq -e '.running==false' /tmp/vpnpool/.ping-progress.json >/dev/null 2>&1 && break; sleep 1; _i=$((_i+1)); done
+	_i=0; while [ $_i -lt 200 ]; do jq -e '.running==false' /tmp/vpnpool/.ping-progress.json >/dev/null 2>&1 && break; msleep 100; _i=$((_i+1)); done
 	expect_jq "progress file: finished, 2 of 2, both answered" "$(cat /tmp/vpnpool/.ping-progress.json 2>/dev/null)" '.running==false and .done==2 and .total==2 and .alive==2'
 	expect_eq "one delay probe per node" "$(mock_calls '/delay?')" 2
 }
@@ -165,7 +165,7 @@ M del_source '{"url":"https://src.example.com/l"}' USR1 - c_del_source '{"url":"
 s_probe_source() { mock_on; printf '%s\n%s\n' "$L1" "$L2" > "$FXR/src.txt"; mock_rule 'GET https://src.example.com/l' 200 "$FXR/src.txt"; }
 c_probe_source() {
 	expect_jq "started" "$R" '.started==true'
-	_i=0; while [ $_i -lt 30 ]; do rcall probe_result; printf '%s' "$R" | jq -e '.running==false' >/dev/null 2>&1 && break; sleep 1; _i=$((_i+1)); done
+	_i=0; while [ $_i -lt 300 ]; do rcall probe_result; printf '%s' "$R" | jq -e '.running==false' >/dev/null 2>&1 && break; msleep 100; _i=$((_i+1)); done
 	expect_jq "probe_result lists both nodes" "$R" '.running==false and .total==2 and (.nodes|length)==2'
 }
 M probe_source '{"url":"https://src.example.com/l"}' - - c_probe_source '{"url":""}' 3.1

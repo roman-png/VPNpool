@@ -34,6 +34,9 @@ mkdir -p /opt/stand/tests-bin /tmp/curlmock
 cp "$T_DIR/shim/curl" /opt/stand/tests-bin/curl && chmod +x /opt/stand/tests-bin/curl
 export MOCK_DIR=/tmp/curlmock
 export PATH="/opt/stand/tests-bin:$PATH"
+# No network here: a name lookup that reaches the real curl/nslookup must fail at once, not after
+# musl's 5 s resolver timeout (diag alone spent 17 s per call waiting on DNS).
+printf 'nameserver 127.0.0.1\noptions timeout:1 attempts:1\n' > /etc/resolv.conf 2>/dev/null || true
 
 # ---- fake daemon (signal observer) at a path pgrep recognises as vpnpoold ----
 FAKED=/opt/stand/fake/usr/libexec/vpnpool/vpnpoold
@@ -77,18 +80,18 @@ mock_calls() { gcount "$1" /tmp/curlmock/calls.log; }
 daemon_start() {
 	daemon_stop
 	sh "$FAKED" >/dev/null 2>&1 &
-	i=0; while [ ! -s /var/run/vpnpool.pid ] && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+	i=0; while [ ! -s /var/run/vpnpool.pid ] && [ $i -lt 200 ]; do msleep 50; i=$((i+1)); done
 	: > "$FAKED_LOG"
 }
 daemon_stop() {
 	for p in $(pgrep -f "$FAKED" 2>/dev/null); do kill "$p" 2>/dev/null; done
 	rm -f /var/run/vpnpool.pid
-	i=0; while pgrep -f "$FAKED" >/dev/null 2>&1 && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+	i=0; while pgrep -f "$FAKED" >/dev/null 2>&1 && [ $i -lt 200 ]; do msleep 50; i=$((i+1)); done
 }
-# signals_seen <USR1|USR2> — count after a short settle (trap runs after `sleep 1` wakes)
+# signals_seen <USR1|USR2> — count once the signal shows up, or after a 3 s window without it
 signals_seen() {
 	_si=0
-	while [ $_si -lt 3 ]; do sleep 1; [ "$(gcount "^$1\$" "$FAKED_LOG")" -ge 1 ] && break; _si=$((_si+1)); done
+	while [ $_si -lt 30 ]; do [ "$(gcount "^$1\$" "$FAKED_LOG")" -ge 1 ] && break; msleep 100; _si=$((_si+1)); done
 	gcount "^$1\$" "$FAKED_LOG"
 }
 
