@@ -589,7 +589,7 @@ case "\$1" in
 	fetch) while [ \$# -gt 0 ]; do [ "\$1" = -o ] && { shift; : > "\$1/sing-box-1.0-r1.apk"; }; shift; done ;;
 	extract) while [ \$# -gt 0 ]; do [ "\$1" = --destination ] && { shift; mkdir -p "\$1/usr/bin"; cp "$EW/stock.bak" "\$1/usr/bin/sing-box"; }; shift; done ;;
 	list|audit|fix) exec "\$ESH/apk" "\$@" ;;
-	add) [ "\$2" = sing-box ] && exec "\$ESH/apk" "\$@" ;;
+	add) echo "add \$*" >> "$EW/pm.log"; [ "\$2" = sing-box ] && exec "\$ESH/apk" "\$@" ;;
 esac
 exit 0
 EOF
@@ -597,8 +597,13 @@ chmod +x "$ISH/opkg" "$ISH/apk"
 : > "$EW/pkg/vpnpool_2.0.0-r1_all.ipk"; : > "$EW/pkg/luci-app-vpnpool_2.0.0-r1_all.ipk"
 : > "$EW/pkg/vpnpool-2.0.0-r1.apk"; : > "$EW/pkg/luci-app-vpnpool-2.0.0-r1.apk"
 : > "$EW/pkg/luci-i18n-vpnpool-ru_26.288.12345~abcdef0_all.ipk"; : > "$EW/pkg/luci-i18n-vpnpool-ru-26.288.12345~abcdef0.apk"
-# the order the package files were handed to opkg: base, web UI, then its translation
-inst_order() { grep -oE '(vpnpool|luci-app-vpnpool|luci-i18n-vpnpool-ru)_[^ ]*\.ipk' "$EW/pm.log" | sed 's/_.*//' | tr '\n' ' '; }
+# the package manager install.sh picks here (same test as install.sh: apk on 25.12, opkg before)
+if command -v apk >/dev/null 2>&1 && [ -d /etc/apk ]; then IPM=apk; else IPM=opkg; fi
+# the order the package files were handed to opkg/apk: base, web UI, then its translation
+inst_order() {
+	grep -oE '(vpnpool|luci-app-vpnpool|luci-i18n-vpnpool-ru)[-_][0-9][^ ]*\.(ipk|apk)' "$EW/pm.log" \
+		| sed -E 's/[-_][0-9].*//' | tr '\n' ' '
+}
 HOOKF=/etc/hotplug.d/iface/99-vpnpool-singbox-ram
 INST() {   # <VPNPOOL_AWG> <VPNPOOL_RAM_SINGBOX> — runs install.sh; IOUT / IRC
 	run_with_timeout 180 env PATH="$ISH:$PATH" ESH="$ESH" ESRV="$ESRV" ENGINE_MEMINFO="$ESH/meminfo" \
@@ -681,7 +686,11 @@ rm -f "$EW/pm.log"
 begin "engine/install-sh-ram-small-memory"
 INST 1 1
 expect_eq "small flash: packages incl. the translation" "$(inst_order)" "vpnpool luci-app-vpnpool luci-i18n-vpnpool-ru "
-expect_true "small flash: the translation without dependencies (--nodeps)" grep -q -- '--nodeps --force-reinstall .*luci-i18n-vpnpool-ru_' "$EW/pm.log"
+if [ "$IPM" = opkg ]; then
+	expect_true "small flash: the translation without dependencies (--nodeps)" grep -q -- '--nodeps --force-reinstall .*luci-i18n-vpnpool-ru_' "$EW/pm.log"
+else   # apk has no --nodeps: the sing-box placeholder covers the dependency
+	expect_true "small flash: the translation added as a local file" grep -q -- '^add add --allow-untrusted .*luci-i18n-vpnpool-ru-' "$EW/pm.log"
+fi
 expect_true "the fork-era hook is replaced" sh -c '! grep -qiE "hoaxisr|amnezia-box" "$1"' _ "$HOOKF"
 expect_true "other vpnpool hooks removed" [ ! -e /etc/hotplug.d/iface/50-vpnpool-old ]
 expect_true "exit 0 (rc=$IRC)" [ "$IRC" -eq 0 ]
