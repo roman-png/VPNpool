@@ -24,11 +24,25 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || {
 	echo "image $IMAGE not found — build it: docker build -f stand/Dockerfile -t $IMAGE ." >&2; exit 2; }
 
 NAME="vpnpool-tests-$$"
-# MSYS_NO_PATHCONV: stop Git Bash from rewriting the in-container paths below.
-MSYS_NO_PATHCONV=1 exec docker run --rm --name "$NAME" --network none --cap-add NET_ADMIN \
-	-e T_VERBOSE="${T_VERBOSE:-0}" \
-	-v "$R/package/vpnpool/files/usr/libexec/vpnpool:/usr/libexec/vpnpool:ro" \
-	-v "$R/package/luci-app-vpnpool/files/usr/libexec/rpcd:/stage/rpcd:ro" \
-	-v "$R/stand:/work:ro" \
-	-v "$R:/repo:ro" \
-	--entrypoint /bin/sh "$IMAGE" /repo/stand/tests/run.sh "$@"
+# ENGINE_ASSET_DIR (optional): directory with the real engine release asset for the engine
+# suite (vpnpool-engine_<ver>_x86_64), mounted read-only at /engine-assets.
+ASSET=""
+if [ -n "${ENGINE_ASSET_DIR:-}" ]; then
+	[ -d "$ENGINE_ASSET_DIR" ] || { echo "ENGINE_ASSET_DIR=$ENGINE_ASSET_DIR is not a directory" >&2; exit 2; }
+	ASSET="$(hostpath "$ENGINE_ASSET_DIR"):/engine-assets:ro"
+fi
+run() {
+	# MSYS_NO_PATHCONV: stop Git Bash from rewriting the in-container paths below.
+	MSYS_NO_PATHCONV=1 exec docker run --rm --name "$NAME" --network none --cap-add NET_ADMIN \
+		-e T_VERBOSE="${T_VERBOSE:-0}" \
+		-v "$R/package/vpnpool/files/usr/libexec/vpnpool:/usr/libexec/vpnpool:ro" \
+		-v "$R/package/luci-app-vpnpool/files/usr/libexec/rpcd:/stage/rpcd:ro" \
+		-v "$R/stand:/work:ro" \
+		-v "$R:/repo:ro" \
+		"$@"
+}
+if [ -n "$ASSET" ]; then
+	run -v "$ASSET" --entrypoint /bin/sh "$IMAGE" /repo/stand/tests/run.sh "$@"
+else
+	run --entrypoint /bin/sh "$IMAGE" /repo/stand/tests/run.sh "$@"
+fi
