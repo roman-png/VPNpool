@@ -46,6 +46,14 @@ begin "fetch/primary-fails-extra-ok-keeps-primary-nodes"
 expect_eq "exit code" "$FRC" 0
 expect_eq "pool still has Pri1/Pri2 + Ext1" "$(pool_tags)" '["Ext1","Pri1","Pri2"]'
 end
+# stage 3: per-source result for status (last_fetch_at / last_ok_at / result per source)
+_fs=$(cat /tmp/vpnpool/fetch_status.json 2>/dev/null)
+begin "fetch/status-per-source"
+expect_jq "primary: served from cache, its last success kept from the first run" "$_fs" \
+	".[\"$PRI\"] | .result==\"cached\" and (.last_ok_at|type)==\"number\" and .primary==true and .at >= .last_ok_at"
+expect_jq "extra: fetched now, 1 node" "$_fs" \
+	".[\"$EXT\"] | .result==\"ok\" and .nodes==1 and .last_ok_at==.at and .primary==false"
+end
 
 # ---- everything down: whole cache served ----
 fetch_setup 200 200; sh "$FETCH" >/dev/null 2>&1          # repopulate the cache
