@@ -45,7 +45,7 @@ ctl() {
 	name=$1 suite=$2 expect=$3 want=$4; shift 4
 	if [ -n "$SELECT" ]; then case " $SELECT " in *" $name "*) ;; *) return 0 ;; esac; fi
 	d="$TMPBASE/$name"; mkdir -p "$d"
-	cp -r "$REPO/package" "$REPO/stand" "$REPO/scripts" "$REPO/install.sh" "$d/"
+	cp -r "$REPO/package" "$REPO/stand" "$REPO/scripts" "$REPO/install.sh" "$REPO/.github" "$d/"
 	while [ $# -ge 3 ]; do
 		if ! replace_once "$d/$1" "$2" "$3" || cmp -s "$REPO/$1" "$d/$1"; then
 			echo "BAD   $name: needle not found / copy unchanged in $1 (control is void)"; BAD=$((BAD+1)); rm -rf "$d"; return 0
@@ -62,6 +62,8 @@ ctl() {
 		            line=$(grep '^DEPLOY-TAR: ' "$d.log" | tail -1) ;;
 		ui-i18n)    REPO_DIR="$d" sh "$HERE/ui-i18n.sh" check > "$d.log" 2>&1
 		            line=$(grep '^I18N: ' "$d.log" | tail -1) ;;
+		ui-unit)    REPO_DIR="$d" node "$HERE/ui-common.test.js" > "$d.log" 2>&1
+		            line=$(grep '^UNIT: ' "$d.log" | tail -1) ;;
 		*)          REPO_DIR="$d" sh "$HERE/run-in-docker.sh" "$suite" > "$d.log" 2>&1
 		            line=$(grep '^TESTS: ' "$d.log" | tail -1) ;;
 	esac
@@ -272,6 +274,21 @@ ctl i18n-placeholder-mismatch ui-i18n fail 'FAIL placeholders ru: "Switched to %
 	package/luci-app-vpnpool/po/ru/vpnpool.po 'msgstr "Переключено на %s"' 'msgstr "Переключено на %d"'
 ctl i18n-nonbmp-msgid ui-i18n fail 'FAIL nonbmp More actions 📌;FAIL pot-missing-msgid More actions 📌;FAIL po-missing-msgid ru: More actions 📌;FAIL pot-stale More actions;FAIL po-obsolete ru: More actions' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "_('More actions')" "_('More actions 📌')"
+# ui0 review: old views keep strings as text; backend codes all have a text; the translation is shipped
+ctl ui-view-raw-E ui-unit fail 'FAIL - old views: E is common.E' \
+	"$VIEW/dashboard.js" 'var E = common.E;' ''
+ctl ui-view-modal-title-html ui-unit fail 'FAIL - old views: E is common.E' \
+	"$VIEW/dashboard.js" "ui.showModal(common.txt(_('Share node') + ': ' + tag), [" "ui.showModal(_('Share node') + ': ' + tag, ["
+ctl ui-backend-code-without-text ui-unit fail 'FAIL - every code the backend answers with has a human text' \
+	"$RPCD" '{ reply false no_nodes; exit 0; }' '{ reply false brand_new_code; exit 0; }'
+ctl ui-pages-feed-no-i18n ui-unit fail 'FAIL - packaging' \
+	.github/workflows/pages.yml 'expected 3 .ipk' 'expected 2 .ipk'
+ctl deploy-no-translation deploy-tar fail 'Russian translation missing' \
+	scripts/deploy.sh '"$(hp "$tmp/usr/lib/lua/luci/i18n/vpnpool.ru.lmo")" >/dev/null; then :' '"$(hp "$tmp/x.lmo")" >/dev/null; then :'
+ctl deploy-ships-demo-page deploy-tar fail 'stand-only page delivered' \
+	scripts/deploy.sh "--exclude='./www/luci-static/resources/view/vpnpool/_*'" ''
+ctl install-no-translation-small-flash engine fail 'engine/install-sh-ram-small-memory ' \
+	install.sh '	install_i18n --nodeps' '	:'
 ctl ui-smoke-status-broken ui-smoke fail 'ubus vpnpool.status via /ubus' \
 	"$RPCD" '		/usr/libexec/vpnpool/status.sh' '		echo not-json'
 # runner: a suite that silently stops early must fail the run (min-cases.txt), not shrink total

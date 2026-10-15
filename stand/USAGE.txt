@@ -82,7 +82,12 @@ UI components (vpnpool/common.js + the stand-only page view/vpnpool/_demo.js)
   PORT=18081 KEEP=1 stand/tests/ui-components.sh  leave it running for a browser:
     http://localhost:18081/cgi-bin/luci/admin/services/vpnpool/_demo (root / vpnpool);
     window.vpDemo.selfTest() in the console = platform probe; docker rm -f vpnpool-ui-components
-  node stand/tests/ui-common.test.js [--negative]   the unit tests alone
+  node stand/tests/ui-common.test.js [--negative]   the unit tests alone (fake DOM that follows
+                                    LuCI's rule "E(tag, attrs, 'string') = innerHTML", so a
+                                    string reaching innerHTML is caught)
+  BACKEND_DIR=<dir> node stand/tests/ui-common.test.js   codes/methods/ACL of another backend:
+                                    <dir>/rpcd, <dir>/api.uc, <dir>/acl.json (e.g. git show
+                                    stage3:<path> > <dir>/<name>); T_CODES=1 prints the codes found
 
 LuCI stand
   stand/tests/ui-smoke.sh       starts vpnpool-stand-ui on 127.0.0.1:18080, logs in, opens
