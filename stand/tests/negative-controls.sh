@@ -289,6 +289,11 @@ ctl deploy-ships-demo-page deploy-tar fail 'stand-only page delivered' \
 	scripts/deploy.sh "--exclude='./www/luci-static/resources/view/vpnpool/_*'" ''
 ctl install-no-translation-small-flash engine fail 'engine/install-sh-ram-small-memory ' \
 	install.sh '	install_i18n --nodeps' '	:'
+# apk (25.12 image only: on opkg images this branch never runs): translation not added
+case "${IMAGE:-}" in *25.12*)
+ctl install-no-translation-apk engine fail 'engine/install-sh-awg1-flash ;engine/install-sh-ram-small-memory ' \
+	install.sh '	if [ "$PM" = apk ]; then pm_add_files "$PKG_I18N" >/dev/null 2>&1' '	if [ "$PM" = apk ]; then true'
+;; esac
 ctl ui-smoke-status-broken ui-smoke fail 'ubus vpnpool.status via /ubus' \
 	"$RPCD" '		/usr/libexec/vpnpool/status.sh' '		echo not-json'
 # runner: a suite that silently stops early must fail the run (min-cases.txt), not shrink total
