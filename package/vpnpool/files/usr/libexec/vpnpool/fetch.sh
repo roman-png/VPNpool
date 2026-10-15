@@ -85,6 +85,7 @@ fetch_source() {   # $1=url $2=primary(0/1)
 	echo "$key" >> "$SRCDIR/.keys"
 	if fetch_best "$1" "$2" "$out"; then
 		GOT=1; FRESH=1
+		printf '%s\t%s\tok\t%s\n' "$1" "$2" "$best" >> "$FSTAT_TSV"
 		mkdir -p "$CACHEDIR"; persist_if_changed "$out" "$cached"
 		# age marker for the stale-cache warning; refreshed at most once a day (flash wear)
 		mt=$(date -r "$CACHEDIR/.ok-$key" +%s 2>/dev/null || echo 0); now=$(date +%s)
@@ -102,11 +103,31 @@ fetch_source() {   # $1=url $2=primary(0/1)
 		if [ "$age_days" -ge 3 ]; then
 			tg_notify "⚠️ vpnpool: подписка $(mask_url "$1") недоступна, работаю на сохранённой копии (~${age_days} дн.) — узлы могут не работать"
 		fi
+		printf '%s\t%s\tcached\t0\n' "$1" "$2" >> "$FSTAT_TSV"
+		return 1
 	fi
+	printf '%s\t%s\tfailed\t0\n' "$1" "$2" >> "$FSTAT_TSV"
 	return 1
 }
 
-rm -rf "$SRCDIR"; mkdir -p "$SRCDIR"; : > "$SRCDIR/.keys"
+# Per-source result of this run for the UI (status.sh -> "subscriptions"), in RAM:
+#   $SB_DATA/fetch_status.json  {"<url>": {at, result: ok|cached|failed, nodes, primary,
+#                                last_ok_at}}   (last_ok_at survives a failed run)
+# Holds the full URLs (like the uci config); status.sh masks them before they leave the router.
+FSTAT="$SB_DATA/fetch_status.json"
+FSTAT_TSV="$SB_DATA/.fetch_status.tsv"
+write_fetch_status() {
+	[ -f "$FSTAT" ] || echo '{}' > "$FSTAT"
+	jq -Rn --argjson at "$(date +%s)" --slurpfile prev "$FSTAT" '
+		($prev[0] // {}) as $p
+		| reduce (inputs | split("\t") | select(length >= 4)) as $r ({};
+			.[$r[0]] = {at: $at, result: $r[2], nodes: ($r[3] | tonumber? // 0), primary: ($r[1] == "1"),
+			            last_ok_at: (if $r[2] == "ok" then $at else ($p[$r[0]].last_ok_at // null) end)})' \
+		"$FSTAT_TSV" 2>/dev/null | write_atomic "$FSTAT"
+	rm -f "$FSTAT_TSV"
+}
+
+rm -rf "$SRCDIR"; mkdir -p "$SRCDIR"; : > "$SRCDIR/.keys"; : > "$FSTAT_TSV"
 nsrc=0; ngot=0; nfresh=0
 if [ -n "$SUB_URL" ]; then
 	fetch_source "$SUB_URL" 1
@@ -148,6 +169,7 @@ rm -f "$SRCDIR/.keys"
 # Record the attempt (any outcome): the daemon's start-up retry loop and restarts use it to
 # avoid re-downloading the subscriptions more often than INTERVAL_MIN (panels rate-limit).
 echo "$(date +%s) $(sources_sig)" | write_atomic "$FETCH_STAMP"
+write_fetch_status
 
 log "fetch: $nfresh/$nsrc source(s) fetched, $ngot with data"
 [ "$nsrc" -eq 0 ] && exit 0      # no subscriptions configured: manual/imported nodes only

@@ -61,14 +61,43 @@ for f in /etc/vpnpool/awg/*.conf; do
 	[ -f "$f" ] && FILES="$FILES $f"
 done
 
-fail() { rm -f "$NB" "$NB.x" "$SB_CONF.new" "$SB_CONF.tmp"; exit 1; }
+# Result of this build for the UI (status.sh -> "build"): written on EVERY exit, atomically.
+#   {at, ok, nodes, skipped, dropped:[{source,line|item,reason} | {tag,reason,detail?}], error}
+# error / reason are machine codes (the human text lives in the UI's translations).
+BUILD_STATUS="$SB_DATA/build_status.json"
+DROPS="$SB_DATA/.build_drops.tsv"; : > "$DROPS"   # tag \t <tag> \t \t <reason> \t <detail>
+echo '[]' > "$SB_DATA/.build_report.json"
+build_status() {   # $1=true|false $2=error code ("" on success)
+	jq -Rn --argjson ok "$1" --arg err "$2" --argjson n "${CNT:-0}" --argjson at "$(date +%s)" \
+		--slurpfile rep "$SB_DATA/.build_report.json" '
+		[inputs | split("\t") | select(.[0] == "tag")
+			| {tag:.[1], reason:.[3]} + (if (.[4] // "") != "" then {detail:.[4]} else {} end)] as $eng
+		| (($rep[0] // []) | map(select(.status == "skip" and .reason != "duplicate" and .reason != "not_a_node"))) as $sk
+		| {at:$at, ok:$ok, nodes:$n, skipped:($sk | length),
+		   dropped: (($sk[:100] | map({source, reason} + (if .line != null then {line} else {item} end))) + $eng),
+		   error: (if $err == "" then null else $err end)}' "$DROPS" 2>/dev/null | write_atomic "$BUILD_STATUS"
+	rm -f "$DROPS" "$SB_DATA/.build_report.json"
+}
+fail() {   # $1=error code
+	rm -f "$NB" "$NB.x" "$NB.full" "$SB_CONF.new" "$SB_CONF.tmp"
+	build_status false "${1:-build_failed}"; exit 1
+}
 
+# ONE parse for the node list AND the tag->link map (--keep-link), with the node identity
+# (--with-id; generator.uc strips id/_link before they could reach sing-box).
 # shellcheck disable=SC2086
-ucode /usr/libexec/vpnpool/parser.uc $FILES > "$NB" 2>"$SB_DATA/build.err"
+ucode /usr/libexec/vpnpool/parser.uc --keep-link --with-id $FILES > "$NB.full" 2>"$SB_DATA/build.err"
+jq -c 'map(del(._link))' "$NB.full" > "$NB" 2>/dev/null || echo '[]' > "$NB"
+# Per-line report (skipped lines and their reasons) for build_status.json; source = file name.
+# shellcheck disable=SC2086
+ucode /usr/libexec/vpnpool/parser.uc --report $FILES 2>/dev/null \
+	| jq -c --arg f "$FILES" '($f | split(" ") | map(select(length > 0) | split("/") | last)) as $names
+		| map(. + {source: ($names[.src] // "")})' > "$SB_DATA/.build_report.json" 2>/dev/null
+jq -e 'type=="array"' "$SB_DATA/.build_report.json" >/dev/null 2>&1 || echo '[]' > "$SB_DATA/.build_report.json"
 CNT=$(jq 'length' "$NB" 2>/dev/null || echo 0)
 if [ "${CNT:-0}" -lt 1 ]; then
 	log "build: 0 nodes parsed (see $SB_DATA/build.err)"
-	fail
+	fail no_nodes
 fi
 
 # Tag names: parser.uc is the ONLY owner — it renames a node named like one of the
@@ -83,10 +112,9 @@ fi
 # node can be saved even right before the subscription expires — and it is rewritten only
 # when the map changed. nodes.json itself stays link-free (links must never leak into the
 # sing-box outbounds).
-# shellcheck disable=SC2086
-ucode /usr/libexec/vpnpool/parser.uc --keep-link $FILES 2>/dev/null \
-	| jq -c 'map({tag, link:._link}) | map(select(.link != null and .link != ""))' 2>/dev/null \
+jq -c 'map({tag, id, link:._link}) | map(select(.link != null and .link != ""))' "$NB.full" 2>/dev/null \
 	| write_atomic "$LINKS_RAM"
+rm -f "$NB.full"
 jq -e 'type=="array"' "$LINKS_RAM" >/dev/null 2>&1 || echo '[]' | write_atomic "$LINKS_RAM"
 persist_if_changed "$LINKS_RAM" "$LINKS_FLASH"
 
@@ -107,7 +135,7 @@ if [ -n "$EXCJSON" ] && [ "$EXCJSON" != "[]" ]; then
 fi
 CNT=$(jq 'length' "$NB" 2>/dev/null || echo 0)
 if [ "${CNT:-0}" -lt 1 ]; then
-	log "build: 0 nodes after exclude filter"; fail
+	log "build: 0 nodes after exclude filter"; fail no_nodes_after_exclude
 fi
 
 # ---- auto-pool health prefilter ----
@@ -196,14 +224,15 @@ VPNPOOL_PROBE_URL=$(primary_probe_url) ucode /usr/libexec/vpnpool/generator.uc "
 # Safety net before check (lib.sh config_tag_guard): a repeated name must not freeze the pool.
 if ! config_tag_guard "$SB_CONF.new"; then
 	log "build: the generated config repeats a name of its own outbounds — keeping previous config"
-	fail
+	fail own_tag_repeated
 fi
+[ -n "$TAG_GUARD_JSON" ] && printf '%s' "$TAG_GUARD_JSON" | jq -r '.[] | "tag\t\(.)\t\trepeated_name\t"' >> "$DROPS" 2>/dev/null
 dropped=$TAG_GUARD_DROPPED; tries=0
 while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 	tries=$((tries + 1))
 	if [ "$tries" -gt 50 ]; then
 		log "build: >50 bad outbounds (dropped $dropped so far), giving up; keeping previous config — check subscription source quality"
-		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; fail
+		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; fail too_many_bad_nodes
 	fi
 	arr=""; idx=""
 	# sing-box names the offending element by its ARRAY (plural, "outbounds[3]" — decode
@@ -216,13 +245,13 @@ while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 	fi
 	if [ -z "$idx" ]; then
 		log "build: sing-box check failed (non-node error), keeping previous config"
-		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; fail
+		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; fail check_failed
 	fi
 	badtype=$(jq -r --arg a "$arr" --argjson i "$idx" '.[$a][$i].type // ""' "$SB_CONF.new" 2>/dev/null)
 	if ! printf '%s' "$NODE_TYPES" | jq -e --arg y "$badtype" 'index($y) != null' >/dev/null 2>&1; then
 		# structural outbound (auto/proxy/direct/block) failed — don't gut the config
 		log "build: check failed on non-node ${arr}[$idx] ($badtype), keeping previous config"
-		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; fail
+		cat "$SB_DATA/check.err" >> "$SB_DATA/build.err"; fail check_failed
 	fi
 	badtag=$(jq -r --arg a "$arr" --argjson i "$idx" '.[$a][$i].tag // ""' "$SB_CONF.new" 2>/dev/null)
 	jq --arg arr "$arr" --argjson i "$idx" --arg t "$badtag" '
@@ -231,8 +260,10 @@ while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 			if (.type=="urltest" or .type=="selector") and (.outbounds|type=="array")
 			then .outbounds -= [$t] else . end)
 	' "$SB_CONF.new" > "$SB_CONF.tmp" 2>/dev/null && mv "$SB_CONF.tmp" "$SB_CONF.new" || {
-		log "build: failed to prune bad node, keeping previous config"; fail; }
-	log "build: dropped node \"$badtag\" rejected by sing-box: $(grep -m1 -oE '(FATAL|ERROR).*' "$SB_DATA/check.err" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-160)"
+		log "build: failed to prune bad node, keeping previous config"; fail prune_failed; }
+	why=$(grep -m1 -oE '(FATAL|ERROR).*' "$SB_DATA/check.err" | sed 's/\x1b\[[0-9;]*m//g' | tr '\t' ' ' | cut -c1-160)
+	log "build: dropped node \"$badtag\" rejected by sing-box: $why"
+	printf 'tag\t%s\t\trejected_by_engine\t%s\n' "$badtag" "$why" >> "$DROPS"
 	dropped=$((dropped + 1))
 done
 
@@ -253,6 +284,8 @@ if [ "$dropped" -gt 0 ]; then
 	fi
 fi
 mv -f "$NB" "$NODES"
+CNT=$(jq 'length' "$NODES" 2>/dev/null || echo 0)
+build_status true ""
 
 if [ "$dropped" -gt 0 ]; then
 	log "build: ok ($((CNT - dropped)) nodes; dropped $dropped unsupported)"

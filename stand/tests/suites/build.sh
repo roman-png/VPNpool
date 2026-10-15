@@ -104,6 +104,11 @@ begin "build/poison-json-source-unknown-field"
 expect_good_config
 expect_jq "bad node not in config" "$(cat /etc/vpnpool/sing-box.json 2>/dev/null)" '[.outbounds[].tag] | index("JsonUnknownField") == null'
 end
+# stage 3: the node sing-box rejected is reported in build_status.json (tag + machine reason)
+begin "build/status-file-lists-engine-drop"
+expect_jq "dropped by the engine, with its tag" "$(cat /tmp/vpnpool/build_status.json 2>/dev/null)" \
+	'.ok==true and .nodes==3 and ([.dropped[] | select(.tag=="JsonUnknownField" and .reason=="rejected_by_engine")] | length)==1'
+end
 
 # a reality short_id longer than 8 bytes makes sing-box PANIC (no outbounds[N] in the message,
 # nothing for build.sh to prune) -> the parser must drop it from a JSON source too
@@ -228,4 +233,30 @@ begin "build/tag-guard-own-repeat-refused-clean-untouched"
 expect_eq "two own outbounds share a tag -> rc 1" "$(sh "$T_STATE/build/guard.sh" config_tag_guard "$T_STATE/build/own.json" 2>&1 | tail -1)" "rc=1 dropped=0"
 expect_eq "clean config -> rc 0, nothing dropped" "$(sh "$T_STATE/build/guard.sh" config_tag_guard "$T_STATE/build/clean.json" 2>&1 | tail -1)" "rc=0 dropped=0"
 expect_true "clean config left byte-identical" cmp -s "$T_STATE/build/clean.json" "$T_STATE/build/clean.orig"
+end
+
+# ---- stage 3: build_status.json (the UI polls it instead of blind timers) + node id ----
+printf '%s\n%s\n' "$GOOD" "vless://$U@203.0.113.50:70000?type=tcp&security=tls&sni=p.example#Port70000" > "$SUB"
+run_build "$SUB"
+_bs=$(cat /tmp/vpnpool/build_status.json 2>/dev/null)
+begin "build/status-file-success"
+expect_jq "ok, 3 nodes, a time, no error" "$_bs" '.ok==true and .nodes==3 and (.at|type=="number") and .error==null'
+expect_jq "the parser-rejected line is listed: source, line, reason" "$_bs" \
+	'.skipped==1 and (.dropped|length)==1 and .dropped[0].reason=="bad_port" and .dropped[0].line==4 and .dropped[0].source=="000.raw"'
+end
+begin "build/nodes-carry-id-config-does-not"
+expect_jq "every node in nodes.json has a 12-char id" "$(cat /tmp/vpnpool/nodes.json 2>/dev/null)" \
+	'length==3 and all(.[]; (.id|type)=="string" and (.id|length)==12)'
+expect_jq "links.json carries tag, id and link" "$(cat /tmp/vpnpool/links.json 2>/dev/null)" \
+	'length==3 and all(.[]; (.id|type)=="string" and (.link|startswith("vless://")))'
+expect_jq "no id / _link field reaches the sing-box config" "$(cat /etc/vpnpool/sing-box.json 2>/dev/null)" \
+	'[(.outbounds[]), ((.endpoints // [])[]) | select(has("id") or has("_link"))] | length == 0'
+expect_true "sing-box check accepts it" sing-box check -c /etc/vpnpool/sing-box.json
+end
+printf '%s\n' "vless://$U@203.0.113.50:70000?type=tcp&security=tls&sni=p.example#OnlyBad" > "$SUB"
+run_build "$SUB"
+begin "build/status-file-failure"
+expect_eq "build.sh failed" "$BRC" 1
+expect_jq "ok:false with a machine error code, the reason of the line kept" "$(cat /tmp/vpnpool/build_status.json 2>/dev/null)" \
+	'.ok==false and .error=="no_nodes" and .skipped==1 and .dropped[0].reason=="bad_port"'
 end

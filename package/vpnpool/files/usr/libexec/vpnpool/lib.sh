@@ -341,9 +341,10 @@ wan_alive() {
 # Sets TAG_GUARD_DROPPED (count), logs the dropped names. The file is untouched when clean.
 NODE_TYPES='["vless","vmess","trojan","shadowsocks","shadowtls","hysteria","hysteria2","tuic","wireguard","awg","socks","http","anytls"]'
 TAG_GUARD_DROPPED=0
+TAG_GUARD_JSON=""
 config_tag_guard() {
 	local out names
-	TAG_GUARD_DROPPED=0
+	TAG_GUARD_DROPPED=0; TAG_GUARD_JSON=""
 	out=$(jq -c --argjson nt "$NODE_TYPES" '
 		def isnode: ((.type) as $y | $nt | index($y)) != null;
 		([.outbounds[]? | select(isnode | not) | .tag]) as $own
@@ -362,6 +363,7 @@ config_tag_guard() {
 		        | if has("endpoints") then .endpoints = $r.endpoints else . end)}' "$1" 2>/dev/null) || return 1
 	TAG_GUARD_DROPPED=$(printf '%s' "$out" | jq '.dropped | length')
 	[ "${TAG_GUARD_DROPPED:-0}" -gt 0 ] || { TAG_GUARD_DROPPED=0; return 0; }
+	TAG_GUARD_JSON=$(printf '%s' "$out" | jq -c '.dropped')   # for build_status.json
 	names=$(printf '%s' "$out" | jq -r '.dropped | join(", ")')
 	printf '%s' "$out" | jq '.cfg' > "$1.tg" && mv -f "$1.tg" "$1" || { rm -f "$1.tg"; return 1; }
 	log "build: dropped node(s) with a repeated name before check: $names"
