@@ -573,7 +573,8 @@ cat > "$ISH/opkg" <<EOF
 case "\$1" in
 	print-architecture) echo "arch all 1"; echo "arch \$(cat "\$ESH/arch") 10" ;;
 	status|flag|download) exec "\$ESH/opkg" "\$@" ;;
-	install) case " \$* " in
+	install) echo "\$*" >> "$EW/pm.log"
+		case " \$* " in
 		*" -d ram "*) mkdir -p /tmp/usr/bin; cp "$EW/stock.bak" /tmp/usr/bin/sing-box ;;
 		*sing-box_*.ipk*) exec "\$ESH/opkg" "\$@" ;;    # engine.sh putting the stock package back
 	esac ;;
@@ -595,6 +596,9 @@ EOF
 chmod +x "$ISH/opkg" "$ISH/apk"
 : > "$EW/pkg/vpnpool_2.0.0-r1_all.ipk"; : > "$EW/pkg/luci-app-vpnpool_2.0.0-r1_all.ipk"
 : > "$EW/pkg/vpnpool-2.0.0-r1.apk"; : > "$EW/pkg/luci-app-vpnpool-2.0.0-r1.apk"
+: > "$EW/pkg/luci-i18n-vpnpool-ru_26.288.12345~abcdef0_all.ipk"; : > "$EW/pkg/luci-i18n-vpnpool-ru-26.288.12345~abcdef0.apk"
+# the order the package files were handed to opkg: base, web UI, then its translation
+inst_order() { grep -oE '(vpnpool|luci-app-vpnpool|luci-i18n-vpnpool-ru)_[^ ]*\.ipk' "$EW/pm.log" | sed 's/_.*//' | tr '\n' ' '; }
 HOOKF=/etc/hotplug.d/iface/99-vpnpool-singbox-ram
 INST() {   # <VPNPOOL_AWG> <VPNPOOL_RAM_SINGBOX> — runs install.sh; IOUT / IRC
 	run_with_timeout 180 env PATH="$ISH:$PATH" ESH="$ESH" ESRV="$ESRV" ENGINE_MEMINFO="$ESH/meminfo" \
@@ -615,8 +619,10 @@ expect_true "calls engine.sh" grep -q '/usr/libexec/vpnpool/engine.sh' "$REPO/in
 end
 
 reset_engine
+rm -f "$EW/pm.log"
 begin "engine/install-sh-awg1-flash"
 INST 1 0
+expect_eq "packages installed: base, web UI, its Russian translation" "$(inst_order)" "vpnpool luci-app-vpnpool luci-i18n-vpnpool-ru "
 expect_true "exit 0 (rc=$IRC)" [ "$IRC" -eq 0 ]
 expect_true "says the build is installed" grep -q 'AmneziaWG: build 1.14.3-awg.95 installed' "$EW/inst.log"
 expect_eq "engine in place" "$(sha_of "$BIN")" "$(sha_of "$EW/f95")"
@@ -671,8 +677,11 @@ reset_engine
 meminfo 131072 90000
 # a 1.4.x RAM router: its hook fetches the hoaxisr fork, plus a stray second vpnpool hook
 cp "$EW/old-hook" "$HOOKF"; printf '#!/bin/sh\n# old\n' > /etc/hotplug.d/iface/50-vpnpool-old
+rm -f "$EW/pm.log"
 begin "engine/install-sh-ram-small-memory"
 INST 1 1
+expect_eq "small flash: packages incl. the translation" "$(inst_order)" "vpnpool luci-app-vpnpool luci-i18n-vpnpool-ru "
+expect_true "small flash: the translation without dependencies (--nodeps)" grep -q -- '--nodeps --force-reinstall .*luci-i18n-vpnpool-ru_' "$EW/pm.log"
 expect_true "the fork-era hook is replaced" sh -c '! grep -qiE "hoaxisr|amnezia-box" "$1"' _ "$HOOKF"
 expect_true "other vpnpool hooks removed" [ ! -e /etc/hotplug.d/iface/50-vpnpool-old ]
 expect_true "exit 0 (rc=$IRC)" [ "$IRC" -eq 0 ]
