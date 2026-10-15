@@ -1,10 +1,11 @@
 #!/usr/bin/ucode
 // vpnpool: JSON status snapshot for the LuCI dashboard / rpcd / the Telegram bot.
 // One process does it all (ROADMAP 3.7): uci is read ONCE through the ucode uci module, files
-// are read directly, the daemon is found in /proc. Processes spawned per poll:
-//   nft (is routing installed) + one curl for the clash API (proxies + connections, only while
-//   the daemon runs) + parser.uc only when the imported/manual/saved link files CHANGED (cached
-//   by mtime:size in /tmp/vpnpool/.status-cache.json).
+// are read directly, the daemon is its pidfile PID (checked in /proc). Processes per poll:
+//   nft (is routing installed) + one curl for the clash API (proxies + connections in one call,
+//   to stdout — no shared temp files, polls may overlap — only while the daemon runs) +
+//   parser.uc only when the imported/manual/saved link files CHANGED (cached by
+//   inode:mtime:size + the parser's own signature in /tmp/vpnpool/.status-cache.json).
 // Output: the same fields the UI has always read, plus ok/code/daemon (the rpcd reply shape),
 // node `id`, build (build_status.json), busy, paused, ping_progress, subscriptions. Secrets are
 // masked: telegram_token -> "<bot id>:***", subscription URLs -> scheme://host/***.
@@ -12,6 +13,7 @@
 
 import { readfile, stat, lsdir, popen, access, writefile, unlink, open } from 'fs';
 import { cursor } from 'uci';
+import { rand } from 'math';
 import { read_json, write_atomic, file_sig, mask_url, mask_token, str_key, as_list, nid } from './common.uc';
 
 const SB = '/tmp/vpnpool';
@@ -24,22 +26,40 @@ let RT = all.routing ?? {};
 function o(name, def) { let v = M[name]; return (v != null && v != '') ? v : def; }
 function num(v, def) { let n = +v; return (v != null && v != '' && n == n) ? n : def; }
 
-// ---- processes: the daemon (pidfile first, then a /proc scan) + busy workers ----
+// ---- processes ----
+// argv of a PID (procfs files report size 0: readfile() / read('all') return "" — read a chunk)
+function argv_of(pid) {
+	let f = open('/proc/' + pid + '/cmdline', 'r');
+	if (!f) return null;
+	let c = f.read(4096);
+	f.close();
+	return c ? split(c, '\0') : null;
+}
+// Is this process RUNNING the script (its interpreter's first argument / argv[0] is the
+// script path)? Not a substring of the whole command line: a `pgrep -f <path>` or any command
+// that merely mentions the path must not count.
+function runs_script(argv, path) {
+	if (!argv) return false;
+	for (let i = 0; i < 2 && i < length(argv); i++) {
+		let a = '' + argv[i];   // path is given without the leading '/'
+		if (a == path || (length(a) > length(path) && substr(a, -length(path) - 1) == '/' + path))
+			return true;
+	}
+	return false;
+}
+// the daemon = the PID in its pidfile, alive and running vpnpoold
+let dpid = trim(readfile('/var/run/vpnpool.pid') ?? '');
+let running = match(dpid, /^[0-9]+$/) ? runs_script(argv_of(dpid), 'usr/libexec/vpnpool/vpnpoold') : false;
 let procs = [];
 for (let p in (lsdir('/proc') ?? [])) {
 	if (!match(p, /^[0-9]+$/)) continue;
-	// procfs files report size 0: readfile() / read('all') return "" — read a bounded chunk
-	let f = open('/proc/' + p + '/cmdline', 'r');
-	if (!f) continue;
-	let c = f.read(4096);
-	f.close();
-	if (c) push(procs, join(' ', split(c, '\0')));
+	let a = argv_of(p);
+	if (a) push(procs, a);
 }
-function proc_running(needle) {
-	for (let c in procs) if (index(c, needle) >= 0) return true;
+function proc_running(script) {
+	for (let a in procs) if (runs_script(a, script)) return true;
 	return false;
 }
-let running = proc_running('/usr/libexec/vpnpool/vpnpoold');
 
 // lock file with a live owner PID (clear_stale_lock rule); a PID-less lock counts if fresh
 function lock_busy(path, maxage) {
@@ -61,26 +81,27 @@ function run(cmd) {
 let routing = length(run('nft list table inet vpnpool 2>/dev/null')) > 0;
 
 let clash = o('clash_api', '127.0.0.1:9091');
-let PROXF = SB + '/.prox.json', CONNF = SB + '/.conn.json';
 let prox = {}, conns = {};
+function jparse(s) { let v = null; try { v = json(s); } catch (e) { v = null; } return (type(v) == 'object') ? v : {}; }
 if (running) {
-	unlink(PROXF); unlink(CONNF);
-	run(sprintf("curl -s -m3 -o '%s' 'http://%s/proxies' -o '%s' 'http://%s/connections' >/dev/null 2>&1",
-		PROXF, clash, CONNF, clash));
-	prox = read_json(PROXF, {});
-	conns = read_json(CONNF, {});
-	if (type(prox) != 'object') prox = {};
-	if (type(conns) != 'object') conns = {};
+	// both answers in ONE curl call, to stdout, each followed by a separator line
+	let SEP = '@@vpnpool-status@@';
+	let outp = run(sprintf("curl -s -m3 -w '\\n%s\\n' 'http://%s/proxies' 'http://%s/connections' 2>/dev/null", SEP, clash, clash));
+	let parts = split(outp, '\n' + SEP + '\n');
+	prox = jparse(parts[0] ?? '');
+	conns = jparse(parts[1] ?? '');
 }
 let px = prox.proxies ?? {};
 
 // ---- parser results of the small link files, cached by file signature ----
 let CACHEF = SB + '/.status-cache.json';
+let PARSER_SIG = file_sig(PARSER);   // a new parser.uc (package update) invalidates the cache
 let cache = read_json(CACHEF, {});
 if (type(cache) != 'object') cache = {};
 let cache_dirty = false;
 function parsed(key, sig, path_fn) {
 	let c = cache[key];
+	sig = sig + '|' + PARSER_SIG;
 	if (c && c.sig == sig) return c.v;
 	let v = [];
 	let path = path_fn();
@@ -89,6 +110,7 @@ function parsed(key, sig, path_fn) {
 		try { v = json(out); } catch (e) { v = []; }
 		if (type(v) != 'array') v = [];
 	}
+	if (path && index(path, '/.archive.links.') >= 0) unlink(path);
 	cache[key] = { sig: sig, v: v };
 	cache_dirty = true;
 	return v;
@@ -107,7 +129,7 @@ let archive_nodes = parsed('archive', file_sig(SAVED_MAP) + '|' + file_sig(SNAP_
 	let links = [];
 	for (let k in sort(keys(by))) if (type(by[k]) == 'string' && length(by[k])) push(links, by[k]);
 	if (!length(links)) return null;
-	let p = SB + '/.archive.links';
+	let p = sprintf('%s/.archive.links.%d.%d', SB, time(), rand());   // own name: polls may overlap
 	writefile(p, join('\n', links) + '\n');
 	return p;
 });
@@ -210,8 +232,8 @@ for (let u in extra) sub_entry(u, 'extra');
 
 // ---- busy workers / progress ----
 let busy = {
-	fetch: proc_running('/usr/libexec/vpnpool/fetch.sh'),
-	build: proc_running('/usr/libexec/vpnpool/build.sh'),
+	fetch: proc_running('usr/libexec/vpnpool/fetch.sh'),
+	build: proc_running('usr/libexec/vpnpool/build.sh'),
 	ping: lock_busy(SB + '/.ping-running', 600),
 	nodecheck: lock_busy(SB + '/.nodecheck-running', 600),
 	probe: lock_busy(SB + '/.probe-running', 180),
