@@ -28,11 +28,14 @@
 #
 # AmneziaWG nodes: set VPNPOOL_AWG=1 to ALSO install the AmneziaWG-capable sing-box build
 # (vpnpool-engine) as a separate file /usr/bin/sing-box-awg. Stock sing-box cannot do
-# AmneziaWG; it stays in place untouched (podkop and the package manager keep using it).
-# Builds: aarch64, armv7 with FPU, mips_24kc, mipsel_24kc, x86_64 - other routers are told
-# so and keep working without AmneziaWG. The download is checked (sha256, version, a test
-# config) before it replaces anything. Small-flash routers (VPNPOOL_RAM_SINGBOX=1) keep it in
-# RAM next to sing-box, only with enough memory (MemTotal >= 256 MB). One-liner:
+# AmneziaWG; it stays the standard package (podkop and the package manager keep using it).
+# If an older vpnpool (1.4.x) replaced /usr/bin/sing-box with its AmneziaWG fork build, the
+# standard package is put back once the new build is in place (podkop is restarted).
+# Builds: aarch64, armv7 with FPU, mips/mipsel 24kc/34kc/74kc/1004kc, x86_64 - other routers
+# are told so and keep working without AmneziaWG. The download is checked (sha256, version, a
+# test config) before it replaces anything. Small-flash routers (VPNPOOL_RAM_SINGBOX=1) keep
+# it in RAM next to sing-box, only on routers with 256 MB of RAM or more (MemTotal >= 200 MB,
+# VPNPOOL_ENGINE_RAM_MIN_MB). One-liner:
 #   VPNPOOL_AWG=1 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
 # Update it later: VPNPOOL_AWG=update (same one-liner), or /usr/libexec/vpnpool/engine.sh update
 #
@@ -197,6 +200,15 @@ awg_engine() {
 			say "AmneziaWG: build $v is already installed and up to date"
 		else
 			say "AmneziaWG: build $v installed"
+		fi
+		# an older vpnpool had put the old AmneziaWG build in place of the standard sing-box
+		if printf '%s' "$res" | grep -q '"stock_restored":true'; then
+			say "the standard sing-box is back in place of the old AmneziaWG build"
+			printf '%s' "$res" | grep -q '"podkop_restarted":true' && say "podkop was restarted on the standard sing-box"
+		elif printf '%s' "$res" | grep -q '"stock_restored":false'; then
+			say "warning: the old AmneziaWG build still stands in place of the standard sing-box and could not be replaced now."
+			say "         The new AmneziaWG build works anyway. To put the standard sing-box back later, run:"
+			say "         /usr/libexec/vpnpool/engine.sh restore-stock"
 		fi
 		AWG_DONE=1
 		return 0
