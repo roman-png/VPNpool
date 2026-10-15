@@ -446,21 +446,21 @@ V() {   # V <vector> <xfail|-> <expected host> <expected port>
 	end "$_xf"
 }
 V A_modern               -   198.51.100.61 443
-V B_wrapped76            4.5 198.51.100.61 443
+V B_wrapped76            -   198.51.100.61 443
 V B2_wrapped_crlf        -   198.51.100.61 443
-V B3_space_inside        4.5 198.51.100.61 443
-V C_label_prefix         4.5 198.51.100.61 443
-V D_old_plainjson        4.5 198.51.100.61 443
-V E_xray_first           4.5 198.51.100.61 443
+V B3_space_inside        -   198.51.100.61 443
+V C_label_prefix         -   198.51.100.61 443
+V D_old_plainjson        -   198.51.100.61 443
+V E_xray_first           -   198.51.100.61 443
 V F_stored_level0        -   198.51.100.61 443
 V G_lastconfig_object    -   198.51.100.61 443
 V H_crlf_conf            -   198.51.100.61 443
 V I_padded_std_b64       -   198.51.100.61 443
-V J_two_links            4.5 198.51.100.61 443
+V J_two_links            -   198.51.100.61 443
 V K_hostname_endpoint    -   vpn.example.com 51820
 V L_big_I2               -   198.51.100.61 443
 V M_no_psk_noKA          -   198.51.100.61 443
-V N_awg_key_variant_amnezia_awg2 4.5 198.51.100.61 443
+V N_awg_key_variant_amnezia_awg2 -   198.51.100.61 443
 
 # garbage after vpn:// must be rejected QUICKLY: today the pure-ucode inflate spins forever
 # on it (100% CPU; via rpcd import_nodes that is a hung call) -> ROADMAP 4.5 "awgdecode robust".
@@ -472,4 +472,4 @@ _grc=$?
 expect_true "decoder finishes within 20s (rc=$_grc)" [ "$_grc" -ne 124 ]
 expect_true "non-zero exit or ok:false" sh -c '[ "$1" -ne 0 ] && [ "$1" -ne 124 ] || jq -e ".ok==false" "$2"' _ "$_grc" "$T_STATE/parser/garbage.out"
 expect_true "no [Interface] produced" sh -c '! grep -q Interface "$1"' _ "$T_STATE/parser/garbage.out"
-end 4.5
+end
