@@ -16,9 +16,10 @@ REAL=/usr/bin/curl
 [ -f "$MOCK_DIR/enabled" ] || exec "$REAL" "$@"
 
 url=""; out=""; wfmt=""; hdr=""; fail=0; proxy=""; method=GET; hasdata=0
+nurl=0; nout=0   # several transfers in one call (curl URL1 -o F1 URL2 -o F2): pairs by order
 while [ $# -gt 0 ]; do
 	case "$1" in
-		-o|--output) out="$2"; shift ;;
+		-o|--output) nout=$((nout + 1)); if [ "$nout" -eq 1 ]; then out="$2"; else eval "out_$nout=\$2"; fi; shift ;;
 		-w|--write-out) wfmt="$2"; shift ;;
 		-D|--dump-header) hdr="$2"; shift ;;
 		-x|--proxy) proxy="$2"; shift ;;
@@ -27,9 +28,16 @@ while [ $# -gt 0 ]; do
 		-A|--user-agent|-H|--header|-m|--max-time|--connect-timeout|-e|--referer|-u|--user|-b|--cookie|-c|--cookie-jar|--retry|-r|--range|--limit-rate|--resolve|--interface) shift ;;
 		-f|--fail) fail=1 ;;
 		-*) case "$1" in -*f*) case "$1" in --*) ;; *) fail=1 ;; esac ;; esac ;;   # e.g. -sfL
-		*) url="$1" ;;
+		*) nurl=$((nurl + 1)); if [ "$nurl" -eq 1 ]; then url="$1"; else eval "url_$nurl=\$1"; fi ;;
 	esac
 	shift
+done
+# the 2nd.. transfers: the same double, one call each (method / proxy / --fail carried over)
+_i=2
+while [ "$_i" -le "$nurl" ]; do
+	eval "_u=\$url_$_i; _o=\${out_$_i:-}"
+	"$0" -X "$method" ${proxy:+-x "$proxy"} $([ "$fail" = 1 ] && echo -f) ${_o:+-o "$_o"} "$_u"
+	_i=$((_i + 1))
 done
 [ "$method" = GET ] && [ "$hasdata" = 1 ] && method=POST
 key="$method $url"; [ -n "$proxy" ] && key="P $key"
