@@ -123,7 +123,7 @@ grep -q '"result":\[0,{' "$TMPD/st" && ok "vpnpool.status answers an object" || 
 ubus no_such_method > "$TMPD/nm"
 grep -q '"code":-32002' "$TMPD/nm" && ok "method outside the ACL -> -32002 (common: access_denied)" || bad "method outside the ACL: $(head -c 200 "$TMPD/nm")"
 ubus select > "$TMPD/sel"
-grep -q '"ok":false' "$TMPD/sel" && grep -q '"code":"no_tag"' "$TMPD/sel" && ok "select without a node -> ok:false code no_tag (common: human text)" || bad "select {}: $(head -c 200 "$TMPD/sel")"
+grep -q '"ok":false' "$TMPD/sel" && grep -q '"code":"invalid"' "$TMPD/sel" && grep -q '"errors":{"tag":"bad_tag"}' "$TMPD/sel" && ok "select without a node -> ok:false invalid, errors.tag (common: field text)" || bad "select {}: $(head -c 200 "$TMPD/sel")"
 
 echo "UI-COMPONENTS: passed=$P failed=$F"
 [ "$KEEP" = 1 ] && echo "# kept: $B/cgi-bin/luci/admin/services/vpnpool/_demo  (docker rm -f $NAME)"
