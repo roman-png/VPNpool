@@ -151,6 +151,73 @@ full = qc(json.dumps(top([awg2], "amnezia-awg2")).encode())
 V["truncated"] = raw_link(full[:len(full) // 2])
 V["bad_adler"] = raw_link(full[:-1] + bytes([full[-1] ^ 0xFF]))
 V["bad_length_prefix"] = raw_link(struct.pack(">I", 7) + full[4:])
+# ---- limits (the decoder must refuse these fast, with a code) ----
+# declared 4 MB of output (a zip bomb: 5 KB of input)
+V["bomb_declared_4mb"] = raw_link(qc(b"\0" * (4 * 1024 * 1024), 9))
+
+
+class Bits:
+    def __init__(self):
+        self.out, self.acc, self.n = bytearray(), 0, 0
+
+    def put(self, v, n):            # LSB-first, like DEFLATE
+        for i in range(n):
+            self.acc |= ((v >> i) & 1) << self.n
+            self.n += 1
+            if self.n == 8:
+                self.out.append(self.acc); self.acc = 0; self.n = 0
+
+    def align(self):
+        if self.n:
+            self.out.append(self.acc); self.acc = 0; self.n = 0
+
+
+def deflate_many_empty_blocks(payload, nblocks):
+    bw = Bits()
+    for _ in range(nblocks):        # BFINAL=0, BTYPE=01 (fixed), end-of-block (code 256 = 7 zero bits)
+        bw.put(0, 1); bw.put(1, 2); bw.put(0, 7)
+    bw.put(1, 1); bw.put(0, 2); bw.align()   # final stored block with the payload
+    bw.out += struct.pack("<HH", len(payload), len(payload) ^ 0xFFFF) + payload
+    z = b"\x78\x01" + bytes(bw.out) + struct.pack(">I", zlib.adler32(payload))
+    return struct.pack(">I", len(payload)) + z
+
+
+small = json.dumps(top([awg2], "amnezia-awg2")).encode()
+# a VALID stream: 5000 empty blocks, then the real JSON (the block budget refuses it)
+V["blocks_5000_valid"] = raw_link(deflate_many_empty_blocks(small, 5000))
+# the same with 100 empty blocks: within budget, must decode
+V["blocks_100_valid"] = raw_link(deflate_many_empty_blocks(small, 100))
+# near the output limit (~200 KB of JSON): still decodes
+bigconf = AWG31.replace("I1 = ", "I2 = <b 0x" + "ab" * 98000 + ">\nI1 = ")
+V["near_limit_200k_ok"] = link(top([{"container": "amnezia-awg2", "awg": {
+    "last_config": json.dumps({"config": bigconf, "hostName": "198.51.100.7"})}}], "amnezia-awg2"))
+
+# ---- hostile types inside an xray container: always a JSON answer ----
+def xr(stream=None, settings=None, desc="T"):
+    ob = xray_cfg(stream if stream is not None else reality)["outbounds"][0]
+    if settings is not None:
+        ob["settings"] = settings
+    return link(top([{"container": "amnezia-xray", "xray": {"last_config": json.dumps({"outbounds": [ob]})}}],
+                    "amnezia-xray", description=desc))
+
+
+V["xray_stream_str"] = xr(stream="x")
+V["xray_reality_num"] = xr(stream={"network": "tcp", "security": "reality", "realitySettings": 5})
+V["xray_ws_headers_str"] = xr(stream={"network": "ws", "security": "tls", "tlsSettings": "x",
+                                     "wsSettings": {"path": ["/a"], "headers": "x"}})
+V["xray_vnext_str"] = xr(settings={"vnext": "x"})
+V["xray_settings_arr"] = xr(settings=[1, 2])
+V["xray_nonscalar"] = xr(stream={"network": 5, "security": ["x"]})
+V["xray_tcp_http_insecure"] = xr(stream={"network": "tcp", "security": "tls",
+                                        "tlsSettings": {"serverName": "h.example.com", "allowInsecure": True},
+                                        "tcpSettings": {"header": {"type": "http", "request": {
+                                            "path": ["/p"], "headers": {"Host": ["h.example.com"]}}}}})
+V["ss_sip002"] = link(top([{"container": "amnezia-ssxray", "ssxray": {"last_config": json.dumps({"outbounds": [
+    {"protocol": "shadowsocks", "settings": {"servers": [
+        {"address": "198.51.100.10", "port": 8388, "method": "aes-256-gcm", "password": "???>>>???"}]}}]})}}],
+    "amnezia-ssxray", description="SIP"))
+V["awg_endpoint_colon"] = link(top([{"container": "amnezia-awg2", "awg": {"last_config": json.dumps(
+    {"config": AWG31.replace("Endpoint = 198.51.100.7:46139", "Endpoint = :")})}}], "amnezia-awg2"))
 V["not_base64"] = "vpn://%%%%"
 V["no_link"] = "Привет! Ссылку пришлю позже.\n"
 

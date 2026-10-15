@@ -106,8 +106,12 @@ X_link xray-ws-tls-lastconfig-object xray_ws_tls_object \
 	'length==1 and .[0].transport.type=="ws" and .[0].transport.path=="/ws path" and .[0].transport.headers.Host=="cdn.example.com" and .[0].tls.server_name=="cdn.example.com" and (.[0].flow // "")==""'
 X_link xray-grpc xray_grpc \
 	'length==1 and .[0].transport.type=="grpc" and .[0].transport.service_name=="svc"'
-X_link ssxray-ss-link ssxray \
-	'length==1 and .[0].type=="shadowsocks" and .[0].server=="198.51.100.10" and .[0].server_port==8388 and .[0].method=="chacha20-ietf-poly1305" and .[0].password=="p@ss:w0rd" and .[0].tag=="SS"'
+# ss:// is SIP002 base64url without padding — today's parser.uc can't read that yet (its
+# item 5, xfail there): here the link itself; the parser round trip is ss-sip002-parses [5]
+begin "awgdecode/ssxray-ss-link"
+dj "$AFX/dec/ssxray.txt"
+expect_jq "ss link to 198.51.100.10:8388, name SS" "$DJ" '.ok and .items[0].kind=="link" and (.items[0].link|startswith("ss://")) and (.items[0].link|endswith("@198.51.100.10:8388#SS")) and .items[0].host=="198.51.100.10"'
+end
 
 # ---- 4. refusals: a code, no item, never hangs ----
 E_code() {   # <case> <vector> <code> [jq-pred]
@@ -161,6 +165,85 @@ _o=$(ucode "$AWGDEC" --json "Ключ: $(cat "$AFX/dec/xray_reality.txt")" 2>/de
 expect_jq "link item" "$_o" '.ok and .items[0].kind=="link"'
 end
 
+# ---- 5. limits: untrusted input is refused fast and with a code (each < 3 s on x86) ----
+# L <case> <input file> <jq-pred>  — watchdog 20 s + wall-clock bound + exactly one JSON line
+L() {
+	begin "awgdecode/$1"
+	_t0=$(date +%s); dj "$2"; _dt=$(( $(date +%s) - _t0 ))
+	expect_true "not hung (rc=$DRC)" [ "$DRC" -ne 124 ]
+	expect_le "seconds" "$_dt" 3
+	expect_eq "stdout is one line" "$(printf '%s\n' "$DJ" | grep -c .)" 1
+	expect_jq "$1" "$DJ" "$3"
+	end
+}
+awk 'BEGIN { printf "vpn://"; for (i = 0; i < 20000; i++) printf "A "; print "" }' > "$AD/words.txt"
+L many-words-40k "$AD/words.txt" '.ok==false and (.code|startswith("E_"))'
+L declared-4mb-refused "$AFX/dec/bomb_declared_4mb.txt" '.ok==false and .code=="E_TOO_BIG"'
+awk 'BEGIN { s = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"; for (i = 0; i < 5000; i++) print s }' > "$AD/big.txt"
+cat "$AFX/dec/awg2_amnezia5.txt" >> "$AD/big.txt"
+L input-over-256k-refused "$AD/big.txt" '.ok==false and .code=="E_TOO_BIG"'
+awk 'BEGIN { for (i = 0; i < 100000; i++) printf "vpn://" }' > "$AD/links100k.txt"
+L links-100k-refused "$AD/links100k.txt" '.ok==false and .code=="E_TOO_BIG"'
+awk 'BEGIN { for (i = 0; i < 40000; i++) printf "vpn://" }' > "$AD/links40k.txt"
+L links-40k-capped "$AD/links40k.txt" '.ok==false and (.errors|length)==33 and .errors[32].code=="E_TOO_MANY"'
+L blocks-5000-refused "$AFX/dec/blocks_5000_valid.txt" '.ok==false and .code=="E_INFLATE"'
+L blocks-100-decodes "$AFX/dec/blocks_100_valid.txt" '.ok==true and .items[0].kind=="awg"'
+begin "awgdecode/near-limit-200k-decodes"
+_t0=$(date +%s); dj "$AFX/dec/near_limit_200k_ok.txt"; _dt=$(( $(date +%s) - _t0 ))
+expect_jq "ok, awg" "$DJ" '.ok==true and .items[0].kind=="awg" and (.items[0].conf|length) > 190000'
+expect_le "seconds (x86)" "$_dt" 15
+metric awgdecode_200k_seconds "$_dt"
+end
+# 32 good links + one more: 32 items, the rest reported once
+{ i=0; while [ $i -lt 33 ]; do cat "$AFX/dec/awg2_amnezia5.txt"; printf '\n'; i=$((i + 1)); done; } > "$AD/links33.txt"
+L links-33-good "$AD/links33.txt" '.ok==true and (.items|length)==1 and (.errors|length)==1 and .errors[0].code=="E_TOO_MANY"'
+
+# ---- 6. hostile types inside a container: always ONE JSON answer, never a crash ----
+H() {   # <case> <vector> <jq-pred>
+	begin "awgdecode/$1"
+	dj "$AFX/dec/$2.txt"
+	expect_true "rc 0 or 1, not a crash (rc=$DRC)" [ "$DRC" -le 1 ]
+	expect_eq "stdout is one line" "$(printf '%s\n' "$DJ" | grep -c .)" 1
+	expect_jq "$1" "$DJ" "$3"
+	end
+}
+H types-stream-str      xray_stream_str     '.ok==true and (.items[0].link|contains("type=tcp&security=none"))'
+H types-reality-num     xray_reality_num    '.ok==true and (.items[0].link|contains("security=reality")) and (.items[0].link|contains("pbk=")|not)'
+H types-ws-headers-str  xray_ws_headers_str '.ok==true and (.items[0].link|contains("type=ws")) and (.items[0].link|contains("host=")|not) and (.items[0].link|contains("path=")|not)'
+H types-vnext-str       xray_vnext_str      '.ok==false and .code=="E_NO_CONF"'
+H types-settings-array  xray_settings_arr   '.ok==false and .code=="E_NO_CONF"'
+H types-nonscalar-dropped xray_nonscalar    '.ok==true and (.items[0].link|contains("type=tcp&security=none")) and (.items[0].link|contains("%5B")|not)'
+H tcp-http-header-insecure xray_tcp_http_insecure '.ok==true and (.items[0].link|contains("headerType=http&path=%2Fp&host=h.example.com")) and (.items[0].link|contains("allowInsecure=1"))'
+H awg-endpoint-colon-refused awg_endpoint_colon '.ok==false and .code=="E_NO_CONF"'
+
+# ss:// per SIP002: base64url userinfo without padding, decodes back to method:password
+begin "awgdecode/ss-sip002-base64url"
+dj "$AFX/dec/ss_sip002.txt"
+_l=$(item_link)
+_ui=$(printf '%s' "$_l" | sed -n 's|^ss://\([^@]*\)@.*|\1|p')
+expect_true "userinfo present" [ -n "$_ui" ]
+expect_true "url-safe, no padding" sh -c 'case "$1" in *[+/=]*) exit 1;; esac' _ "$_ui"
+printf '%s\n' "let s = replace(replace(ARGV[0], /-/g, '+'), /_/g, '/'); while (length(s) % 4) s += '='; print(b64dec(s));" > "$AD/b64.uc"
+_dec=$(ucode "$AD/b64.uc" "$_ui" 2>/dev/null)
+expect_eq "decodes to method:password" "$_dec" 'aes-256-gcm:???>>>???'
+end
+# the ssxray link through today's parser.uc (base64url without padding is parser item 5)
+begin "awgdecode/ss-sip002-parses"
+_p=$(parse_link "$_l")
+expect_jq "shadowsocks node, password intact" "$_p" 'length==1 and .[0].type=="shadowsocks" and .[0].password=="???>>>???"'
+end 5
+
+# ---- 7. legacy mode looks through ALL containers for a .conf (default xray + awg) ----
+begin "awgdecode/legacy-default-xray-still-gives-conf"
+dl "$AFX/dec/default_xray_wins.txt"
+expect_true "exit 0 (rc=$DRC)" [ "$DRC" -eq 0 ]
+expect_true "the awg .conf" grep -q '^Endpoint = 198.51.100.7:46139' "$AD/legacy"
+end
+begin "awgdecode/legacy-xray-only-no-output"
+dl "$AFX/dec/xray_reality.txt"
+expect_true "exit 1 + empty stdout" sh -c '[ "$1" -eq 1 ] && [ ! -s "$2" ]' _ "$DRC" "$AD/legacy"
+end
+
 # no human text in the machine output (texts live in po)
 begin "awgdecode/no-human-text-in-errors"
 _bad=0; _n=0
@@ -168,6 +251,6 @@ for _vf in "$AFX"/dec/*.txt; do
 	dj "$_vf"; _n=$((_n + 1))
 	printf '%s' "$DJ" | jq -e 'has("ok") and (if .ok then true else (keys - ["ok","code","found","errors"] | length)==0 end)' >/dev/null 2>&1 || _bad=$((_bad + 1))
 done
-expect_true "checked $_n dec vectors (expected 30)" [ "$_n" -eq 30 ]
+expect_true "checked $_n dec vectors (expected 43)" [ "$_n" -eq 43 ]
 expect_eq "outputs with keys outside the contract" "$_bad" 0
 end
