@@ -32,7 +32,7 @@ ctl() {
 	name=$1 suite=$2 expect=$3 want=$4; shift 4
 	if [ -n "$SELECT" ]; then case " $SELECT " in *" $name "*) ;; *) return 0 ;; esac; fi
 	d="$TMPBASE/$name"; mkdir -p "$d"
-	cp -r "$REPO/package" "$REPO/stand" "$REPO/scripts" "$d/"
+	cp -r "$REPO/package" "$REPO/stand" "$REPO/scripts" "$REPO/install.sh" "$d/"
 	while [ $# -ge 3 ]; do
 		if ! replace_once "$d/$1" "$2" "$3" || cmp -s "$REPO/$1" "$d/$1"; then
 			echo "BAD   $name: needle not found / copy unchanged in $1 (control is void)"; BAD=$((BAD+1)); rm -rf "$d"; return 0
@@ -253,6 +253,41 @@ ctl deploy-old-behaviour deploy-tar fail 'root/dirs changed' \
 	scripts/deploy.sh 'own="--owner=0 --group=0 --numeric-owner"' 'own="--numeric-owner"' \
 	scripts/deploy.sh 'check_tar "$ARCHIVE"' ': check_tar' \
 	scripts/deploy.sh "REMOTE_EXTRACT='tar xzof - -C /'" "REMOTE_EXTRACT='tar xzf - -C /'"
+# awgdecode.uc (vpn:// decoder)
+# the old unbounded inflate: no end-of-input / stored-header / NLEN / stored-length guard
+# (four layers; any one of them alone stops the zero-filled stream, hence all four here)
+ctl awgdecode-inflate-unbounded awgdecode fail 'awgdecode/garbage-zlib-zeros ;awgdecode/no-human-text-in-errors ' \
+	"$LIBX/awgdecode.uc" 'if (pos >= dlen) { overrun = true; return 0; }' 'if (false) { overrun = true; return 0; }' \
+	"$LIBX/awgdecode.uc" 'if (pos + 4 > dlen) return null;' 'if (false) return null;' \
+	"$LIBX/awgdecode.uc" 'if ((len ^ 0xffff) != nlen) return null;' 'if (false) return null;' 	"$LIBX/awgdecode.uc" 'if (pos + len > dlen || length(out) + len > maxout) return null;' 'if (length(out) + len > maxout) return null;'
+ctl awgdecode-whitespace-kept awgdecode fail 'awgdecode/vec-B2_wrapped_crlf ;awgdecode/vec-B3_space_inside ;awgdecode/vec-B_wrapped76 ;awgdecode/caption-wrapped-trailing-text ;awgdecode/uncompressed-json-crlf-wrapped ' \
+	"$LIBX/awgdecode.uc" "push(cands, join('', slice(words, 0, n)));" "push(cands, join(' ', slice(words, 0, n)));"
+ctl awgdecode-default-ignored awgdecode fail 'awgdecode/default-container-wins ' \
+	"$LIBX/awgdecode.uc" 'rank: (isdef ? 0 : 10)' 'rank: (isdef ? 10 : 10)'
+# (the api-key vector also carries config_version, which a second rule refuses: the
+#  no-version vector is the one only this rule protects)
+ctl awgdecode-api-key-imported awgdecode fail 'awgdecode/api-key-no-version ' \
+	"$LIBX/awgdecode.uc" 'if (obj.api_key != null || obj.auth_data != null || obj.api_config != null)' 'if (false)'
+ctl awgdecode-full-access-imported awgdecode fail 'awgdecode/full-access ' \
+	"$LIBX/awgdecode.uc" 'if (obj.hostName != null && obj.userName != null && obj.password != null)' 'if (false)'
+ctl awgdecode-adler-unchecked awgdecode fail 'awgdecode/bad-adler32 ' \
+	"$LIBX/awgdecode.uc" 'if (ad != adler32(r.out))' 'if (false)'
+# engine.sh (AWG engine installer) — engine controls need ENGINE_ASSET_DIR (real asset)
+# a real asset with one byte changed still RUNS (version + check pass): sha256 is the only guard
+ctl engine-sha-unchecked engine fail 'engine/corrupt-asset-sha-refused ;engine/override-sha-mismatch-refused ;engine/real-corrupt-over-working ' \
+	"$LIBX/engine.sh" '|| out_fail E_SHA "want=$_sha"' '|| true "want=$_sha"'
+ctl engine-version-unchecked engine fail 'engine/wrong-version-refused ' \
+	"$LIBX/engine.sh" '[ "$_v" = "$ENGINE_VERSION" ] || out_fail' 'true || out_fail'
+ctl engine-awg-check-skipped engine fail 'engine/no-awg-check-refused ' \
+	"$LIBX/engine.sh" 'awg_check "$TMPF" || out_fail E_CHECK' 'true || out_fail E_CHECK'
+ctl engine-space-unchecked engine fail 'engine/no-space-refused ' \
+	"$LIBX/engine.sh" '[ "$_avail" -ge $((_need + ENGINE_SPACE_MARGIN_KB)) ]' 'true || [ "$_avail" -ge 0 ]'
+ctl engine-download-over-working engine fail 'engine/corrupt-asset-sha-refused ;engine/override-sha-mismatch-refused ;engine/override-no-sha256-refused ;engine/override-garbage-sha256-refused ;engine/wrong-version-refused ;engine/no-awg-check-refused ;engine/download-404-refused ;engine/real-corrupt-over-working ' \
+	"$LIBX/engine.sh" 'TMPF="$_dir/.$(basename "$DEST").new.$$"' 'TMPF="$DEST"'
+ctl engine-arch-too-wide engine fail 'engine/arch-mipsel_74kc ' \
+	"$LIBX/engine.sh" 'mipsel_24kc|mipsel_24kc_*) echo mipsel_24kc ;;' 'mipsel_*) echo mipsel_24kc ;;'
+ctl engine-installer-leaks-codes engine fail 'engine/install-sh-awg1-unsupported-arch ;engine/install-sh-update-without-engine ;engine/install-sh-ram-small-memory ' \
+	install.sh 'say "AmneziaWG: $(awg_explain "$code" "$pa").' 'say "AmneziaWG: $res $(awg_explain "$code" "$pa").'
 
 rm -rf "$TMPBASE"
 echo "CONTROLS: ok=$OK bad=$BAD"

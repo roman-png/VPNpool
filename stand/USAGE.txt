@@ -36,10 +36,19 @@ Automated tests (offline: --network none; every HTTP call hits the curl test dou
           daemon (fail-safe / kill-switch, reload order, watchdog, pause, reload queue, preferred
                   pin, nodecheck WAN guard, node tests, route.sh on real nft) |
           tgbot (/on /off, direct poll fallback, own-token sweep, init.d bot instance) |
-          uitext (UI text guard)
+          uitext (UI text guard) |
+          awgdecode (vpn:// decoder, --json and legacy) | engine (engine.sh + install.sh VPNPOOL_AWG)
   The container gets --cap-add NET_ADMIN (its own network namespace only): the daemon suite
   applies the real nft table / ip rule there. vpnpoold and tgbot.sh are sourced with
   VPNPOOLD_NO_MAIN=1 / TGBOT_NO_MAIN=1 (functions only) and driven with stubbed probes.
+
+  The engine suite needs the REAL x86_64 engine release asset (else engine/real-asset-mounted
+  FAILS; CI downloads it in build.yml):
+    gh release download v1.14.3-awg.1 -R roman-png/vpnpool-engine -p vpnpool-engine_1.14.3-awg.1_x86_64 -D <dir>
+    ENGINE_ASSET_DIR=<dir> stand/tests/run-in-docker.sh engine        (mounted at /engine-assets)
+  Same variable for negative-controls.sh (its engine-* controls expect exact red cases).
+  awgdecode vectors: python -I stand/tests/fixtures/awg/gen-dec.py stand/tests/fixtures/awg/dec
+  (deterministic; made-up keys, documentation IPs).
 
   Each suite must run at least the number of cases in stand/tests/min-cases.txt (raise it when
   you add cases). Invariants (rc 0, reply is an object, time bound) are separate plain cases,
