@@ -343,6 +343,8 @@ ctl awgdecode-full-access-imported awgdecode fail 'awgdecode/full-access ' \
 	"$LIBX/awgdecode.uc" 'if (obj.hostName != null && obj.userName != null && obj.password != null)' 'if (false)'
 ctl awgdecode-adler-unchecked awgdecode fail 'awgdecode/bad-adler32 ' \
 	"$LIBX/awgdecode.uc" 'if (ad != adler32(r.out))' 'if (false)'
+# the limit cases' CPU bound: a decoder that burns ~6 CPU s on big input must go red
+ctl awgdecode-slow-on-big-input awgdecode fail 'awgdecode/input-over-256k-refused ;awgdecode/links-100k-refused ;awgdecode/links-40k-capped ' 	"$LIBX/awgdecode.uc" "	if (text == null) text = stdin.read(MAX_IN + 1) ?? '';" "	if (text == null) text = stdin.read(MAX_IN + 1) ?? ''; if (length(text) > 200000) { let t0 = time(); while (time() - t0 < 7); }"
 # engine.sh (AWG engine installer) — engine controls need ENGINE_ASSET_DIR (real asset)
 # a real asset with one byte changed still RUNS (version + check pass): sha256 is the only guard
 ctl engine-sha-unchecked engine fail 'engine/corrupt-asset-sha-refused ;engine/override-sha-mismatch-refused ;engine/real-corrupt-over-working ' \
