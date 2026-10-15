@@ -122,6 +122,7 @@ E_code() {   # <case> <vector> <code> [jq-pred]
 	end
 }
 E_code api-key                 api_key                 E_API_KEY
+E_code api-key-no-version      api_key_no_version      E_API_KEY
 E_code api-config-version-only api_config_version_only E_API_KEY
 E_code full-access             full_access             E_FULL_ACCESS
 E_code unsupported-containers  unsupported_only        E_NO_SUPPORTED_CONTAINER '.found==["amnezia-openvpn","amnezia-cloak"]'
@@ -167,6 +168,6 @@ for _vf in "$AFX"/dec/*.txt; do
 	dj "$_vf"; _n=$((_n + 1))
 	printf '%s' "$DJ" | jq -e 'has("ok") and (if .ok then true else (keys - ["ok","code","found","errors"] | length)==0 end)' >/dev/null 2>&1 || _bad=$((_bad + 1))
 done
-expect_true "checked $_n dec vectors (expected 29)" [ "$_n" -eq 29 ]
+expect_true "checked $_n dec vectors (expected 30)" [ "$_n" -eq 30 ]
 expect_eq "outputs with keys outside the contract" "$_bad" 0
 end

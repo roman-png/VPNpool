@@ -130,6 +130,9 @@ V["default_unsupported_falls_back"] = link(top([{"container": "amnezia-openvpn",
 V["two_links"] = "AWG:\n" + s + "\n\nXRAY: " + V["xray_reality"] + " — конец"
 V["api_key"] = link({"api_config": {"service_type": "amnezia-premium", "user_country_code": "XX"},
                      "auth_data": {"api_key": "FAKE-API-KEY-0000"}, "config_version": 2, "description": "Premium"})
+# same without config_version: the api_key/auth_data/api_config rule alone must refuse it
+V["api_key_no_version"] = link({"api_config": {"service_type": "amnezia-premium"},
+                                "auth_data": {"api_key": "FAKE-API-KEY-0001"}, "description": "Premium"})
 V["api_config_version_only"] = link({"config_version": 1, "name": "Amnezia Free", "api_endpoint": "https://api.example.com/"})
 V["full_access"] = link(top([awg2], "amnezia-awg2", userName="root", password="FAKE-PASSWORD", port=22))
 V["unsupported_only"] = link(top([{"container": "amnezia-openvpn", "openvpn": {"last_config": "{}"}},
