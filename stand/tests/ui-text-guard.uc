@@ -4,11 +4,17 @@
 //
 // usage: ucode ui-text-guard.uc <luci-app-root> <stoplist> <baseline|-> [--write-baseline <file>]
 //   <luci-app-root> = package/luci-app-vpnpool (or a fixture tree with the same layout)
-// Sources of human-visible text:
-//   - _('…') / _("…") / _(`…`) literals in files/www/luci-static/resources/view/**/*.js
+// Sources of human-visible text, in this order:
+//   - _('…') / _("…") / _(`…`) literals in files/www/luci-static/resources/**/*.js (views AND
+//     the shared modules such as vpnpool/common.js; not *.min.js)
 //   - every literal inside `var DICT = {…};` in files/www/luci-static/resources/vpnpool/i18n.js
-//   - "title" of files/usr/share/luci/menu.d/*.json
-//   - msgid/msgstr of po/**/*.po (when the app moves to LuCI po, ROADMAP 10.8)
+//   - "title" of files/usr/share/luci/menu.d/*.json, "description" of files/usr/share/rpcd/acl.d/*.json
+//   - msgid/msgid_plural/msgstr of po/**/*.po (LuCI po, ROADMAP 10.8; the header is not UI text)
+// A po string that already occurs in an earlier source is not counted again: a po msgid is
+// the very string of its _() call site (and a msgstr carried over from the DICT is the DICT
+// value), so moving the dictionary into po neither hides nor duplicates a violation; the
+// other sources are counted per file as before. Whitespace is collapsed like LuCI's _() does
+// (trim + runs of space/tab/newline -> one space).
 // Output: "STRINGS n", "VIOLATIONS n", "NEW <line>", "GONE <line>", "VERDICT ok|fail".
 // Exit: 0 = exactly the baseline; 1 = new violation(s); 3 = no new, but baseline lines that no
 //       longer occur (shrink the baseline); 2 = usage/scan error.
@@ -51,14 +57,17 @@ function read_lit(s, i) {
 }
 
 let strings = [];   // [{file, text}]
-function add(file, text) {
-	text = trim(replace(text, /[\r\n\t]+/g, ' '));
-	if (length(text)) push(strings, { file, text });
+let seen_text = {};
+function add(file, text, catalog) {
+	text = trim(replace(text, /[\r\n\t ]+/g, ' '));
+	if (!length(text) || (catalog && seen_text[text])) return;
+	seen_text[text] = true;
+	push(strings, { file, text });
 }
 function rel(p) { return substr(p, 0, length(ROOT)) == ROOT ? 'luci-app-vpnpool' + substr(p, length(ROOT)) : p; }
 
-// 1) _('…') in views
-let views = walk(ROOT + '/files/www/luci-static/resources/view', '.js', []);
+// 1) _('…') in views and shared modules
+let views = filter(walk(ROOT + '/files/www/luci-static/resources', '.js', []), (f) => substr(f, -7) != '.min.js');
 for (let f in views) {
 	let s = readfile(f) ?? '';
 	let i = 0;
@@ -97,23 +106,38 @@ for (let f in walk(ROOT + '/files/www/luci-static/resources/vpnpool', 'i18n.js',
 	}
 }
 
-// 3) menu titles
+// 3) menu titles, ACL descriptions
 for (let f in walk(ROOT + '/files/usr/share/luci/menu.d', '.json', [])) {
 	let m = json(readfile(f) ?? '{}');
 	if (type(m) == 'object') for (let k, v in m) if (type(v) == 'object' && type(v.title) == 'string') add(rel(f), v.title);
 }
+for (let f in walk(ROOT + '/files/usr/share/rpcd/acl.d', '.json', [])) {
+	let m = json(readfile(f) ?? '{}');
+	if (type(m) == 'object') for (let k, v in m) if (type(v) == 'object' && type(v.description) == 'string') add(rel(f), v.description);
+}
 
-// 4) po files (future)
+// 4) po files: msgid, msgid_plural, msgstr, msgstr[N]; po escapes undone; the header (the
+//    msgstr of msgid "") is metadata, not UI text
+function po_unq(s) {
+	return replace(s, /\\(.)/g, (m, c) => (c == 'n' || c == 't') ? ' ' : c);
+}
 for (let f in walk(ROOT + '/po', '.po', [])) {
-	let cur = null, buf = '';
+	let cur = null, buf = '', id = null;
+	let flush = () => {
+		if (cur == null) return;
+		if (cur == 'msgid') id = buf;
+		if (!(substr(cur, 0, 6) == 'msgstr' && id == '')) add(rel(f), po_unq(buf), true);
+		cur = null; buf = '';
+	};
 	for (let line in split(readfile(f) ?? '', '\n')) {
-		let m = match(line, /^(msgid|msgstr) "(.*)"$/);
-		if (m) { if (cur) add(rel(f), buf); cur = m[1]; buf = m[2]; continue; }
+		line = rtrim(line, '\r');
+		let m = match(line, /^(msgid|msgid_plural|msgstr|msgstr\[[0-9]+\]) "(.*)"$/);
+		if (m) { flush(); cur = m[1]; buf = m[2]; continue; }
 		let c = match(line, /^"(.*)"$/);
-		if (c && cur) { buf += c[1]; continue; }
-		if (cur) { add(rel(f), buf); cur = null; buf = ''; }
+		if (c && cur != null) { buf += c[1]; continue; }
+		flush();
 	}
-	if (cur) add(rel(f), buf);
+	flush();
 }
 
 // stop-list
