@@ -185,6 +185,32 @@ ctl power-off-stops-everything tgbot fail 'tgbot/power-off-keeps-bot ' \
 	"$LIBX/power.sh" '	/etc/init.d/vpnpool reload >/dev/null 2>&1' '	/etc/init.d/vpnpool stop >/dev/null 2>&1'
 ctl initd-reload-noop-again tgbot fail 'tgbot/initd-reload-really-reaches-procd ' \
 	package/vpnpool/files/etc/init.d/vpnpool 'service_triggers() {' 'reload_service() { start_service; }; service_triggers() {'
+# REVIEW_wave2 1: a long step back in the foreground -> TERM waits for it
+ctl daemon-fetch-in-foreground daemon fail 'daemon/term-during-long-fetch-cleans-up-at-once ' \
+	"$LIBX/vpnpoold" 'run_child "$LIBEXEC/fetch.sh" || log "fetch failed (cached' '"$LIBEXEC/fetch.sh" || log "fetch failed (cached'
+# every failure seen through run_child (failed build, dead tunnel probe) turns into success
+ctl daemon-run-child-loses-rc daemon fail 'daemon/reload-dead-tunnel-failsafe-down ;daemon/reload-build-fails-keeps-config-and-routes ;daemon/periodic-refresh-through-failsafe ;daemon/startup-dead-tunnel-clears-stale-routes ;daemon/startup-guard-clears-stale-table-before-first-build ;daemon/usr1-during-build-keeps-failure ;daemon/signal-during-route-up-no-desync ;daemon/watchdog-dead-tunnel-takes-routes-down ' \
+	"$LIBX/vpnpoold" 'wait "$CHILD"; rc=$?' 'wait "$CHILD"; rc=0'
+ctl daemon-cleanup-leaves-child daemon fail 'daemon/term-during-long-fetch-cleans-up-at-once ' \
+	"$LIBX/vpnpoold" '	stop_child' '	:'
+# integrator's assumption: restart keeps the kill-switch block, stop / the user's off remove it
+ctl daemon-restart-drops-block daemon fail 'daemon/restart-with-killswitch-keeps-block ' \
+	"$LIBX/vpnpoold" 'if restart_keeps_block; then' 'if false; then'
+ctl daemon-restart-ignores-user-off daemon fail 'daemon/user-off-with-killswitch-removes-block-even-in-a-restart ' \
+	"$LIBX/vpnpoold" '[ "$(uci -q get vpnpool.main.enabled)" = 1 ] || return 1   # the user' ':   # the user'
+ctl initd-restart-no-marker tgbot fail 'tgbot/initd-restart-marks-a-restart ' \
+	package/vpnpool/files/etc/init.d/vpnpool 'mkdir -p /var/run && : > /var/run/vpnpool.restarting' ':'
+# REVIEW_wave2 2: power.sh around the daemon's state change
+ctl power-on-hups-dying-daemon tgbot fail 'tgbot/power-quick-off-on-waits-and-starts ' \
+	"$LIBX/power.sh" 'if [ "$was" = 1 ] && signal_daemon HUP; then' 'if signal_daemon HUP; then'
+ctl power-off-no-leftover-cleanup tgbot fail 'tgbot/power-off-removes-leftovers-of-a-killed-daemon ' \
+	"$LIBX/power.sh" '		leftovers_down' '		:'
+# REVIEW_wave2 5: RAM mode must not get the boot hook
+ctl power-ram-mode-enables tgbot fail 'tgbot/power-ram-mode-no-enable ' \
+	"$LIBX/power.sh" 'boot_hook() { [ -f "$RAM_HOOK" ] || /etc/init.d/vpnpool enable' 'boot_hook() { /etc/init.d/vpnpool enable'
+# REVIEW_wave2 3: the tag safety net keeps repeated nodes
+ctl tag-guard-keeps-repeats build fail 'build/tag-guard-drops-repeated-nodes ' \
+	"$LIBX/lib.sh" 'then .dropped += [$e.v.tag]' 'then .[$e.a] += [$e.v]'
 ctl alive-criterion-000-alive daemon fail 'daemon/alive-criterion ;daemon/probe-services-any-vs-all ' \
 	"$LIBX/lib.sh" 'svc_code_alive() { case "$1" in [1-5][0-9][0-9])' 'svc_code_alive() { case "$1" in [0-9][0-9][0-9])'
 ctl node-test-uses-lan-selector daemon fail 'daemon/node-tests-use-test-selector-only ' \
