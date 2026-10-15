@@ -128,6 +128,23 @@ write_fetch_status() {
 }
 
 rm -rf "$SRCDIR"; mkdir -p "$SRCDIR"; : > "$SRCDIR/.keys"; : > "$FSTAT_TSV"
+# Killed mid-run (the daemon stops / restarts): every source not answered yet is recorded as
+# "interrupted" (written atomically), so status never shows an old "ok" for this run.
+# fetch.sh holds no lock of its own.
+on_signal() {
+	local u
+	trap - INT TERM HUP
+	for u in $SUB_URL $(uci -q get vpnpool.main.extra_sub); do
+		[ -n "$u" ] || continue
+		cut -f1 "$FSTAT_TSV" 2>/dev/null | grep -Fxq -- "$u" && continue
+		if [ "$u" = "$SUB_URL" ]; then p=1; else p=0; fi
+		printf '%s\t%s\tinterrupted\t0\n' "$u" "$p" >> "$FSTAT_TSV"
+	done
+	write_fetch_status
+	rm -f "$SB_DATA/h.tmp" "$SB_DATA/b.tmp" "$SB_DATA/n.tmp" "$SB_DATA/usage.tmp" "$SB_DATA/expire.tmp"
+	exit 143
+}
+trap on_signal INT TERM HUP
 nsrc=0; ngot=0; nfresh=0
 if [ -n "$SUB_URL" ]; then
 	fetch_source "$SUB_URL" 1
@@ -169,6 +186,7 @@ rm -f "$SRCDIR/.keys"
 # Record the attempt (any outcome): the daemon's start-up retry loop and restarts use it to
 # avoid re-downloading the subscriptions more often than INTERVAL_MIN (panels rate-limit).
 echo "$(date +%s) $(sources_sig)" | write_atomic "$FETCH_STAMP"
+trap - INT TERM HUP
 write_fetch_status
 
 log "fetch: $nfresh/$nsrc source(s) fetched, $ngot with data"

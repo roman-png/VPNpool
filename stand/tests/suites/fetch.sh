@@ -112,3 +112,19 @@ expect_true "not due again (control for the next check)" sh -c '! sh -c ". /usr/
 uci add_list vpnpool.main.extra_sub="$EXT"; uci commit vpnpool
 expect_true "due at once when a subscription was added" due
 end
+
+# ---- review V5: a killed fetch records "interrupted" for what it did not finish ----
+reset_state
+uci set vpnpool.main.subscription_url="$PRI"; uci add_list vpnpool.main.extra_sub="$EXT"; uci commit vpnpool
+fetch_setup 200 200; sh "$FETCH" >/dev/null 2>&1                     # one good run first
+mock_on; mock_rule "GET $PRI" 200 "$FXF/primary.b64" "$FXF/primary.hdr" 0.010 8; mock_rule "GET $EXT" 200 "$FXF/extra.txt"
+rm -f /tmp/curlmock/calls.log   # count only THIS run's requests
+sh "$FETCH" > "$FXF/logk" 2>&1 & FP=$!
+_i=0; while [ $_i -lt 10 ] && [ "$(mock_calls "GET $PRI")" -lt 1 ]; do sleep 1; _i=$((_i + 1)); done
+kill -TERM "$FP"; wait "$FP"; KRC=$?
+_fs=$(cat /tmp/vpnpool/fetch_status.json 2>/dev/null)
+begin "fetch/term-records-interrupted"
+expect_eq "exit code 143" "$KRC" 143
+expect_jq "both sources interrupted, the last success kept" "$_fs" \
+	".[\"$PRI\"].result==\"interrupted\" and .[\"$EXT\"].result==\"interrupted\" and (.[\"$PRI\"].last_ok_at|type)==\"number\""
+end
