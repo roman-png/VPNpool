@@ -1,6 +1,6 @@
 name: Build .ipk + .apk
 
-# Builds the packages (vpnpool + luci-app-vpnpool) with the official OpenWrt SDK for
+# Builds the packages (vpnpool + luci-app-vpnpool + luci-i18n-vpnpool-ru) with the official OpenWrt SDK for
 # both package-manager generations:
 #   - OpenWrt 24.10 SDK -> .ipk (opkg, OpenWrt <= 24.10)
 #   - OpenWrt 25.12 SDK -> .apk (apk,  OpenWrt 25.12+)
@@ -120,18 +120,21 @@ jobs:
           PACKAGES: vpnpool luci-app-vpnpool
 
       # .ipk: vpnpool_1.5.0-r1_all.ipk     .apk: vpnpool-1.5.0-r1.apk
+      # + the Russian translation built by luci.mk from package/luci-app-vpnpool/po/ru:
+      # .ipk: luci-i18n-vpnpool-ru_<ver>_all.ipk   .apk: luci-i18n-vpnpool-ru-<ver>.apk
       # Fails the job if a package is missing, so a silent SDK skip can't go green.
       - name: Collect packages
         run: |
           mkdir -p artifacts
           if [ "${{ matrix.ext }}" = apk ]; then
-            find bin \( -name 'vpnpool-[0-9]*.apk' -o -name 'luci-app-vpnpool-[0-9]*.apk' \) -exec cp {} artifacts/ \;
+            find bin \( -name 'vpnpool-[0-9]*.apk' -o -name 'luci-app-vpnpool-[0-9]*.apk' -o -name 'luci-i18n-vpnpool-ru-[0-9]*.apk' \) -exec cp {} artifacts/ \;
           else
-            find bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' \) -exec cp {} artifacts/ \;
+            find bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' -o -name 'luci-i18n-vpnpool-ru_*.ipk' \) -exec cp {} artifacts/ \;
           fi
           ls -l artifacts
           n=$(ls artifacts/*.${{ matrix.ext }} 2>/dev/null | wc -l)
-          [ "$n" -eq 2 ] || { echo "expected 2 .${{ matrix.ext }} packages, got $n"; exit 1; }
+          [ "$n" -eq 3 ] || { echo "expected 3 .${{ matrix.ext }} packages, got $n"; exit 1; }
+          ls artifacts | grep -q '^luci-i18n-vpnpool-ru' || { echo "the translation package luci-i18n-vpnpool-ru was not built"; exit 1; }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -140,7 +143,7 @@ jobs:
           path: artifacts/*.${{ matrix.ext }}
 
       # Our packages are arch-independent (PKGARCH:=all): every job of one format
-      # produces the SAME two filenames. Attach from ONE job per format only,
+      # produces the SAME three filenames. Attach from ONE job per format only,
       # otherwise the upload steps collide on duplicate asset names.
       - name: Attach to release
         if: github.event_name == 'release' && matrix.attach
