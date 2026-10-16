@@ -112,6 +112,15 @@ end
 begin "build/log-counts-the-final-pool"   # the log line once subtracted the dropped node twice
 expect_true "log: 3 nodes, 1 dropped" grep -q 'build: ok (3 nodes; dropped 1 unsupported)' "$T_STATE/build.out"
 end
+# ... and the same for an ENDPOINT (WireGuard of a JSON source: "endpoints[0]..." — the plural
+# array name; AWG nodes no longer reach check without an engine, they are deferred before it)
+printf '{"outbounds":[{"type":"wireguard","tag":"JsonWgBogus","private_key":"WGcliFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEA0=","address":["10.66.66.2/32"],"bogus_field":1,"peers":[{"address":"198.51.100.7","port":51820,"public_key":"WGsrvFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEA0=","allowed_ips":["0.0.0.0/0"]}]}]}\n' > "$T_STATE/build/poison-ep.json"
+run_build "$SUB" "$T_STATE/build/poison-ep.json"
+begin "build/poison-json-endpoint-unknown-field"
+expect_good_config
+expect_jq "control: check named it by the endpoints array" "$(cat /tmp/vpnpool/build_status.json 2>/dev/null)" '[.dropped[] | select(.tag=="JsonWgBogus" and .reason=="rejected_by_engine")] | length==1'
+expect_jq "bad endpoint not in config" "$(cat /etc/vpnpool/sing-box.json 2>/dev/null)" '[(.endpoints // [])[].tag] | index("JsonWgBogus") == null'
+end
 
 # a reality short_id longer than 8 bytes makes sing-box PANIC (no outbounds[N] in the message,
 # nothing for build.sh to prune) -> the parser must drop it from a JSON source too
