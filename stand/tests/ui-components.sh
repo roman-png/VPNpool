@@ -7,6 +7,7 @@
 #   PORT=18081 KEEP=1 stand/tests/ui-components.sh      leave the container running for a
 #                                                       browser: http://localhost:18081/cgi-bin/luci/admin/services/vpnpool/_demo
 #                                                       (root / vpnpool; stop: docker rm -f vpnpool-ui-components)
+#   NAME=vpnpool-ui3-keep PORT=18084 KEEP=1 …          the same under an own name (parallel sessions)
 # Needs: docker, curl; node (syntax + unit tests of common.js); python3 (po -> lmo).
 # There is no headless browser on the stand: DOM behaviour (menu keys, dialog, 375 px layout,
 # dark theme) is checked by hand in a browser — what to look at: see the handoff of pack ui0.
@@ -17,8 +18,11 @@ REPO_DIR=${REPO_DIR:-$(cd "$HERE/../.." && pwd)}
 IMAGE=${IMAGE:-vpnpool-stand-ui}
 PORT=${PORT:-18083}
 KEEP=${KEEP:-0}
+# KEEP=1: a fixed name (vpnpool-ui-components) unless NAME is given — two sessions keep their own
+# stands with NAME=<own name> PORT=<own port>
+NAME_GIVEN=${NAME:-}
 NAME=${NAME:-vpnpool-ui-components-$$}
-[ "$KEEP" = 1 ] && NAME=vpnpool-ui-components
+[ "$KEEP" = 1 ] && [ -z "$NAME_GIVEN" ] && NAME=vpnpool-ui-components
 hostpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 R=$(hostpath "$REPO_DIR")
 A=$R/package/luci-app-vpnpool/files
@@ -50,7 +54,7 @@ sh "$HERE/ui-i18n.sh" check > "$TMPD/i18n" 2>&1
 I=$(grep -E '^I18N: ' "$TMPD/i18n")
 grep -q '^VERDICT ok$' "$TMPD/i18n" && ok "po check (${I#I18N: })" || { bad "po check: ${I:-no summary}"; grep '^FAIL' "$TMPD/i18n" | head -20; }
 LMO=$TMPD/vpnpool.ru.lmo
-[ "$KEEP" = 1 ] && LMO=${TMPDIR:-/tmp}/vpnpool-ui-components.ru.lmo   # must outlive this script
+[ "$KEEP" = 1 ] && LMO=${TMPDIR:-/tmp}/$NAME.ru.lmo   # must outlive this script (one per kept stand)
 sh "$HERE/ui-i18n.sh" lmo "$(hostpath "$LMO")" > "$TMPD/lmo" 2>&1
 [ -s "$LMO" ] && ok "po -> lmo ($(cat "$TMPD/lmo"))" || bad "po -> lmo: $(cat "$TMPD/lmo")"
 PY=$(command -v python3 || command -v python || true)
@@ -124,6 +128,46 @@ ubus no_such_method > "$TMPD/nm"
 grep -q '"code":-32002' "$TMPD/nm" && ok "method outside the ACL -> -32002 (common: access_denied)" || bad "method outside the ACL: $(head -c 200 "$TMPD/nm")"
 ubus select > "$TMPD/sel"
 grep -q '"ok":false' "$TMPD/sel" && grep -q '"code":"invalid"' "$TMPD/sel" && grep -q '"errors":{"tag":"bad_tag"}' "$TMPD/sel" && ok "select without a node -> ok:false invalid, errors.tag (common: field text)" || bad "select {}: $(head -c 200 "$TMPD/sel")"
+
+# --- ui3: the settings pages "Routes" and "Settings" (form.JSONMap + one set_config)
+# host: syntax, the page unit tests (+ their negative controls); they also write the set_config
+# payloads of their "every field changed" cases, which the REAL backend must accept below
+PAY=$TMPD/payload; mkdir -p "$PAY"
+if command -v node >/dev/null 2>&1; then
+	for f in view/vpnpool/routing.js view/vpnpool/settings.js; do
+		node --check "$(hostpath "$RES/$f")" 2>"$TMPD/err" && ok "syntax $f" || bad "syntax $f: $(head -c 300 "$TMPD/err")"
+	done
+	UI_PAGES_PAYLOAD_DIR=$(hostpath "$PAY") node "$(hostpath "$HERE/ui-pages.test.js")" > "$TMPD/pages" 2>&1
+	U=$(grep -E '^PAGES: passed=[0-9]+ failed=[0-9]+ checked=[0-9]+$' "$TMPD/pages")
+	case "$U" in "PAGES: passed="[1-9]*" failed=0 checked="[1-9]*) ok "unit tests of the settings pages ($U)" ;; *) bad "unit tests of the settings pages: ${U:-no summary line}"; grep '^FAIL' "$TMPD/pages" ;; esac
+	node "$(hostpath "$HERE/ui-pages.test.js")" --negative > "$TMPD/pneg" 2>&1
+	N=$(grep -E '^PAGES-NEG: passed=[0-9]+ failed=[0-9]+$' "$TMPD/pneg")
+	case "$N" in "PAGES-NEG: passed="[1-9]*" failed=0") ok "negative controls of the page tests ($N)" ;; *) bad "negative controls of the page tests: ${N:-no summary line}"; grep '^FAIL' "$TMPD/pneg" ;; esac
+fi
+for pg in routing settings; do
+	CODE=$(curl -s -o "$TMPD/pg" -w '%{http_code}' -b "$CK" "$B/cgi-bin/luci/admin/services/vpnpool/$pg")
+	[ "$CODE" = 200 ] && grep -q "vpnpool/$pg" "$TMPD/pg" && ok "page $pg -> 200, loads view vpnpool/$pg" || bad "page $pg -> HTTP $CODE"
+	curl -s -o "$TMPD/served" "$B/luci-static/resources/view/vpnpool/$pg.js"
+	cmp -s "$TMPD/served" "$RES/view/vpnpool/$pg.js" && ok "LuCI serves view/vpnpool/$pg.js (byte-identical)" || bad "LuCI serves view/vpnpool/$pg.js"
+done
+check_tr 'Routes' 'Маршруты'
+check_tr 'Revert' 'Отменить'
+check_tr 'There are unsaved changes.' 'Есть несохранённые изменения.'
+ubusj() { curl -s -H 'Content-Type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"call\",\"params\":[\"$SID\",\"vpnpool\",\"$1\",$2]}" "$B/ubus"; }
+for pg in routing settings; do
+	if [ -s "$PAY/$pg.json" ]; then
+		ubusj set_config "$(cat "$PAY/$pg.json")" > "$TMPD/sc"
+		grep -q '"ok":true' "$TMPD/sc" && grep -Eq '"code":"(saved|applied)"' "$TMPD/sc" \
+			&& ok "the real set_config accepts what the $pg page sends ($(grep -o '"changed":\[[^]]*\]' "$TMPD/sc" | tr -cd ',' | wc -c | awk '{print $1+1}') fields)" \
+			|| bad "the real set_config refused the $pg page's payload: $(head -c 400 "$TMPD/sc")"
+	else bad "no $pg payload from the page tests"; fi
+done
+ubus status > "$TMPD/st2"
+grep -q '"mode":"exclude"' "$TMPD/st2" && grep -q '"log_level":"info"' "$TMPD/st2" && ok "status shows the saved values (mode, log detail)" || bad "status after the saves: $(head -c 300 "$TMPD/st2")"
+# negative control of the acceptance check: a payload with a wrong type is refused, field named
+ubusj set_config '{"settings":{"killswitch":"maybe","domains":["ok.example","bad domain!"]}}' > "$TMPD/sc0"
+grep -q '"ok":false' "$TMPD/sc0" && grep -q '"killswitch":"bad_value"' "$TMPD/sc0" && grep -q '"domains\[1\]":"bad_domain"' "$TMPD/sc0" \
+	&& ok "a wrong payload is refused with the field codes (negative control)" || bad "wrong payload: $(head -c 300 "$TMPD/sc0")"
 
 echo "UI-COMPONENTS: passed=$P failed=$F"
 [ "$KEEP" = 1 ] && echo "# kept: $B/cgi-bin/luci/admin/services/vpnpool/_demo  (docker rm -f $NAME)"
