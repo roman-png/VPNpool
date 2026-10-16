@@ -35,7 +35,8 @@ uci set vpnpool.sub_pick.url="$U2"
 uci set vpnpool.sub_pick.enabled=1
 uci set vpnpool.sub_pick.mode=pick
 uci add_list vpnpool.sub_pick.pick="$D"
-for i in $A $B $D $M $L; do uci add_list vpnpool.main.auto_member="$i"; done   # X is excluded
+uci -q delete vpnpool.main.auto_exclude || true
+uci add_list vpnpool.main.auto_exclude="$X"   # X is excluded from the automatic choice by the user
 uci add_list vpnpool.main.hidden="$H"
 uci commit vpnpool
 
