@@ -20,13 +20,24 @@ let nodes_path = ARGV[0];
 let nodes = nodes_path ? json(readfile(nodes_path)) : [];
 if (type(nodes) != 'array')
 	nodes = [];
-// nodes.json carries the node identity `id` (parser --with-id; status/rpcd key on it) and may
-// carry `_link`: sing-box rejects unknown outbound fields, so neither may reach the config.
+// nodes.json carries the node identity `id` (parser --with-id: EVERY store keys on it — auto-pool
+// members, dead marks, favourites, the preferred node) and bookkeeping fields `_*` (`_link`,
+// `_src`): sing-box rejects unknown outbound fields, so none of them may reach the config.
+// TAG_OF: id -> the tag this build gave the node (the config references nodes by tag).
+let TAG_OF = {};
 for (let n in nodes) {
 	if (type(n) != 'object') continue;
+	if (n.id != null) TAG_OF[n.id] = n.tag;
 	delete n.id;
-	delete n._link;
+	for (let k in keys(n)) if (substr(k, 0, 1) == '_') delete n[k];
 }
+// a list of ids -> the tags of the nodes of THIS build (unknown ids are dropped)
+function tags_of(ids) {
+	let out = [];
+	for (let i in ids) if (TAG_OF[i] != null) push(out, TAG_OF[i]);
+	return out;
+}
+function as_array(v) { return (v == null) ? [] : ((type(v) == 'array') ? v : [ v ]); }
 
 let uci = cursor();
 function opt(section, name, def) {
@@ -126,26 +137,33 @@ let node_tags = [];
 for (let n in nodes)
 	push(node_tags, n.tag);
 
-// auto-pool members: which node tags take part in urltest auto-switching.
-// Empty / unset => ALL nodes (default; new nodes auto-join). When a non-empty
-// subset is configured, only those nodes are auto-switched (the rest stay
-// available for manual selection via the "proxy" selector). Filtered to tags
-// that still exist; if the filter leaves nothing (e.g. tags changed after a
-// subscription update) we fall back to all nodes so urltest is never empty.
-let auto_member = uci.get('vpnpool', 'main', 'auto_member') ?? [];
-if (type(auto_member) != 'array')
-	auto_member = [auto_member];
+// auto-pool members (uci list auto_member, node IDS): which nodes take part in urltest
+// auto-switching. Empty / unset => ALL nodes (default; new nodes auto-join). When a non-empty
+// subset is configured, only those nodes are auto-switched (the rest stay available for manual
+// selection via the "proxy" selector). Ids of nodes not in this build are dropped; if the filter
+// leaves nothing we fall back to all nodes so urltest is never empty.
 let member_set = {};
-for (let m in auto_member)
-	if (length(m)) member_set[m] = 1;
+for (let t in tags_of(as_array(uci.get('vpnpool', 'main', 'auto_member'))))
+	member_set[t] = 1;
 
 let auto_tags = [];
-if (length(auto_member)) {
+if (length(member_set)) {
 	for (let t in node_tags)
 		if (member_set[t]) push(auto_tags, t);
 }
 if (!length(auto_tags))
 	auto_tags = node_tags;                               // default / fallback: all nodes
+
+// "Favourites only" (uci favorites_only=1): the automatic choice uses only the user's
+// favourite nodes (/etc/vpnpool/favorites.map.json, keyed by id). Never empties the pool: with
+// no favourite in this build the option has no effect.
+if (opt('main', 'favorites_only', '0') == '1') {
+	let fav = json(readfile('/etc/vpnpool/favorites.map.json') ?? 'null');
+	let fav_set = {};
+	if (type(fav) == 'object') for (let t in tags_of(keys(fav))) fav_set[t] = 1;
+	let only = filter(auto_tags, (t) => fav_set[t]);
+	if (length(only)) auto_tags = only;
+}
 
 // Health prefilter (build.sh writes .alive_tags.json): keep ONLY TCP-reachable nodes
 // in the urltest pool. A dead node leaves a hung probe socket every interval; ~10 of
@@ -169,17 +187,17 @@ if (alive_raw) {
 	}
 }
 
-// Node-quality filter (nodecheck.sh writes .dead_tags.json): drop nodes that the
-// e2e probe found unable to reach ANY real endpoint for a sustained run — they TCP-
+// Node-quality filter (nodecheck.sh writes .dead_ids.json, node ids): drop nodes that the
+// e2e probe found unable to reach the user's services for a sustained run — they TCP-
 // ping (and may even pass the single cp.cloudflare urltest probe) but carry no real
 // traffic (expired-sub placeholders, over-quota / service-blocked exits). They stay
 // in node_tags (manually selectable) but leave the auto/urltest pool. Never empty it.
-let dead_raw = (opt('main', 'dead_filter', '1') != '0') ? readfile('/tmp/vpnpool/.dead_tags.json') : null;
+let dead_raw = (opt('main', 'dead_filter', '1') != '0') ? readfile('/tmp/vpnpool/.dead_ids.json') : null;
 if (dead_raw) {
 	let dead = json(dead_raw);
 	if (type(dead) == 'array' && length(dead)) {
 		let dead_set = {};
-		for (let t in dead)
+		for (let t in tags_of(dead))
 			dead_set[t] = 1;
 		let kept = [];
 		for (let t in auto_tags)
@@ -203,25 +221,23 @@ push(outbounds, {
 	interrupt_exist_connections: true
 });
 
-// manual override selector. Default depends on auto_switch + a persisted manual
-// pick (so a chosen node survives reload/subscription updates if it still exists).
+// manual override selector. Its default is 'auto' (urltest + failover): the user's
+// "Connect" choice is the SOFT preferred node (uci preferred_node, a node id), which the
+// daemon's preferred_check puts on this selector while the node works and hands back to auto
+// when it fails (ROADMAP 9.5 — there is no hard pin any more). auto_switch=0 = no automatic
+// switching: the selector stays on the preferred node (or the first node).
 let auto_switch = opt('main', 'auto_switch', '1');
-let selected    = opt('main', 'selected_node', '');
+let preferred_tag = TAG_OF[opt('main', 'preferred_node', '')] ?? null;
 
 let sel = [ 'auto' ];
-let sel_exists = false;
-for (let t in node_tags) {
+for (let t in node_tags)
 	push(sel, t);
-	if (t == selected) sel_exists = true;
-}
 
 let def;
-if (length(selected) && sel_exists)
-	def = selected;                                  // honor persisted manual pick
-else if (auto_switch == '0')
-	def = length(node_tags) ? node_tags[0] : 'auto'; // off -> fixed node, no auto-switch
+if (auto_switch == '0')
+	def = preferred_tag ?? (length(node_tags) ? node_tags[0] : 'auto');
 else
-	def = 'auto';                                    // on -> urltest auto + failover
+	def = 'auto';
 
 push(outbounds, {
 	type: 'selector',

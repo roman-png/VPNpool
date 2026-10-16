@@ -13,8 +13,15 @@
 //         results merge cleanly).
 // Flags (leading, any order):
 //   --keep-link  attach the original link as `_link` (probe.sh / rpcd import / links.json)
-//   --with-id    attach the stable node identity `id` (see node_id; AWG/WireGuard: awg_id).
+//   --with-id    attach the stable node identity `id` (key_id of the canonical config without the
+//                name; AWG/WireGuard: awg_id). One id = one node in the output (the first input wins).
 //                generator.uc strips it (sing-box rejects unknown outbound fields).
+//   --with-src   attach `_src` = the index of the input file the node came from (build.sh: which
+//                source a node belongs to; generator.uc strips every `_` field).
+//   --hide FILE  ids (one per line) the user hid: such nodes are skipped (reason "hidden") in
+//                every input, before the dedup.
+//   --pick FILE  (before an input file) only the ids listed in FILE are taken from THAT file
+//                (reason "not_picked" for the rest): a subscription in "pick" mode.
 //   --report     instead of the node array print one record per input line / JSON item:
 //                {src, line|item, status:"ok"|"skip", reason?, field?, tag?, type?, id?,
 //                 dup_of?, tag_changed?, hints?, server?, port?}. reason is a machine code (no
@@ -23,6 +30,7 @@
 //                bad_reality_key bad_short_id unsupported_transport unsupported_security
 //                unsupported_encryption unsupported_flow unsupported_method unsupported_plugin
 //                unsupported_obfs bad_key tls_required duplicate not_a_node no_nodes
+//                hidden not_picked (+ id, tag, server, port of the skipped node; duplicate + id)
 //                AWG .conf (field = the .conf key): awg_no_peer awg_multi_peer awg_bad_value
 //                awg_unsupported_param bad_key; hints: awg_random_trailers (the server must
 //                run AmneziaWG 3.1 too). server/port: of an accepted AWG/WireGuard node;
@@ -33,7 +41,7 @@
 import { readfile, stdin } from 'fs';
 
 let nodes = [];
-let seen = {};       // dedup key -> final tag of the node that owns it
+let seen = {};       // node id (or, without one, the canonical config) -> tag of the node that owns it
 let used_tags = {};
 // Tags the generator itself defines (urltest "auto", selector "proxy", "direct"; "block" and
 // "dns-out" are the conventional names of the other built-ins). A node may never take one:
@@ -42,6 +50,7 @@ let used_tags = {};
 let RESERVED_TAGS = { auto: 1, proxy: 1, direct: 1, block: 1, 'dns-out': 1, 'vpnpool-test': 1 };
 let KEEP_LINK = false;
 let WITH_ID = false;
+let WITH_SRC = false;
 let REPORT = false;
 let report = [];
 let cur_src = 0;
@@ -929,16 +938,16 @@ function bare(ob) {
 // fingerprint, reality, transport, obfs password, ss plugin, ...) is part of the identity; the
 // display name, the input order and the JSON key order are not. The parser normalises what is
 // case-insensitive (UUIDs, fingerprint, ss method) before this, so the same node written
-// differently gets one id. Two nodes with the same config and different names share an id
-// (merging them is ROADMAP 2.2). AWG/WireGuard nodes: awg_id (sha256 of the private key).
+// differently gets one id. AWG/WireGuard nodes: awg_id (sha256 of the private key).
+// The id is THE key of every store (preferred, favourites, hidden, dead marks, auto-pool members,
+// test results; ROADMAP 2.2) and it is unique in the output: one config = one node (add_node).
 function fnv1a(s, h) {
 	for (let i = 0; i < length(s); i++)
 		h = ((h ^ ord(s, i)) * 16777619) & 0xffffffff;
 	return h;
 }
 
-function node_id(ob) {
-	let key = canon(bare(ob));
+function key_id(key) {
 	let a = fnv1a(key, 0x811c9dc5), b = fnv1a(key, 0x9747b28c);
 	return substr(sprintf('%08x%08x', a, b), 0, 12);
 }
@@ -954,26 +963,46 @@ function unique_tag(base) {
 	return cand;
 }
 
-// dedup key: display name + the node's whole config (key order irrelevant). The same config
-// under ANOTHER name stays a separate node (a user's own copy of a subscription node must not
-// vanish); merging those is ROADMAP 2.2 together with the id-keyed stores.
-function config_key(base, ob) {
-	return base + '\x1f' + canon(bare(ob));
+// the node's whole config WITHOUT its name (key order irrelevant): the input of its id. The same
+// config under another name is ONE node (ROADMAP 2.2): the first input wins, and build.sh passes
+// the user's own nodes first (manual links, AWG files, favourites), so a user's copy of a
+// subscription node keeps the user's name.
+function config_key(ob) {
+	return canon(bare(ob));
 }
 
+// Per-input filters (build.sh): HIDE = ids the user hid (every input); PICK = for ONE input file,
+// the ids taken from it (a subscription in "pick" mode). Both act BEFORE the dedup, so a hidden /
+// not-picked node never shadows the same node of another input.
+let HIDE = null, PICK = null;
+
 // -> report fields { status, tag?, type?, id?, reason?, dup_of?, tag_changed? }
-function add_node(ob, dedupkey, link) {
+function add_node(ob, link) {
 	if (!ob || type(ob) != 'object') return { status: 'skip', reason: 'parse_error' };
 	let is_awg = (ob.type == 'awg' || ob.type == 'wireguard');
 	let base = length(ob.tag) ? trim('' + ob.tag) : ((ob.server ?? 'node') + ':' + (ob.server_port ?? 0));
 	if (!length(base)) base = 'node';
-	if (dedupkey == null) dedupkey = config_key(base, ob);
-	if (seen[dedupkey] != null)
-		return { status: 'skip', reason: 'duplicate', type: ob.type, dup_of: seen[dedupkey] };
+	// the id: AWG/WireGuard = its private key, any other node = its canonical config without the name
+	let id = null;
+	if (is_awg) { if (length(ob.private_key)) id = awg_id(ob.private_key); }
+	else id = key_id(config_key(ob));
+	if (id && ((HIDE && HIDE[id]) || (PICK && !PICK[id]))) {
+		let p0 = (type(ob.peers) == 'array') ? ob.peers[0] : null;
+		return { status: 'skip', reason: (HIDE && HIDE[id]) ? 'hidden' : 'not_picked', type: ob.type,
+			id: id, tag: base, server: ob.server ?? p0?.address, port: ob.server_port ?? p0?.port };
+	}
+	// one id = one node: the dedup is by the id (the output never repeats one); an AWG endpoint
+	// of a JSON source without a private key has no id and dedups by its canonical config
+	let dk = id ?? ('noid:' + config_key(ob));
+	if (seen[dk] != null) {
+		let r = { status: 'skip', reason: 'duplicate', type: ob.type, dup_of: seen[dk] };
+		if (id) r.id = id;
+		return r;
+	}
 	ob.tag = unique_tag(base);
-	seen[dedupkey] = ob.tag;
-	let id = !(WITH_ID || REPORT) ? null : (is_awg ? (length(ob.private_key) ? awg_id(ob.private_key) : null) : node_id(ob));
+	seen[dk] = ob.tag;
 	if (WITH_ID && id) ob.id = id;
+	if (WITH_SRC) ob._src = cur_src;
 	if (KEEP_LINK && type(link) == 'string')
 		ob._link = link;
 	push(nodes, ob);
@@ -1102,7 +1131,7 @@ function process_json(data) {
 			rec({ item: i, status: 'skip', reason: bad, type: o.type });
 			continue;
 		}
-		let r = add_node(o, null, null);
+		let r = add_node(o, null);
 		r.item = i;
 		rec(r);
 	}
@@ -1139,7 +1168,7 @@ function process_text(raw) {
 		if (pa.ob) {
 			// one private key = one node: the same .conf twice is a duplicate, two clients of
 			// one server are two nodes
-			let r = add_node(pa.ob, 'awg:' + awg_id(pa.ob.private_key), null);
+			let r = add_node(pa.ob, null);
 			r.line = 1;
 			if (pa.hints) r.hints = pa.hints;
 			if (pa.ignored) r.ignored = pa.ignored;
@@ -1176,26 +1205,38 @@ function process_text(raw) {
 			rec({ line: ln, status: 'skip', reason: ob });
 			continue;
 		}
-		let r = add_node(ob, null, line);
+		let r = add_node(ob, line);
 		r.line = ln;
 		rec(r);
 	}
 }
 
 // ---- inputs: every ARGV entry is a file; if none, read stdin ----
-let files = [];
-for (let a in ARGV) {
+// an id list file -> { id: true } (one id per line; blank lines ignored)
+function id_set(path) {
+	let set = {};
+	for (let l in split(readfile(path) ?? '', /\r?\n/)) { l = trim(l); if (length(l)) set[l] = true; }
+	return set;
+}
+let files = [], next_pick = null;
+for (let i = 0; i < length(ARGV); i++) {
+	let a = ARGV[i];
 	if (a == '--keep-link') KEEP_LINK = true;
 	else if (a == '--with-id') WITH_ID = true;
+	else if (a == '--with-src') WITH_SRC = true;
 	else if (a == '--report') REPORT = true;
-	else push(files, a);
+	else if (a == '--hide') HIDE = id_set(ARGV[++i]);
+	else if (a == '--pick') next_pick = id_set(ARGV[++i]);
+	else { push(files, { path: a, pick: next_pick }); next_pick = null; }
 }
 if (length(files)) {
 	for (let f in files) {
-		let raw = readfile(f);
+		PICK = f.pick;
+		let raw = readfile(f.path);
 		if (raw != null) process_text(raw);
 		cur_src++;
 	}
+	PICK = null;
 } else {
 	process_text(stdin.read('all'));
 }

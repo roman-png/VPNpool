@@ -1,7 +1,8 @@
-# suite: fetch — fetch.sh with partially failing sources (sourced by run.sh)
-# Known defect (ROADMAP 2.5): the cache fallback is all-or-nothing. If the PRIMARY
-# subscription fails but an extra one answers, ok=1 -> the cache is REPLACED by the extra's
-# file only -> the primary's nodes vanish from the pool until it answers again.
+# suite: fetch — fetch.sh over the subscription sections with partially failing sources (sourced
+# by run.sh). Every subscription is its own uci section (ROADMAP 9.1) with its own cache, its own
+# expiry / quota / provider interval (the panel's headers -> subs.meta.json) and its own "updated".
+# 2.5: the cache fallback is PER subscription — one that fails is served from its own copy while
+# another one answers.
 
 FETCH=/usr/libexec/vpnpool/fetch.sh
 U=9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce
@@ -10,33 +11,37 @@ PRI='https://sub.example.com/sub/SECRETTOKEN123'
 EXT='https://extra.example.com/list'
 printf 'vless://%s@203.0.113.61:443?security=tls&sni=a.example#Pri1\nvless://%s@203.0.113.62:443?security=tls&sni=a.example#Pri2\n' "$U" "$U" | base64 -w0 > "$FXF/primary.b64"
 printf 'vless://%s@203.0.113.63:443?security=tls&sni=a.example#Ext1\n' "$U" > "$FXF/extra.txt"
-printf 'HTTP/1.1 200 OK\r\nsubscription-userinfo: upload=1; download=2; total=1000; expire=1893456000\r\n\r\n' > "$FXF/primary.hdr"
+# the panel's headers: quota/expiry, the provider's update interval (hours), a base64 title
+printf 'HTTP/1.1 200 OK\r\nSubscription-Userinfo: upload=1; download=2; total=1000; expire=1893456000\r\nprofile-update-interval: 12\r\nprofile-title: base64:%s\r\nprofile-web-page-url: https://sub.example.com/panel/SECRETTOKEN123\r\n\r\n' \
+	"$(printf 'My Provider' | base64 -w0)" > "$FXF/primary.hdr"
+printf 'HTTP/1.1 200 OK\r\nsubscription-userinfo: upload=5; download=6; total=2000; expire=1900000000\r\n\r\n' > "$FXF/extra.hdr"
 
 fetch_setup() {   # <primary code> <extra code>
 	mock_on
 	mock_rule "GET $PRI" "$1" "$FXF/primary.b64" "$FXF/primary.hdr"
-	mock_rule "GET $EXT" "$2" "$FXF/extra.txt"
+	mock_rule "GET $EXT" "$2" "$FXF/extra.txt" "$FXF/extra.hdr"
 }
 pool_tags() {   # tags the build would see from the fetched sources
-	cat /tmp/vpnpool/sources/*.raw 2>/dev/null > "$FXF/all.txt"
 	for f in /tmp/vpnpool/sources/*.raw; do [ -f "$f" ] && ucode /usr/libexec/vpnpool/parser.uc "$f"; done 2>/dev/null \
 		| jq -sc 'add // [] | map(.tag) | sort' 2>/dev/null
 }
+two_subs() { sub_section sp "$PRI"; sub_section se "$EXT"; }
 
-reset_state
-uci set vpnpool.main.subscription_url="$PRI"
-uci add_list vpnpool.main.extra_sub="$EXT"
-uci commit vpnpool
+reset_state; two_subs
 
 # ---- positive control: both sources answer ----
 fetch_setup 200 200
 sh "$FETCH" > "$FXF/log1" 2>&1; FRC=$?
+_m=$(cat /etc/vpnpool/subs.meta.json 2>/dev/null)
 begin "fetch/all-sources-ok"
 expect_eq "exit code" "$FRC" 0
-expect_eq "pool = primary + extra" "$(pool_tags)" '["Ext1","Pri1","Pri2"]'
-expect_eq "expiry from subscription-userinfo" "$(cat /etc/vpnpool/sub.expire 2>/dev/null)" 1893456000
-expect_eq "quota from subscription-userinfo" "$(cat /etc/vpnpool/sub.usage 2>/dev/null)" "1 2 1000"
+expect_eq "pool = both subscriptions" "$(pool_tags)" '["Ext1","Pri1","Pri2"]'
+expect_jq "expiry + quota of EACH subscription from its own headers" "$_m" \
+	'.sp.expire==1893456000 and .sp.upload==1 and .sp.download==2 and .sp.total==1000 and .se.expire==1900000000 and .se.total==2000'
+expect_jq "provider update interval (12 h -> s), title, web page" "$_m" \
+	'.sp.update_interval==43200 and (.sp.title|startswith("base64:")) and (.sp.web_page|length)>0 and .se.update_interval==null'
 expect_true "cache written" [ -d /etc/vpnpool/sources_cache ]
+expect_true "'updated' marker per subscription" sh -c '[ -f /etc/vpnpool/sources_cache/.ok-sp ] && [ -f /etc/vpnpool/sources_cache/.ok-se ]'
 end
 
 # ---- primary 500, extra 200: the primary's nodes must stay (from cache) ----
@@ -45,14 +50,15 @@ sh "$FETCH" > "$FXF/log2" 2>&1; FRC=$?
 begin "fetch/primary-fails-extra-ok-keeps-primary-nodes"
 expect_eq "exit code" "$FRC" 0
 expect_eq "pool still has Pri1/Pri2 + Ext1" "$(pool_tags)" '["Ext1","Pri1","Pri2"]'
+expect_jq "the failed subscription keeps its last expiry / quota" "$(cat /etc/vpnpool/subs.meta.json)" '.sp.expire==1893456000 and .sp.total==1000'
 end
 # stage 3: per-source result for status (last_fetch_at / last_ok_at / result per source)
 _fs=$(cat /tmp/vpnpool/fetch_status.json 2>/dev/null)
 begin "fetch/status-per-source"
 expect_jq "primary: served from cache, its last success kept from the first run" "$_fs" \
-	".[\"$PRI\"] | .result==\"cached\" and (.last_ok_at|type)==\"number\" and .primary==true and .at >= .last_ok_at"
+	".[\"$PRI\"] | .result==\"cached\" and (.last_ok_at|type)==\"number\" and .id==\"sp\" and .at >= .last_ok_at"
 expect_jq "extra: fetched now, 1 node" "$_fs" \
-	".[\"$EXT\"] | .result==\"ok\" and .nodes==1 and .last_ok_at==.at and .primary==false"
+	".[\"$EXT\"] | .result==\"ok\" and .nodes==1 and .last_ok_at==.at and .id==\"se\""
 end
 
 # ---- everything down: whole cache served ----
@@ -65,22 +71,22 @@ expect_eq "pool from cache" "$(pool_tags)" '["Ext1","Pri1","Pri2"]'
 end
 
 # ---- the subscription token must not reach the log in clear text ----
-begin "fetch/log-written"   # positive control for the next case, outside its xfail
+begin "fetch/log-written"   # positive control for the next case
 expect_true "log mentions the fetch at all" grep -q 'fetch:' "$FXF/log1"
 end
 begin "fetch/token-masked-in-log"
 expect_eq "SECRETTOKEN123 occurrences in log" "$(cat "$FXF/log1" "$FXF/log2" "$FXF/log3" | gcount SECRETTOKEN123)" 0
 end
 
-# ---- flash wear (2.11): an unchanged subscription does not rewrite its cached copy ----
-reset_state
-uci set vpnpool.main.subscription_url="$PRI"; uci add_list vpnpool.main.extra_sub="$EXT"; uci commit vpnpool
+# ---- flash wear (2.11): an unchanged subscription does not rewrite its cached copy / meta ----
+reset_state; two_subs
 fetch_setup 200 200; sh "$FETCH" >/dev/null 2>&1
-touch -d '2000-01-01 00:00:00' /etc/vpnpool/sources_cache/s-*.raw
+touch -d '2000-01-01 00:00:00' /etc/vpnpool/sources_cache/s-*.raw /etc/vpnpool/subs.meta.json
 sh "$FETCH" >/dev/null 2>&1
 begin "fetch/unchanged-source-cache-not-rewritten"
 expect_eq "cached copies" "$(ls /etc/vpnpool/sources_cache/s-*.raw 2>/dev/null | wc -l)" 2
 expect_eq "cached copies still dated 2000" "$(for f in /etc/vpnpool/sources_cache/s-*.raw; do date -r "$f" +%Y; done | sort -u)" 2000
+expect_eq "meta still dated 2000 (same headers)" "$(date -r /etc/vpnpool/subs.meta.json +%Y)" 2000
 end
 cp "$FXF/extra.txt" "$FXF/extra.orig"
 printf 'vless://%s@203.0.113.64:443?security=tls&sni=a.example#Ext2\n' "$U" >> "$FXF/extra.txt"
@@ -90,13 +96,27 @@ expect_eq "exactly one cached copy rewritten" "$(for f in /etc/vpnpool/sources_c
 end
 cp "$FXF/extra.orig" "$FXF/extra.txt"
 
-# ---- a removed subscription leaves the cache (its nodes must not come back from it) ----
-uci -q delete vpnpool.main.extra_sub; uci commit vpnpool
+# ---- a switched-off subscription is not fetched, and keeps its cached copy ----
+uci set vpnpool.se.enabled=0; uci commit vpnpool
+fetch_setup 200 200; rm -f /tmp/curlmock/calls.log
+sh "$FETCH" >/dev/null 2>&1
+begin "fetch/disabled-subscription-not-fetched"
+expect_eq "no request to it" "$(mock_calls "GET $EXT")" 0
+expect_true "the enabled one was fetched (positive control)" [ "$(mock_calls "GET $PRI")" -ge 1 ]
+expect_eq "its cached copy kept" "$(ls /etc/vpnpool/sources_cache/s-*.raw 2>/dev/null | wc -l)" 2
+expect_eq "pool = the enabled subscription only" "$(pool_tags)" '["Pri1","Pri2"]'
+end
+uci set vpnpool.se.enabled=1; uci commit vpnpool
+
+# ---- a removed subscription leaves the cache, the meta and its marker ----
+uci delete vpnpool.se; uci commit vpnpool
 fetch_setup 500 500
 sh "$FETCH" >/dev/null 2>&1
 begin "fetch/removed-source-dropped-from-cache"
 expect_eq "pool = primary from cache only" "$(pool_tags)" '["Pri1","Pri2"]'
 expect_eq "one cached copy left" "$(ls /etc/vpnpool/sources_cache/s-*.raw 2>/dev/null | wc -l)" 1
+expect_jq "its meta gone, the other one kept" "$(cat /etc/vpnpool/subs.meta.json)" '(has("se")|not) and has("sp")'
+expect_true "its marker gone" [ ! -f /etc/vpnpool/sources_cache/.ok-se ]
 end
 
 # ---- start-up throttle (2.1): no re-download within 10 min unless the source set changed ----
@@ -109,13 +129,15 @@ echo "$(( $(date +%s) - 700 )) $(sig)" > /tmp/vpnpool/.last_fetch
 expect_true "due after 700 s" due
 echo "$(date +%s) $(sig)" > /tmp/vpnpool/.last_fetch
 expect_true "not due again (control for the next check)" sh -c '! sh -c ". /usr/libexec/vpnpool/lib.sh; fetch_due"'
-uci add_list vpnpool.main.extra_sub="$EXT"; uci commit vpnpool
+sub_section se "$EXT"
 expect_true "due at once when a subscription was added" due
+echo "$(date +%s) $(sig)" > /tmp/vpnpool/.last_fetch
+uci set vpnpool.se.name='Renamed'; uci commit vpnpool
+expect_true "a new name alone does not make a fetch due" sh -c '! sh -c ". /usr/libexec/vpnpool/lib.sh; fetch_due"'
 end
 
 # ---- review V5: a killed fetch records "interrupted" for what it did not finish ----
-reset_state
-uci set vpnpool.main.subscription_url="$PRI"; uci add_list vpnpool.main.extra_sub="$EXT"; uci commit vpnpool
+reset_state; two_subs
 fetch_setup 200 200; sh "$FETCH" >/dev/null 2>&1                     # one good run first
 mock_on; mock_rule "GET $PRI" 200 "$FXF/primary.b64" "$FXF/primary.hdr" 0.010 8; mock_rule "GET $EXT" 200 "$FXF/extra.txt"
 rm -f /tmp/curlmock/calls.log   # count only THIS run's requests

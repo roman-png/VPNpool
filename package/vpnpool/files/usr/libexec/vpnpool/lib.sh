@@ -207,54 +207,35 @@ tg_notify() {
 	return 0
 }
 
-# ---- saved-node store ----
-# Two persistent maps feed the single uci `saved_node` list:
-#   saved.map.json    — manual ⭐ picks (rpcd save_node/unsave_node)
-#   snapshot.map.json — auto-snapshot of currently-reachable nodes (snapshot.sh)
-# Keeping them separate means auto-snapshot can be bounded/replaced wholesale
-# without ever evicting a node the user saved by hand.
-SAVED_MAP=/etc/vpnpool/saved.map.json
-SNAP_MAP=/etc/vpnpool/snapshot.map.json
+# ---- the data model (ROADMAP 9): node ids everywhere, subscriptions as uci sections ----
+# model.uc is the shell scripts' door to it (subscriptions, picks, hidden ids, favourites,
+# id <-> tag of the last build); the stores are described in common.uc.
+MODEL=/usr/libexec/vpnpool/model.uc
+# the cache / output file key of a subscription URL (fetch.sh writes $SB_DATA/sources/s-<key>.raw)
+src_key() { printf '%s' "$1" | md5sum | cut -c1-12; }
+# node_resolve <id|tag> -> "<id>\t<tag>" of a node of the last build; rc 1 if there is none
+node_resolve() { ucode "$MODEL" resolve "$1" 2>/dev/null; }
 
-# Regenerate uci saved_node = unique union of both maps' link values, then commit.
-rebuild_saved_list() {
-	mkdir -p "$CONF_DIR"
-	[ -f "$SAVED_MAP" ] || echo '{}' > "$SAVED_MAP"
-	[ -f "$SNAP_MAP" ]  || echo '{}' > "$SNAP_MAP"
-	uci -q delete vpnpool.main.saved_node
-	jq -rn --slurpfile a "$SAVED_MAP" --slurpfile b "$SNAP_MAP" \
-		'[ (($a[0]//{})|.[]), (($b[0]//{})|.[]) ] | unique | .[]' 2>/dev/null \
-	| while IFS= read -r l; do [ -n "$l" ] && uci add_list vpnpool.main.saved_node="$l"; done
-	uci commit vpnpool
+# ---- what a backup holds (ONE rule: rpcd backup/restore and the 1.x -> 2.0 migration copy) ----
+# backup packs only files that match it, restore accepts only members that match it (our own
+# backup can never be refused). Regular files only.
+MEMBER_RE='^(etc/?|etc/config/?|etc/config/vpnpool|etc/vpnpool/?|etc/vpnpool/awg/?|etc/vpnpool/awg/[A-Za-z0-9._-]+\.conf|etc/vpnpool/[A-Za-z0-9._-]+\.map\.json)$'
+BACKUP_MAPS='*.map.json'
+backup_scan() {   # "ok <rel>" / "skip <rel>" for every candidate file of the live config
+	local f rel
+	echo "ok etc/config/vpnpool"
+	for f in /etc/vpnpool/awg/* /etc/vpnpool/$BACKUP_MAPS; do
+		[ -e "$f" ] || [ -L "$f" ] || continue
+		rel=${f#/}
+		if [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$rel" | grep -Eq "$MEMBER_RE"; then
+			echo "ok $rel"
+		else
+			echo "skip $rel"
+		fi
+	done
 }
+backup_members() { backup_scan | sed -n 's/^ok //p'; }   # names never contain spaces (MEMBER_RE)
 
-# JSON array of all saved tags (manual + snapshot), for the dashboard ⭐ flag.
-saved_tags_json() {
-	[ -f "$SAVED_MAP" ] || echo '{}' > "$SAVED_MAP"
-	[ -f "$SNAP_MAP" ]  || echo '{}' > "$SNAP_MAP"
-	jq -n --slurpfile a "$SAVED_MAP" --slurpfile b "$SNAP_MAP" \
-		'[ (($a[0]//{})|keys[]), (($b[0]//{})|keys[]) ] | unique' 2>/dev/null
-}
-
-# Resolve a saved tag -> its archived vless:// link (manual map first, then snapshot).
-# Used to (de)activate a saved node even when it's no longer in the live subscription.
-saved_link_for_tag() {   # $1=tag
-	[ -f "$SAVED_MAP" ] || echo '{}' > "$SAVED_MAP"
-	[ -f "$SNAP_MAP" ]  || echo '{}' > "$SNAP_MAP"
-	jq -rn --slurpfile a "$SAVED_MAP" --slurpfile b "$SNAP_MAP" --arg t "$1" \
-		'(($a[0]//{})[$t]) // (($b[0]//{})[$t]) // ""' 2>/dev/null
-}
-
-# JSON array [{tag,link}] of the whole saved archive (manual UNION snapshot), the
-# source for the dashboard's inactive "saved" list.
-saved_archive_json() {
-	[ -f "$SAVED_MAP" ] || echo '{}' > "$SAVED_MAP"
-	[ -f "$SNAP_MAP" ]  || echo '{}' > "$SNAP_MAP"
-	jq -n --slurpfile a "$SAVED_MAP" --slurpfile b "$SNAP_MAP" \
-		'[ (($a[0]//{})|to_entries[]), (($b[0]//{})|to_entries[]) ] | unique_by(.key) | map({tag:.key, link:.value})' 2>/dev/null
-}
-
-SUB_URL=$(uci -q get vpnpool.main.subscription_url)
 TPROXY_PORT=$(uci -q get vpnpool.main.tproxy_port); [ -n "$TPROXY_PORT" ] || TPROXY_PORT=1603
 FWMARK=$(uci -q get vpnpool.main.fwmark); [ -n "$FWMARK" ] || FWMARK=0x400000
 RT_TABLE=$(uci -q get vpnpool.main.route_table); [ -n "$RT_TABLE" ] || RT_TABLE=142
@@ -466,10 +447,10 @@ parse_interval() {
 	n=$(printf '%s' "$n" | sed 's/^0*//'); [ -n "$n" ] || n=0   # "08" is not octal here
 	echo $(( n * u ))
 }
-# Signature of the configured subscription set: a change (URL added/edited) makes a fetch due
-# at once regardless of the time throttle.
+# Signature of the configured subscription set (the enabled URLs): a change (a subscription
+# added, edited or switched on) makes a fetch due at once regardless of the time throttle.
 sources_sig() {
-	{ uci -q get vpnpool.main.subscription_url; uci -q get vpnpool.main.extra_sub; } 2>/dev/null | md5sum | cut -c1-12
+	ucode "$MODEL" subs 2>/dev/null | awk -F'\t' '$2 == 1 {print $4}' | md5sum | cut -c1-12
 }
 FETCH_STAMP="$SB_DATA/.last_fetch"   # "<epoch> <sources_sig>", written by fetch.sh
 # fetch_due -> 0 when the subscriptions should be downloaded now: never fetched since boot,

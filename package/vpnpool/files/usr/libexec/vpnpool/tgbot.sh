@@ -106,25 +106,32 @@ cmd_nodes() {
 	' 2>/dev/null
 }
 
-# /switch <n|tag>: point the "proxy" selector at a node (live + persisted).
+# /switch <n|tag>: "Connect" to a node — the soft preferred node (its id, ROADMAP 9.5: the daemon
+# keeps it while it works and falls back to the automatic choice when it fails) + the live
+# selector at once. "/switch auto" = back to the automatic choice.
 cmd_switch() {
-	local arg tag j code
+	local arg tag id j code
 	arg="$1"
-	[ -n "$arg" ] || { echo "usage: /switch <number|tag>"; return; }
+	[ -n "$arg" ] || { echo "usage: /switch <number|tag|auto>"; return; }
+	if [ "$arg" = auto ]; then
+		uci -q delete vpnpool.main.preferred_node; uci commit vpnpool 2>/dev/null
+		curl -s -m 5 -o /dev/null -X PUT "http://$CLASH_API/proxies/proxy" --data '{"name":"auto"}' 2>/dev/null
+		echo "automatic choice"; return
+	fi
 	j="$($LIBEXEC/status.sh 2>/dev/null)"
 	case "$arg" in
 		''|*[!0-9]*) tag="$arg" ;;                              # treat as a tag
 		*) tag=$(echo "$j" | jq -r --argjson i "$arg" '(.nodes // [])[$i-1].tag // ""' 2>/dev/null) ;;
 	esac
 	[ -n "$tag" ] || { echo "node not found"; return; }
-	# verify the tag exists
-	echo "$j" | jq -e --arg t "$tag" '(.nodes // []) | map(.tag) | index($t)' >/dev/null 2>&1 || {
-		echo "unknown node: $tag"; return; }
+	# the node must be in the pool; its id is what is stored
+	id=$(echo "$j" | jq -r --arg t "$tag" '(.nodes // []) | map(select(.tag == $t and (.deferred | not))) | .[0].id // ""' 2>/dev/null)
+	[ -n "$id" ] || { echo "unknown node: $tag"; return; }
+	uci set vpnpool.main.preferred_node="$id" 2>/dev/null
+	uci commit vpnpool 2>/dev/null
 	code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' -X PUT "http://$CLASH_API/proxies/proxy" \
 		--data "$(jq -nc --arg n "$tag" '{name:$n}')" 2>/dev/null)
-	[ "$code" = 204 ] || { echo "could not switch to $tag (service not answering)"; return; }
-	uci set vpnpool.main.selected_node="$tag" 2>/dev/null
-	uci commit vpnpool 2>/dev/null
+	[ "$code" = 204 ] || { echo "saved: $tag (applies when the service answers)"; return; }
 	echo "switched to: $tag"
 }
 
@@ -145,16 +152,16 @@ cmd_quota() {
 	' 2>/dev/null
 }
 
-# /saved: list saved (persistent) nodes.
+# /saved: list the favourite nodes (in the pool or kept from a source that no longer has them).
 cmd_saved() {
 	local j
 	j="$($LIBEXEC/status.sh 2>/dev/null)"
 	[ -n "$j" ] || { echo "no data"; return; }
 	echo "$j" | jq -r '
-		[ (.nodes // [])[] | select(.saved==true) ] as $sv |
-		if ($sv|length)==0 then "no saved nodes"
-		else "saved nodes (" + ($sv|length|tostring) + "):\n"
-			+ ($sv | .[:40] | map("⭐ " + .tag) | join("\n")) end
+		(.favorites // []) as $sv |
+		if ($sv|length)==0 then "no favourite nodes"
+		else "favourite nodes (" + ($sv|length|tostring) + "):\n"
+			+ ($sv | .[:40] | map("⭐ " + (.tag // .id) + (if .in_pool then "" else " (not in a source)" end)) | join("\n")) end
 	' 2>/dev/null
 }
 

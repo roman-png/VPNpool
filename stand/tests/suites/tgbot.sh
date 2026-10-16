@@ -211,3 +211,34 @@ expect_eq "no init.d enable in RAM mode" "$(gcount '^vpnpool enable' "$TINIT")" 
 expect_eq "on still starts" "$(gcount '^vpnpool start' "$TINIT")" 1
 end
 rm -f /etc/hotplug.d/iface/99-vpnpool-singbox-ram
+
+# ---- /switch = "Connect" (ROADMAP 9.5): the soft preferred node by id + the live selector ----
+reset_state
+printf 'vless://9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce@203.0.113.81:443?security=tls#Node1\nvless://9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce@203.0.113.82:443?security=tls#Node2\n' > "$TB/n.links"
+ucode /usr/libexec/vpnpool/parser.uc --with-id "$TB/n.links" > /tmp/vpnpool/nodes.json
+TID2=$(jq -r '.[1].id' /tmp/vpnpool/nodes.json)
+mock_on; mock_rule 'PUT http://127.0.0.1:9091/proxies/proxy' 204
+OUT=$(in_bot cmd_switch 2)
+begin "tgbot/switch-stores-the-preferred-id"
+expect_eq "reply" "$OUT" "switched to: Node2"
+expect_eq "preferred = Node2's id" "$(uci -q get vpnpool.main.preferred_node)" "$TID2"
+expect_eq "no hard pin" "$(uci -q get vpnpool.main.selected_node)" ''
+expect_eq "live selector switched" "$(mock_calls 'PUT http://127.0.0.1:9091/proxies/proxy')" 1
+end
+OUT=$(in_bot cmd_switch auto)
+begin "tgbot/switch-auto-clears-it"
+expect_eq "reply" "$OUT" "automatic choice"
+expect_eq "no preferred node" "$(uci -q get vpnpool.main.preferred_node)" ''
+end
+OUT=$(in_bot cmd_switch Nope)
+begin "tgbot/switch-unknown-node-refused"
+expect_eq "reply" "$OUT" "unknown node: Nope"
+expect_eq "nothing stored" "$(uci -q get vpnpool.main.preferred_node)" ''
+end
+jq -nc --arg i "$TID2" '{($i): {tag:"Node2", link:"vless://x", active:false, auto:false}, "aaaaaaaaaaaa": {tag:"Gone", link:"vless://y", active:false, auto:true}}' > /etc/vpnpool/favorites.map.json
+OUT=$(in_bot cmd_saved)
+begin "tgbot/saved-lists-the-favourites"
+expect_true "two favourites" sh -c 'printf "%s" "$1" | grep -q "favourite nodes (2)"' _ "$OUT"
+expect_true "the one no source has is marked" sh -c 'printf "%s" "$1" | grep -q "Gone (not in a source)"' _ "$OUT"
+expect_true "the one in the pool is plain" sh -c 'printf "%s" "$1" | grep -qx "⭐ Node2"' _ "$OUT"
+end

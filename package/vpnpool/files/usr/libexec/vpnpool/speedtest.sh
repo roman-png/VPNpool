@@ -6,14 +6,18 @@
 # LAN onto the node under test or leave it there if the test is killed. Writes a JSON result.
 . /usr/libexec/vpnpool/lib.sh
 
-TAG="$1"
+# $1 = the node id (or its tag in the last build: older screens / the bot send names)
+ARG="$1"
 OUT=/tmp/vpnpool/.speedtest-result.json
 mkdir -p /tmp/vpnpool
 NTP=$(uci -q get vpnpool.main.node_test_port); [ -n "$NTP" ] || NTP=1606
 URL=$(uci -q get vpnpool.main.speedtest_url)
 [ -n "$URL" ] || URL="https://speed.cloudflare.com/__down?bytes=10000000"
 
-[ -n "$TAG" ] || { echo '{"ok":false,"code":"invalid","error":"invalid"}' > "$OUT"; exit 0; }
+[ -n "$ARG" ] || { echo '{"ok":false,"code":"invalid","error":"invalid"}' > "$OUT"; exit 0; }
+# the node of the last build: its id keys the result, its tag is what the test selector knows
+R=$(node_resolve "$ARG") || { jq -nc --arg t "$ARG" '{ok:false, tag:$t, code:"not_found", error:"not_found"}' > "$OUT"; exit 0; }
+ID=${R%%	*}; TAG=${R#*	}
 
 # Low-memory guard (also enforced by rpcd, repeated here for direct invocation):
 # bail out rather than risk OOM-killing sing-box on a tiny router.
@@ -25,12 +29,12 @@ if [ -n "$AVAIL" ] && [ "$AVAIL" -lt "$MINKB" ]; then
 fi
 
 # The test selector is shared by speedtest and unlock: one test at a time.
-node_test_lock || { jq -nc --arg t "$TAG" '{ok:false, tag:$t, code:"busy", error:"busy"}' > "$OUT"; exit 0; }
+node_test_lock || { jq -nc --arg t "$TAG" --arg i "$ID" '{ok:false, id:$i, tag:$t, code:"busy", error:"busy"}' > "$OUT"; exit 0; }
 trap node_test_unlock EXIT
 trap 'exit 1' INT TERM   # a killed test must stop, not carry on after releasing the lock
 
 if ! node_test_select "$TAG"; then
-	jq -nc --arg t "$TAG" '{ok:false, tag:$t, code:"not_found", error:"not_found"}' > "$OUT"; exit 0
+	jq -nc --arg t "$TAG" --arg i "$ID" '{ok:false, id:$i, tag:$t, code:"not_found", error:"not_found"}' > "$OUT"; exit 0
 fi
 
 RES=$(curl -s -m 25 --proxy "socks5h://127.0.0.1:$NTP" -o /dev/null \
@@ -41,9 +45,9 @@ SZ=$(echo "$RES"  | awk '{print $2+0}')
 MBPS=$(awk -v b="${BPS:-0}" 'BEGIN{printf "%.2f", b*8/1000000}')
 
 if [ "${SZ:-0}" -gt 0 ]; then
-	jq -n --arg t "$TAG" --argjson mbps "$MBPS" --argjson bytes "${SZ:-0}" \
-		'{ok:true, tag:$t, mbps:$mbps, bytes:$bytes}' > "$OUT"
+	jq -n --arg t "$TAG" --arg i "$ID" --argjson mbps "$MBPS" --argjson bytes "${SZ:-0}" \
+		'{ok:true, id:$i, tag:$t, mbps:$mbps, bytes:$bytes}' > "$OUT"
 else
-	jq -n --arg t "$TAG" '{ok:false, tag:$t, code:"no_data", error:"no_data"}' > "$OUT"
+	jq -n --arg t "$TAG" --arg i "$ID" '{ok:false, id:$i, tag:$t, code:"no_data", error:"no_data"}' > "$OUT"
 fi
 exit 0

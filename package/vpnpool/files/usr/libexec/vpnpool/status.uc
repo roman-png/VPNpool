@@ -3,24 +3,28 @@
 // One process does it all (ROADMAP 3.7): uci is read ONCE through the ucode uci module, files
 // are read directly, the daemon is its pidfile PID (checked in /proc). Processes per poll:
 //   nft (is routing installed) + one curl for the clash API (proxies + connections in one call,
-//   to stdout — no shared temp files, polls may overlap — only while the daemon runs) +
-//   parser.uc only when the imported/manual/saved link files CHANGED (cached by
-//   inode:mtime:size + the parser's own signature in /tmp/vpnpool/.status-cache.json).
-// Output: the same fields the UI has always read, plus ok/code/daemon (the rpcd reply shape),
-// node `id`, build (build_status.json), busy, paused, ping_progress, subscriptions. Secrets are
-// masked: telegram_token -> "<bot id>:***", subscription URLs -> scheme://host/***.
+//   to stdout — no shared temp files, polls may overlap — only while the daemon runs). The node
+//   list carries its source (build.sh `_src`), so no link file is parsed here.
+// Output: ok/code/daemon (the rpcd reply shape); nodes with their id, source, favourite /
+// preferred / dead / kept marks; subscriptions (each with its expiry, quota, update interval,
+// "updated", mode and picks), favorites, hidden, preferred, dead_ids / kept_ids /
+// auto_member_ids (ROADMAP 9: node ids everywhere); build, busy, paused, ping_progress, engine,
+// migration (what the 1.x -> 2.0 migration could not match). The older screens' fields
+// (subscription, extra_subs, sources, saved_inactive, dead_nodes / kept_nodes / auto_members as
+// tags, settings.preferred_node as a tag, settings.selected_node "") are still there until
+// stage 7. Secrets are masked: telegram_token -> "<bot id>:***", URLs -> scheme://host/***.
 'use strict';
 
-import { readfile, stat, lsdir, popen, access, writefile, unlink, open } from 'fs';
+import { readfile, stat, lsdir, popen, access, open } from 'fs';
 import { cursor } from 'uci';
-import { rand } from 'math';
-import { uniq, read_json, write_atomic, file_sig, mask_url, mask_token, str_key, as_list, nid, SB_AWG, engine_cap } from './common.uc';
+import { read_json, mask_url, mask_token, str_key, as_list, SB_AWG, engine_cap,
+	is_id, subs_of, fav_read } from './common.uc';
 
 const SB = '/tmp/vpnpool';
 const CONF = '/etc/vpnpool';
-const PARSER = '/usr/libexec/vpnpool/parser.uc';
 
-let all = cursor().get_all('vpnpool') ?? {};
+let U = cursor();
+let all = U.get_all('vpnpool') ?? {};
 let M = all.main ?? {};
 let RT = all.routing ?? {};
 function o(name, def) { let v = M[name]; return (v != null && v != '') ? v : def; }
@@ -93,58 +97,25 @@ if (running) {
 }
 let px = prox.proxies ?? {};
 
-// ---- parser results of the small link files, cached by file signature ----
-let CACHEF = SB + '/.status-cache.json';
-let PARSER_SIG = file_sig(PARSER);   // a new parser.uc (package update) invalidates the cache
-let cache = read_json(CACHEF, {});
-if (type(cache) != 'object') cache = {};
-let cache_dirty = false;
-function parsed(key, sig, path_fn) {
-	let c = cache[key];
-	sig = sig + '|' + PARSER_SIG;
-	if (c && c.sig == sig) return c.v;
-	let v = [];
-	let path = path_fn();
-	if (path && (stat(path)?.size ?? 0) > 0) {
-		let out = run(sprintf("ucode %s '%s' 2>/dev/null", PARSER, path));
-		try { v = json(out); } catch (e) { v = []; }
-		if (type(v) != 'array') v = [];
-	}
-	if (path && index(path, '/.archive.links.') >= 0) unlink(path);
-	cache[key] = { sig: sig, v: v };
-	cache_dirty = true;
-	return v;
-}
-function tags_of(arr) { return map(arr, (n) => n.tag); }
-let imp_tags = tags_of(parsed('imported', file_sig(SB + '/imported.links'), () => SB + '/imported.links'));
-let man_tags = tags_of(parsed('manual', file_sig(SB + '/manual.links'), () => SB + '/manual.links'));
-
-// saved archive = manual stars (saved.map) UNION auto-snapshot (snapshot.map), one entry per tag
-let SAVED_MAP = CONF + '/saved.map.json', SNAP_MAP = CONF + '/snapshot.map.json';
-let archive_nodes = parsed('archive', file_sig(SAVED_MAP) + '|' + file_sig(SNAP_MAP), function() {
-	let a = read_json(SAVED_MAP, {}), b = read_json(SNAP_MAP, {});
-	let by = {};
-	for (let m in [ b, a ])                      // a (manual) wins over the snapshot
-		if (type(m) == 'object') for (let k in m) by[k] = m[k];
-	let links = [];
-	for (let k in sort(keys(by))) if (type(by[k]) == 'string' && length(by[k])) push(links, by[k]);
-	if (!length(links)) return null;
-	let p = sprintf('%s/.archive.links.%s', SB, uniq());   // own name: polls may overlap
-	writefile(p, join('\n', links) + '\n');
-	return p;
-});
-let archive_ids = {};
-for (let n in archive_nodes) archive_ids[nid(n)] = true;
-let actsaved_ids = {};
-for (let n in parsed('active_saved', file_sig(SB + '/active_saved.links'), () => SB + '/active_saved.links'))
-	actsaved_ids[nid(n)] = true;
-if (cache_dirty) write_atomic(CACHEF, sprintf('%J', cache));
+// ---- the data model (ROADMAP 9; the stores are described in common.uc) ----
+let SUBS = subs_of(U);
+let fav = fav_read();
+let pref_id = o('preferred_node', '');
+let hidden_ids = filter(as_list(M.hidden, true), is_id);
+let auto_ids = filter(as_list(M.auto_member, true), is_id);
+let keep_ids = filter(as_list(M.keep_auto, true), is_id);
+let dead_ids = read_json(SB + '/.dead_ids.json', []);
+if (type(dead_ids) != 'array') dead_ids = [];
+function set_of(a) { let s = {}; for (let x in a) s[x] = true; return s; }
+let dead_set = set_of(dead_ids), keep_set = set_of(keep_ids), hidden_set = set_of(hidden_ids);
 
 // ---- nodes ----
 let nodes_in = read_json(SB + '/nodes.json', []);
 if (type(nodes_in) != 'array') nodes_in = [];
-let node_tag_set = {};
-for (let n in nodes_in) node_tag_set[n.tag] = true;
+let node_tag_set = {}, tag_of = {};
+for (let n in nodes_in) if (type(n) == 'object') { node_tag_set[n.tag] = true; if (n.id) tag_of[n.id] = n.tag; }
+// the ids of a list -> the tags of this build (the legacy fields of the older screens)
+function tags_of(ids) { let r = []; for (let i in ids) if (tag_of[i] != null) push(r, tag_of[i]); return r; }
 
 // per-node / per-client live traffic from the clash connections
 let ntraf = {}, ctraf = {}, clist = [];
@@ -170,34 +141,61 @@ for (let c in conn_arr) {
 clist = sort(clist, (a, b) => (b.up + b.down) - (a.up + a.down));
 if (length(clist) > 30) clist = slice(clist, 0, 30);
 
+let sub_mode = {};
+for (let s in SUBS) sub_mode[s.id] = s.mode;
+// where a node comes from (build.sh `_src`): manual | awg | favorite | subscription | legacy
+function source_of(src) {
+	src = '' + (src ?? 'legacy');
+	if (substr(src, 0, 4) == 'sub:') return [ 'subscription', substr(src, 4) ];
+	if (src == 'fav') return [ 'favorite', null ];
+	return [ (src in [ 'manual', 'awg' ]) ? src : 'legacy', null ];
+}
+// the group of the older screens: amneziawg | manual | imported (a "pick" subscription) | subscription
+function legacy_group(n, kind, sid) {
+	if (n.type == 'awg' || n.type == 'wireguard') return 'amneziawg';
+	if (kind == 'manual') return 'manual';
+	if (kind == 'subscription' && sub_mode[sid] == 'pick') return 'imported';
+	return 'subscription';
+}
+
 let unlock = read_json(CONF + '/unlock.map.json', {});
+if (type(unlock) != 'object') unlock = {};
 let ndelay = read_json(SB + '/.nodedelay.json', {});
-let active_ids = {};
-let nodes = [];
+if (type(ndelay) != 'object') ndelay = {};
+let nodes = [], pool_ids = {}, by_sub = {};
 for (let n in nodes_in) {
 	if (type(n) != 'object') continue;
-	let id_legacy = nid(n);
-	active_ids[id_legacy] = true;
+	let id = n.id ?? null;
+	if (id) pool_ids[id] = true;
 	let delay = null;
 	for (let h in (px[n.tag]?.history ?? []))
 		if (h?.delay != null && h.delay > 0) delay = h.delay;
-	if (delay == null && type(ndelay) == 'object') delay = ndelay[n.tag] ?? null;
+	if (delay == null && id) delay = ndelay[id] ?? null;
 	let p0 = (type(n.peers) == 'array') ? n.peers[0] : null;
-	let group = (n.type == 'awg' || n.type == 'wireguard') ? 'amneziawg'
-		: ((n.tag in imp_tags) ? 'imported' : ((n.tag in man_tags) ? 'manual' : 'subscription'));
+	let sk = source_of(n._src);
+	if (sk[1]) by_sub[sk[1]] = (by_sub[sk[1]] ?? 0) + 1;
+	let f = id ? fav[id] : null;
 	push(nodes, {
 		tag: n.tag,
-		id: n.id ?? null,
+		id: id,
 		server: n.server ?? p0?.address,
 		port: n.server_port ?? p0?.port,
 		proto: n.type,
 		delay: delay,
 		up: ntraf[n.tag]?.up ?? 0,
 		down: ntraf[n.tag]?.down ?? 0,
-		saved: !!archive_ids[id_legacy],
-		active_saved: !!actsaved_ids[id_legacy],
-		unlock: (type(unlock) == 'object') ? (unlock[n.tag] ?? null) : null,
-		group: group,
+		source: sk[0],
+		sub: sk[1],
+		favorite: type(f) == 'object',
+		preferred: id != null && id == pref_id,
+		dead: !!dead_set[id],
+		kept: !!keep_set[id],
+		// legacy fields of the older screens: saved = favourite; active_saved = a favourite that is
+		// in the pool only from the archive (no source has it)
+		saved: type(f) == 'object',
+		active_saved: sk[0] == 'favorite',
+		unlock: id ? (unlock[id] ?? null) : null,
+		group: legacy_group(n, sk[0], sk[1]),
 		hints: n.random_trailers ? [ 'awg_random_trailers' ] : null
 	});
 }
@@ -208,43 +206,79 @@ let deferred = read_json(SB + '/deferred.json', []);
 if (type(deferred) != 'array') deferred = [];
 for (let d in deferred) {
 	if (type(d) != 'object') continue;
+	let sk = source_of(d._src);
+	let f = d.id ? fav[d.id] : null;
+	if (d.id) pool_ids[d.id] = true;
 	push(nodes, {
 		tag: d.tag, id: d.id ?? null, server: d.server, port: d.port, proto: d.type,
-		delay: null, up: 0, down: 0, saved: false, active_saved: false, unlock: null,
-		group: (d.type == 'awg' || d.type == 'wireguard') ? 'amneziawg' : null,   // others: source not tracked here
+		delay: null, up: 0, down: 0, source: sk[0], sub: sk[1], favorite: type(f) == 'object',
+		preferred: d.id != null && d.id == pref_id, dead: false, kept: false,
+		saved: type(f) == 'object', active_saved: false, unlock: null,
+		group: (d.type == 'awg' || d.type == 'wireguard') ? 'amneziawg' : legacy_group(d, sk[0], sk[1]),
 		hints: d.hints ?? null,
 		deferred: true, reason: d.reason, detail: d.detail ?? null
 	});
 }
 
-// archived nodes whose identity is NOT live (one per identity, ordered by it)
-let inact = {};
-for (let n in archive_nodes) {
-	let k = nid(n);
-	if (!active_ids[k] && !inact[k]) inact[k] = { tag: n.tag, server: n.server, port: n.server_port };
+// ---- favourites (ROADMAP 9.3): every one, in the pool or kept from a source that lost it ----
+let favorites = [], saved_inactive = [];
+for (let id in sort(keys(fav))) {
+	let f = fav[id];
+	if (type(f) != 'object') continue;
+	let in_pool = !!pool_ids[id];
+	push(favorites, { id: id, tag: tag_of[id] ?? f.tag ?? null, in_pool: in_pool, active: f.active === true,
+		auto: f.auto === true, type: f.type ?? null, server: f.server ?? null, port: f.port ?? null, at: f.at ?? null });
+	if (!in_pool) push(saved_inactive, { id: id, tag: f.tag ?? id, server: f.server ?? null, port: f.port ?? null });
 }
-let saved_inactive = map(sort(keys(inact)), (k) => inact[k]);
 
-// ---- subscription quota / expiry (primary) ----
-let expire = trim(readfile(CONF + '/sub.expire') ?? '');
-expire = match(expire, /^[0-9]+$/) ? +expire : null;
-let usage = split(trim(readfile(CONF + '/sub.usage') ?? ''), /[ \t]+/);
-let sup = num(usage[0], 0), sdn = num(usage[1], 0), stot = num(usage[2], 0);
+// ---- hidden (ROADMAP 9.4): the nodes a source still has (build.sh -> hidden.json) + ids no
+// source has any more (they can still be returned or forgotten) ----
+let hidden = [], hseen = {};
+let hj = read_json(SB + '/hidden.json', []);
+for (let h in ((type(hj) == 'array') ? hj : [])) {
+	if (type(h) != 'object' || !hidden_set[h.id] || hseen[h.id]) continue;
+	hseen[h.id] = true;
+	let sk = source_of(h.src);
+	push(hidden, { id: h.id, tag: h.tag, type: h.type, server: h.server, port: h.port, source: sk[0], sub: sk[1], in_source: true });
+}
+for (let id in hidden_ids) if (!hseen[id]) push(hidden, { id: id, tag: null, in_source: false });
 
-// ---- per-source fetch results (fetch.sh -> fetch_status.json, full URLs; masked here) ----
+// ---- subscriptions (ROADMAP 9.1): each with its own expiry, quota, update interval, "updated" ----
+let meta = read_json(CONF + '/subs.meta.json', {});
+if (type(meta) != 'object') meta = {};
 let fst = read_json(SB + '/fetch_status.json', {});
 if (type(fst) != 'object') fst = {};
-let sub_url = o('subscription_url', '');
-let extra = as_list(M.extra_sub, true);
-let subscriptions = [];
-function sub_entry(u, kind) {
-	let f = fst[u] ?? {};
-	push(subscriptions, { key: str_key(u), kind: kind, url: mask_url(u),
-		last_fetch_at: f.at ?? null, last_ok_at: f.last_ok_at ?? null,
-		result: f.result ?? null, nodes: f.nodes ?? null });
+function clean_text(s, max) {
+	if (type(s) != 'string') return null;
+	if (substr(s, 0, 7) == 'base64:') s = b64dec(trim(substr(s, 7))) ?? '';
+	s = trim(replace(s, /[[:cntrl:]]+/g, ' '));
+	if (length(s) > max) s = substr(s, 0, max);
+	return length(s) ? s : null;
 }
-if (length(sub_url)) sub_entry(sub_url, 'primary');
-for (let u in extra) sub_entry(u, 'extra');
+function host_of(u) { let m = match(u ?? '', /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^@\/?#]*@)?([^\/?#:]+)/); return m ? m[2] : ''; }
+let subscriptions = [], primary = null, extra_masked = [], source_masked = [];
+for (let s in SUBS) {
+	let m = (type(meta[s.id]) == 'object') ? meta[s.id] : {};
+	let f = fst[s.url] ?? {};
+	let okm = stat(CONF + '/sources_cache/.ok-' + s.id);
+	let used = (m.upload != null || m.download != null) ? ((m.upload ?? 0) + (m.download ?? 0)) : null;
+	let missing = 0;
+	if (s.mode == 'pick') for (let i in s.pick) if (!pool_ids[i] && !hidden_set[i]) missing++;
+	let e = {
+		id: s.id, key: str_key(s.url), name: length(s.name) ? s.name : (clean_text(m.title, 64) ?? host_of(s.url)),
+		title: clean_text(m.title, 64), url: mask_url(s.url), enabled: s.enabled, mode: s.mode,
+		picked: length(s.pick), pick_missing: missing, in_pool: by_sub[s.id] ?? 0,
+		expire: m.expire ?? null, used: used, total: m.total ?? null, upload: m.upload ?? null, download: m.download ?? null,
+		update_interval: m.update_interval ?? null, web_page: (type(m.web_page) == 'string') ? mask_url(m.web_page) : null,
+		updated_at: f.last_ok_at ?? (okm ? okm.mtime : null), last_fetch_at: f.at ?? null,
+		result: f.result ?? null, nodes: f.nodes ?? null,
+		kind: null
+	};
+	if (primary == null && s.mode == 'all') { primary = e; e.kind = 'primary'; }
+	else if (s.mode == 'all') { e.kind = 'extra'; push(extra_masked, e.url); }
+	else { e.kind = 'pick'; push(source_masked, e.url); }
+	push(subscriptions, e);
+}
 
 // ---- busy workers / progress ----
 let busy = {
@@ -258,8 +292,6 @@ let busy = {
 };
 let ping_progress = read_json(SB + '/.ping-progress.json', null);
 
-let dead = read_json(SB + '/.dead_tags.json', []);
-if (type(dead) != 'array') dead = [];
 // ---- the engine (ROADMAP 4.1): the binary the live config was checked with (build.sh -> .sb_bin),
 // its version and AWG support, measured by engine_cap (cached by mtime:size: a poll spawns nothing
 // unless a binary changed) + the AWG build if it is installed. awg = AmneziaWG nodes can run.
@@ -275,6 +307,12 @@ if (antidpi == '1') antidpi = 'on';
 else if (!(antidpi in [ 'on', 'off', 'aggressive' ])) antidpi = 'off';
 function intopt(name, def) { let v = '' + o(name, ''); return match(v, /^[0-9]+$/) ? +v : def; }
 let token = o('telegram_token', '');
+// the 1.x -> 2.0 migration (migrate.sh): what it could not match stays listed here
+let mig = read_json(CONF + '/migration.json', null);
+let migration = (type(mig) == 'object') ? { at: mig.at ?? null, from: mig.from ?? null, backup: mig.backup ?? null,
+	// a link-valued item is shown as scheme://host/*** (it carries the node's credential)
+	unmatched: (type(mig.unmatched) == 'array') ? map(mig.unmatched, (x) => ({ store: x?.store,
+		value: (type(x?.value) == 'string' && index(x.value, '://') >= 0) ? mask_url(x.value) : (x?.value ?? null) })) : [] } : null;
 
 printf('%J\n', {
 	ok: true, code: 'ok', daemon: 'n/a',
@@ -290,24 +328,34 @@ printf('%J\n', {
 	mode: o('mode', 'selective'),
 	active: px.proxy?.now ?? '',
 	auto_now: px.auto?.now ?? '',
-	subscription: { url: mask_url(sub_url), expire: expire, used: sup + sdn, total: stot },
+	preferred: length(pref_id) ? { id: pref_id, tag: tag_of[pref_id] ?? fav[pref_id]?.tag ?? null, in_pool: !!pool_ids[pref_id] } : null,
 	subscriptions: subscriptions,
+	favorites: favorites,
+	hidden: hidden,
 	build: read_json(SB + '/build_status.json', null),
 	busy: busy,
 	ping_progress: ping_progress,
 	nodes: nodes,
-	saved_inactive: saved_inactive,
-	dead_nodes: dead,
-	kept_nodes: as_list(M.keep_auto, false),
-	auto_members: as_list(M.auto_member, false),
+	dead_ids: dead_ids,
+	kept_ids: keep_ids,
+	auto_member_ids: auto_ids,
+	migration: migration,
 	traffic: { up_total: conns.uploadTotal ?? 0, down_total: conns.downloadTotal ?? 0, connections: length(conn_arr) },
 	client_traffic: clist,
 	domains: as_list(RT.domain, true),
 	manual_nodes: as_list(M.manual_node, true),
-	sources: map(as_list(M.source, true), mask_url),
-	extra_subs: map(extra, mask_url),
 	auto_domains: as_list(RT.auto_domain, true),
 	communities: as_list(RT.community, true),
+	// ---- legacy fields of the older screens (stage 7 drops them): tags instead of ids, one
+	// "primary" subscription (the first one that takes every node), extra ones, pick sources
+	subscription: primary ? { url: primary.url, expire: primary.expire, used: primary.used ?? 0, total: primary.total ?? 0 }
+	                      : { url: '', expire: null, used: 0, total: 0 },
+	extra_subs: extra_masked,
+	sources: source_masked,
+	saved_inactive: saved_inactive,
+	dead_nodes: tags_of(dead_ids),
+	kept_nodes: tags_of(keep_ids),
+	auto_members: tags_of(auto_ids),
 	settings: {
 		failover_interval: num(o('failover_interval', '60'), 60),
 		subscription_interval: o('subscription_interval', '6h'),
@@ -316,8 +364,10 @@ printf('%J\n', {
 		ipv6: o('ipv6', 'block'),
 		killswitch: o('killswitch', '0') == '1',
 		dns_protect: o('dns_protect', '0') == '1',
-		preferred_node: o('preferred_node', ''),
-		selected_node: o('selected_node', ''),
+		preferred_id: pref_id,
+		favorites_only: o('favorites_only', '0') == '1',
+		preferred_node: tag_of[pref_id] ?? '',   // legacy: the tag
+		selected_node: '',                       // legacy: there is no hard pin any more
 		telegram_enabled: o('telegram_enabled', '0') == '1',
 		telegram_token: mask_token(token),
 		telegram_token_set: length(token) > 0,
@@ -340,7 +390,8 @@ printf('%J\n', {
 		log_level: o('log_level', 'warn'),
 		dns_strategy: o('dns_strategy', 'prefer_ipv4'),
 		adaptive_max_per_run: intopt('adaptive_max_per_run', 8),
-		prefilter_concurrency: intopt('prefilter_concurrency', 16)
+		prefilter_concurrency: intopt('prefilter_concurrency', 16),
+		singbox_bin: o('singbox_bin', '')
 	},
 	clients: as_list(M.client, true),
 	client_devices: as_list(M.client_dev, true)

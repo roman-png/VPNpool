@@ -72,32 +72,44 @@ expect_jq "masked form + a set flag" "$SOUT" '.settings.telegram_token=="123456:
 end
 daemon_stop
 
-# ---- stage 3: subscription URLs masked, per-source fetch result, build result, busy, pause ----
+# ---- stage 3 + 6: subscriptions (sections, ROADMAP 9.1) masked, each with its own fetch result,
+# expiry / quota / provider interval / "updated"; build result, busy, pause ----
 PRI='https://sub.example.com/sub/SECRETTOKEN123?x=1'
 EXT='https://extra.example.com/list/SECRET2'
 SRC='https://lists.example.com/src/SECRET3'
-uci set vpnpool.main.subscription_url="$PRI"; uci add_list vpnpool.main.extra_sub="$EXT"; uci add_list vpnpool.main.source="$SRC"; uci commit vpnpool
-jq -nc --arg p "$PRI" '{($p): {at: 1700000100, result: "cached", nodes: 0, primary: true, last_ok_at: 1700000000}}' > /tmp/vpnpool/fetch_status.json
+ID1=$(jq -r '.[0].id' "$FXS/nodes.json"); ID2=$(jq -r '.[1].id' "$FXS/nodes.json")
+sub_section sp "$PRI"; sub_section se "$EXT"; sub_section ss "$SRC" pick 1 "$ID2" 0123456789ab
+uci set vpnpool.sp.name='My provider'; uci commit vpnpool
+jq -nc --arg p "$PRI" '{($p): {id: "sp", at: 1700000100, result: "cached", nodes: 0, last_ok_at: 1700000000}}' > /tmp/vpnpool/fetch_status.json
+jq -nc --arg w "https://sub.example.com/panel/SECRETTOKEN123" '{sp: {expire: 1893456000, upload: 100, download: 200, total: 1000, update_interval: 43200, title: null, web_page: $w},
+	se: {expire: null, upload: null, download: null, total: null, update_interval: null, title: "base64:VGl0bGUgRQ==", web_page: null}}' > /etc/vpnpool/subs.meta.json
 echo '{"at":1700000200,"ok":true,"nodes":300,"skipped":1,"dropped":[{"source":"000.raw","line":4,"reason":"bad_port"}],"error":null}' > /tmp/vpnpool/build_status.json
 echo '{"running":true,"done":5,"total":300,"alive":4}' > /tmp/vpnpool/.ping-progress.json
 sleep 300 & LIVE=$!
 echo "$LIVE" > /tmp/vpnpool/.ping-running          # a live owner -> busy
 echo 999999 > /tmp/vpnpool/.speedtest-running     # a dead owner -> not busy
 : > /tmp/vpnpool/.routing_paused
+# the build labels where each node comes from: 2 from sp, 1 from the pick subscription ss
+jq --arg a "$ID1" --arg b "$ID2" 'map(if .id == $b then ._src = "sub:ss" elif .tag == "Node003" then ._src = "manual" else ._src = "sub:sp" end)' \
+	"$FXS/nodes.json" > "$FXS/nodes.src.json"
+cp "$FXS/nodes.json" "$FXS/nodes.plain.json"; cp "$FXS/nodes.src.json" "$FXS/nodes.json"
 measure_status
+cp "$FXS/nodes.plain.json" "$FXS/nodes.json"
 kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null
 rm -f /tmp/vpnpool/.ping-running /tmp/vpnpool/.speedtest-running /tmp/vpnpool/.routing_paused
 begin "status/subscription-urls-masked"
 expect_eq "secret paths in status" "$(printf '%s' "$SOUT" | gcount -e 'SECRETTOKEN123' -e 'list/SECRET2' -e 'src/SECRET3')" 0
-expect_jq "masked primary + extra" "$SOUT" '.subscription.url=="https://sub.example.com/***" and .extra_subs==["https://extra.example.com/***"]'
+expect_jq "legacy fields: masked primary + extra" "$SOUT" '.subscription.url=="https://sub.example.com/***" and .extra_subs==["https://extra.example.com/***"]'
 end
 begin "status/source-urls-masked"
-expect_jq "masked probe source" "$SOUT" '.sources==["https://lists.example.com/***"]'
+expect_jq "legacy: the pick subscription is the probe source" "$SOUT" '.sources==["https://lists.example.com/***"]'
 end
 begin "status/subscriptions-last-fetch"
-expect_jq "primary: last fetch, last success, result" "$SOUT" \
-	'.subscriptions[0] | .kind=="primary" and .url=="https://sub.example.com/***" and .last_fetch_at==1700000100 and .last_ok_at==1700000000 and .result=="cached" and (.key|length)==12'
-expect_jq "extra never fetched -> null, not invented" "$SOUT" '.subscriptions[1] | .kind=="extra" and .last_fetch_at==null and .result==null'
+expect_jq "sp: id, name, last fetch, last success, result, its own expiry/quota/interval" "$SOUT" \
+	'.subscriptions[0] | .id=="sp" and .name=="My provider" and .kind=="primary" and .url=="https://sub.example.com/***" and .last_fetch_at==1700000100 and .updated_at==1700000000 and .result=="cached" and (.key|length)==12 and .expire==1893456000 and .used==300 and .total==1000 and .update_interval==43200 and .web_page=="https://sub.example.com/***" and .mode=="all" and .enabled==true'
+expect_jq "se never fetched -> null, not invented; name from its base64 title" "$SOUT" '.subscriptions[1] | .kind=="extra" and .last_fetch_at==null and .result==null and .updated_at==null and .name=="Title E" and .expire==null and .used==null'
+expect_jq "ss: pick mode, 2 picked, 1 of them not in the pool, 1 node in the pool" "$SOUT" '.subscriptions[2] | .kind=="pick" and .mode=="pick" and .picked==2 and .pick_missing==1 and .in_pool==1'
+expect_jq "legacy quota of the primary" "$SOUT" '.subscription.expire==1893456000 and .subscription.used==300 and .subscription.total==1000'
 end
 begin "status/build-busy-pause-progress"
 expect_jq "build result passed through" "$SOUT" '.build.ok==true and .build.nodes==300 and .build.dropped[0].reason=="bad_port"'
@@ -105,48 +117,64 @@ expect_jq "busy: ping (live owner) yes, speedtest (dead owner) no" "$SOUT" '.bus
 expect_jq "ping progress" "$SOUT" '.ping_progress.done==5 and .ping_progress.total==300'
 expect_jq "Telegram pause" "$SOUT" '.paused==true'
 end
+begin "status/node-source-from-the-build"
+expect_jq "Node003 manual, Node002 from the pick subscription (legacy group imported), Node001 subscription" "$SOUT" \
+	'(.nodes[] | select(.tag=="Node003") | .source=="manual" and .group=="manual" and .sub==null) and (.nodes[] | select(.tag=="Node002") | .source=="subscription" and .sub=="ss" and .group=="imported") and (.nodes[] | select(.tag=="Node001") | .source=="subscription" and .sub=="sp" and .group=="subscription")'
+end
 measure_status
 begin "status/flags-clear-after"   # the same fields answer "no" once the files are gone
 expect_jq "not busy, not paused" "$SOUT" '.busy.ping==false and .paused==false'
 end
 
-# ---- the small link files are parsed once and cached by mtime (manual node grouping) ----
-printf 'vless://%s@203.0.113.9:443?security=tls&sni=m.example#Node001\n' "$U" > /tmp/vpnpool/manual.links
-rm -f /tmp/vpnpool/.status-cache.json
-measure_status; P1=$SPROCS
-begin "status/manual-group-from-parsed-links"
-expect_jq "Node001 grouped as manual, others subscription" "$SOUT" \
-	'(.nodes[] | select(.tag=="Node001") | .group)=="manual" and (.nodes[] | select(.tag=="Node002") | .group)=="subscription"'
+# ---- stage 6: favourites, hidden, preferred, the stores by id + the older screens' tag fields ----
+ID3=$(jq -r '.[2].id' "$FXS/nodes.json")
+jq -nc --arg a "$ID1" '{($a): {tag: "Node001", link: "vless://x", active: false, auto: false, type: "vless", server: "10.0.1.7", port: 443},
+	"aaaaaaaaaaaa": {tag: "Gone-Fav", link: "vless://y", active: false, auto: true, type: "vless", server: "203.0.113.200", port: 443}}' > /etc/vpnpool/favorites.map.json
+uci set vpnpool.main.preferred_node="$ID2"
+uci add_list vpnpool.main.hidden="$ID3"; uci add_list vpnpool.main.hidden=bbbbbbbbbbbb
+uci add_list vpnpool.main.auto_member="$ID1"; uci add_list vpnpool.main.keep_auto="$ID2"; uci commit vpnpool
+jq -nc --arg c "$ID3" '[{id: $c, tag: "Node003-hidden", type: "vless", server: "10.0.3.7", port: 443, src: "sub:sp"}]' > /tmp/vpnpool/hidden.json
+jq -nc --arg a "$ID1" '[$a]' > /tmp/vpnpool/.dead_ids.json
+jq -nc --arg a "$ID1" '{($a): {youtube: true}}' > /etc/vpnpool/unlock.map.json
+measure_status
+begin "status/favorites-hidden-preferred"
+expect_jq "node marks by id: favourite, preferred, dead, kept, unlock" "$SOUT" \
+	'(.nodes[0] | .favorite==true and .saved==true and .dead==true and .preferred==false and .unlock.youtube==true) and (.nodes[1] | .preferred==true and .kept==true and .favorite==false)'
+expect_jq "favorites: the one in the pool and the one no source has" "$SOUT" \
+	"(.favorites|length)==2 and (.favorites[] | select(.id==\"$ID1\") | .in_pool==true and .auto==false) and (.favorites[] | select(.id==\"aaaaaaaaaaaa\") | .in_pool==false and .auto==true and .tag==\"Gone-Fav\")"
+expect_jq "legacy saved_inactive = the favourite no source has" "$SOUT" '.saved_inactive==[{id:"aaaaaaaaaaaa", tag:"Gone-Fav", server:"203.0.113.200", port:443}]'
+expect_jq "hidden: the one a source still has (name) + the one none has" "$SOUT" \
+	"(.hidden|length)==2 and .hidden[0].id==\"$ID3\" and .hidden[0].tag==\"Node003-hidden\" and .hidden[0].in_source==true and .hidden[0].sub==\"sp\" and .hidden[1]=={id:\"bbbbbbbbbbbb\", tag:null, in_source:false}"
+expect_jq "preferred: id + its tag in this build" "$SOUT" ".preferred=={id:\"$ID2\", tag:\"Node002\", in_pool:true} and .settings.preferred_id==\"$ID2\""
+expect_jq "the stores by id" "$SOUT" ".dead_ids==[\"$ID1\"] and .kept_ids==[\"$ID2\"] and .auto_member_ids==[\"$ID1\"]"
+expect_jq "the older screens' fields in tags (they compare tags)" "$SOUT" \
+	'.dead_nodes==["Node001"] and .kept_nodes==["Node002"] and .auto_members==["Node001"] and .settings.preferred_node=="Node002" and .settings.selected_node==""'
 end
-measure_status; P2=$SPROCS
-begin "status/link-parse-cached-by-mtime"
-expect_true "second poll spawns fewer processes ($P2) than the first ($P1)" [ "$P2" -lt "$P1" ]
-expect_jq "still grouped as manual" "$SOUT" '(.nodes[] | select(.tag=="Node001") | .group)=="manual"'
-end
-metric status_manual_first_poll_processes "$P1"
-metric status_manual_cached_poll_processes "$P2"
+rm -f /etc/vpnpool/favorites.map.json /tmp/vpnpool/hidden.json /tmp/vpnpool/.dead_ids.json /etc/vpnpool/unlock.map.json
+uci -q delete vpnpool.main.preferred_node; uci -q delete vpnpool.main.hidden; uci -q delete vpnpool.main.auto_member; uci -q delete vpnpool.main.keep_auto; uci commit vpnpool
 
-# ---- review fixes ----
-# M5: the cache key has the inode (a same-size rewrite in the same second is still seen) ...
-fsig() { ucode -e "import { stat } from 'fs'; let s = stat('$1'); print(s.inode, ':', s.mtime, ':', s.size);"; }
-ms() { fsig "$1" | cut -d: -f2-; }   # mtime:size only
-OLDMS=$(ms /tmp/vpnpool/manual.links)
-printf 'vless://%s@203.0.113.9:443?security=tls&sni=m.example#Node002\n' "$U" > /tmp/vpnpool/manual.links.new
-touch -r /tmp/vpnpool/manual.links /tmp/vpnpool/manual.links.new
-mv -f /tmp/vpnpool/manual.links.new /tmp/vpnpool/manual.links
+# a node waiting for the engine (deferred.json) carries the same marks (by id) and its source
+jq -nc '[{id: "cccccccccccc", tag: "AWG-wait", type: "awg", server: "198.51.100.9", port: 51820, _src: "awg", reason: "engine_missing"}]' > /tmp/vpnpool/deferred.json
+jq -nc '{cccccccccccc: {tag: "AWG-wait", link: null, active: false, auto: false}}' > /etc/vpnpool/favorites.map.json
+uci set vpnpool.main.preferred_node=cccccccccccc; uci commit vpnpool
 measure_status
-begin "status/cache-sees-same-size-same-second-rewrite"
-expect_eq "positive control: same mtime and size as before" "$(ms /tmp/vpnpool/manual.links)" "$OLDMS"
-expect_jq "Node002 is manual now, Node001 is not" "$SOUT" \
-	'(.nodes[] | select(.tag=="Node002") | .group)=="manual" and (.nodes[] | select(.tag=="Node001") | .group)=="subscription"'
+begin "status/deferred-node-marks-and-source"
+expect_jq "listed deferred, AWG group, favourite + preferred by id" "$SOUT" \
+	'(.nodes[] | select(.id=="cccccccccccc") | .deferred==true and .reason=="engine_missing" and .source=="awg" and .group=="amneziawg" and .favorite==true and .preferred==true)'
+expect_jq "the favourite counts as in the pool (it is listed), preferred resolves its tag" "$SOUT" \
+	'(.favorites[0] | .id=="cccccccccccc" and .in_pool==true) and .preferred.tag=="AWG-wait" and .saved_inactive==[]'
 end
-# ... and the parser's own signature (a package update invalidates the cache)
-jq -nc --arg s "$(fsig /tmp/vpnpool/manual.links)|OLD-PARSER" '{manual:{sig:$s, v:[]}}' > /tmp/vpnpool/.status-cache.json
+rm -f /tmp/vpnpool/deferred.json /etc/vpnpool/favorites.map.json; uci -q delete vpnpool.main.preferred_node; uci commit vpnpool
+
+# the migration report: what it could not match is listed, a link only masked
+jq -nc '{at: 1, from: "1.x", to: "2", backup: "/etc/vpnpool/backup-1.x/x.tar.gz", moved: {}, unmatched: [{store: "auto_member", value: "Ghost-Node"},
+	{store: "excluded_node", value: "vless://SECRET-UUID@203.0.113.5:443#X"}]}' > /etc/vpnpool/migration.json
 measure_status
-begin "status/cache-invalidated-by-another-parser"
-expect_jq "re-parsed: Node002 still manual" "$SOUT" '(.nodes[] | select(.tag=="Node002") | .group)=="manual"'
+begin "status/migration-unmatched-listed-masked"
+expect_jq "listed" "$SOUT" '.migration.from=="1.x" and .migration.unmatched==[{store:"auto_member", value:"Ghost-Node"},{store:"excluded_node", value:"vless://203.0.113.5:443/***"}]'
+expect_eq "the credential not in status" "$(printf '%s' "$SOUT" | gcount SECRET-UUID)" 0
 end
-rm -f /tmp/vpnpool/manual.links
+rm -f /etc/vpnpool/migration.json
 
 # M3: running = the pidfile's PID runs vpnpoold, not "some command line mentions the path"
 daemon_stop
@@ -162,7 +190,7 @@ end
 daemon_start; mock_on
 mock_rule 'GET http://127.0.0.1:9091/proxies' 200 "$FXS/proxies.json"
 mock_rule 'GET http://127.0.0.1:9091/connections' 200 "$FXS/conns.json"
-echo "{\"Node001\":\"vless://$U@10.0.1.7:443?security=tls&sni=n1.example#Node001\"}" > /etc/vpnpool/saved.map.json
+jq -nc --arg a "$(jq -r '.[0].id' "$FXS/nodes.json")" '{($a): {tag: "Node001", link: "vless://x", active: false, auto: false}}' > /etc/vpnpool/favorites.map.json
 rm -f /tmp/vpnpool/.status-cache.json /tmp/vpnpool/.prox.json /tmp/vpnpool/.conn.json
 cp "$FXS/nodes.json" /tmp/vpnpool/nodes.json
 OKN=0
@@ -175,12 +203,13 @@ done
 begin "status/overlapping-polls-no-shared-temp-files"
 expect_eq "6 of 6 overlapping polls complete" "$OKN" 6
 expect_eq "no shared temp file left in /tmp/vpnpool" "$(ls -a /tmp/vpnpool | grep -c -e '^\.prox\.json' -e '^\.conn\.json' -e '^\.archive\.links')" 0
-expect_jq "the archive was parsed (positive control)" "$(cat "$FXS/p1.json")" '(.nodes[] | select(.tag=="Node001") | .saved)==true'
+expect_jq "the favourites were read (positive control)" "$(cat "$FXS/p1.json")" '(.nodes[] | select(.tag=="Node001") | .favorite)==true'
 end
-rm -f /etc/vpnpool/saved.map.json
+rm -f /etc/vpnpool/favorites.map.json
 # temp-file names of processes that start together must differ (common.uc uniq): ucode's rand()
-# gave two of eight parallel processes the same number, and the overlapping polls above then
-# shared one archive temp file (one poll deleted it under the other -> "saved" lost, ~1 in 6)
+# gave two of eight parallel processes the same number, and two overlapping polls of 1.x-stage-3
+# shared one archive temp file (one poll deleted it under the other -> "saved" lost, ~1 in 6);
+# write_atomic and the API's temp files still rely on it
 printf "import { uniq } from '/usr/libexec/vpnpool/common.uc';\nprint(uniq(), '\\\\n');\n" > "$FXS/uniq.uc"
 : > "$FXS/uniq.out"
 _up=""

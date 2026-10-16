@@ -219,7 +219,7 @@ mark_bad() {   # <node JSON> <detail> -> marked by id
 	sig=$(ucode "$ENGINECAP" cap "$(sb_bin)" 2>/dev/null | jq -r '.sig // ""')
 	[ -s "$BAD_NODES" ] || echo '{}' > "$BAD_NODES"
 	jq -c --argjson n "$1" --arg d "$2" --arg s "$sig" --argjson at "$(date +%s)" \
-		'.[$n.id] = {tag:$n.tag, detail:$d, engine:$s, cfg:($n | del(.tag, .id) | tojson), at:$at}' \
+		'.[$n.id] = {tag:$n.tag, detail:$d, engine:$s, cfg:($n | del(.tag, .id, ._src) | tojson), at:$at}' \
 		"$BAD_NODES" 2>/dev/null | write_atomic "$BAD_NODES"
 }
 # start_guard -> 0 runs | 1 failed / gave up | 2 waiting for the environment (GUARD_PENDING=1)
@@ -291,58 +291,64 @@ clash_select() {   # $1=selector $2=tag
 # (see /etc/init.d/vpnpool), so procd is its single supervisor. /on and /off reach this
 # daemon as the pause flag ($PAUSE_FLAG) + SIGHUP; routing stays this daemon's decision.
 
-# ---- preferred-node soft pin with switch-back ----
-# If preferred_node is set (and the user hasn't manually pinned a node and
-# auto_switch is on): stick to the preferred node while it's reachable; when it
-# dies, hand control to urltest "auto"; when it recovers, switch back. A small
-# bad-streak counter avoids flapping. The pin itself is the USER's choice: the dead-node
-# filter only hands traffic to auto while the node is in the dead set — it never erases
-# the preference (the node is picked again as soon as it leaves the dead set).
+# ---- preferred-node soft pin with switch-back ("Connect", ROADMAP 9.5) ----
+# preferred_node is a node ID (the user's "Connect"; "Back to automatic choice" clears it). With
+# auto_switch on: stick to the preferred node while it's reachable; when it dies, hand control to
+# urltest "auto"; when it recovers, switch back. A small bad-streak counter avoids flapping. The
+# pin itself is the USER's choice: the dead-node filter only hands traffic to auto while the
+# node is in the dead set — it never erases the preference (the node is picked again as soon as
+# it leaves the dead set). There is no hard pin any more (selected_node is gone, the 1.x
+# migration turned it into preferred_node).
 PREF_BAD=0
 PREF_GONE=0
 PREF_DEAD_LOGGED=""
 preferred_check() {
-	local pref sel asw p delay nowsel
+	local pref ptag asw p delay nowsel
 	pref=$(uci -q get vpnpool.main.preferred_node)
 	[ -n "$pref" ] || return 0
-	sel=$(uci -q get vpnpool.main.selected_node); [ -n "$sel" ] && return 0  # manual pin wins
 	asw=$(uci -q get vpnpool.main.auto_switch); [ "$asw" = "0" ] && return 0
 	p=$(curl -s -m3 "http://$CLASH_API/proxies" 2>/dev/null)
 	echo "$p" | jq -e '.proxies' >/dev/null 2>&1 || return 0   # clash API not ready — skip this cycle
 	nowsel=$(echo "$p" | jq -r '.proxies.proxy.now // ""' 2>/dev/null)
-	# Pin points to a tag that no longer exists (node removed / renamed / subscription changed
-	# its #tag). Clear the orphaned pin after a few cycles so a stale 📌 doesn't linger forever
-	# (the counter guards against a transient one-off miss).
-	if ! echo "$p" | jq -e --arg t "$pref" '.proxies[$t]' >/dev/null 2>&1; then
+	# the node's name in THIS build (the clash API knows nodes by tag)
+	ptag=$(jq -r --arg i "$pref" 'map(select(.id == $i)) | .[0].tag // ""' "$SB_DATA/nodes.json" 2>/dev/null)
+	# The preferred node is not in the pool (removed, or gone from its subscription). Clear the
+	# orphaned pin after a few cycles so a stale preference doesn't linger forever (the counter
+	# guards against a transient miss) — but never while a rebuild is under way (a favourite
+	# the user just connected joins the pool with it) and never for a favourite: it stays the
+	# user's choice and comes back with the node.
+	if [ -z "$ptag" ] || ! echo "$p" | jq -e --arg t "$ptag" '.proxies[$t]' >/dev/null 2>&1; then
+		[ -f "$SB_DATA/.reload_running" ] && return 0
+		jq -e --arg i "$pref" 'has($i)' "$CONF_DIR/favorites.map.json" >/dev/null 2>&1 && return 0
 		PREF_GONE=$((PREF_GONE + 1))
 		if [ "$PREF_GONE" -ge 4 ]; then
 			uci -q delete vpnpool.main.preferred_node; uci commit vpnpool
 			PREF_GONE=0
-			log "preferred node $pref no longer exists -> cleared stale pin"
+			log "preferred node $pref is no longer in the pool -> cleared stale pin"
 		fi
 		return 0
 	fi
 	PREF_GONE=0
 	# In the service-accuracy dead set: NEVER keep traffic on it (it "pings" but fails the
 	# user's services), but keep the preference — it comes back when the node recovers.
-	if [ "$(uci -q get vpnpool.main.dead_filter)" != "0" ] && [ -f "$SB_DATA/.dead_tags.json" ] \
-	   && jq -e --arg t "$pref" 'index($t) != null' "$SB_DATA/.dead_tags.json" >/dev/null 2>&1; then
-		[ "$nowsel" = "$pref" ] && clash_select proxy auto
-		[ "$PREF_DEAD_LOGGED" = "$pref" ] || log "preferred node $pref fails the service check -> auto until it recovers (preference kept)"
+	if [ "$(uci -q get vpnpool.main.dead_filter)" != "0" ] && [ -f "$SB_DATA/.dead_ids.json" ] \
+	   && jq -e --arg i "$pref" 'index($i) != null' "$SB_DATA/.dead_ids.json" >/dev/null 2>&1; then
+		[ "$nowsel" = "$ptag" ] && clash_select proxy auto
+		[ "$PREF_DEAD_LOGGED" = "$pref" ] || log "preferred node $ptag fails the service check -> auto until it recovers (preference kept)"
 		PREF_DEAD_LOGGED=$pref
 		return 0
 	fi
 	PREF_DEAD_LOGGED=""
-	delay=$(echo "$p" | jq -r --arg t "$pref" '(.proxies[$t].history // []) | last | .delay // 0' 2>/dev/null)
+	delay=$(echo "$p" | jq -r --arg t "$ptag" '(.proxies[$t].history // []) | last | .delay // 0' 2>/dev/null)
 	if [ -n "$delay" ] && [ "$delay" -gt 0 ] 2>/dev/null; then
 		PREF_BAD=0
-		if [ "$nowsel" != "$pref" ]; then
-			clash_select proxy "$pref" && log "preferred node healthy -> switch back to $pref"
+		if [ "$nowsel" != "$ptag" ]; then
+			clash_select proxy "$ptag" && log "preferred node healthy -> switch back to $ptag"
 		fi
 	else
 		PREF_BAD=$((PREF_BAD + 1))
-		if [ "$PREF_BAD" -ge 2 ] && [ "$nowsel" = "$pref" ]; then
-			clash_select proxy auto && log "preferred node $pref down -> hand over to auto"
+		if [ "$PREF_BAD" -ge 2 ] && [ "$nowsel" = "$ptag" ]; then
+			clash_select proxy auto && log "preferred node $ptag down -> hand over to auto"
 		fi
 	fi
 }
@@ -614,28 +620,26 @@ initial_build() {
 # periodic refresh: through the same reload pipeline (and so the same fail-safe)
 LAST=0
 periodic_refresh() {
-	local EXP DAYS USAGE QTOT QUSED QLEFT QPCT QGB
+	local what sid a b name
 	LAST=$(date +%s)
 	log "periodic subscription refresh"
 	request_reload refetch
-	# subscription expiry warning
-	EXP=$(cat "$CONF_DIR/sub.expire" 2>/dev/null)
-	if [ -n "$EXP" ]; then
-		DAYS=$(( (EXP - $(date +%s)) / 86400 ))
-		[ "$DAYS" -ge 0 ] && [ "$DAYS" -le 3 ] && tg_notify "⚠️ vpnpool: subscription expires in ${DAYS}d"
-	fi
-	# subscription quota warning: alert once per refresh when <10% remains
-	USAGE=$(cat "$CONF_DIR/sub.usage" 2>/dev/null)
-	if [ -n "$USAGE" ]; then
-		QTOT=$(echo "$USAGE" | awk '{print $3+0}')
-		QUSED=$(echo "$USAGE" | awk '{print $1+$2}')
-		if [ "${QTOT:-0}" -gt 0 ] 2>/dev/null; then
-			QLEFT=$(( QTOT - QUSED ))
-			QPCT=$(( QLEFT * 100 / QTOT ))
-			QGB=$(awk -v b="$QLEFT" 'BEGIN{printf "%.1f", b/1073741824}')
-			[ "$QPCT" -ge 0 ] && [ "$QPCT" -le 10 ] && tg_notify "⚠️ vpnpool: subscription quota low — ${QGB} GB (${QPCT}%) left"
-		fi
-	fi
+	# expiry / quota warnings, per subscription (fetch.sh -> subs.meta.json): expires within 3
+	# days, or less than 10 % of the quota left
+	jq -r --argjson now "$(date +%s)" '
+		to_entries[] | .key as $id | .value as $m
+		| (if ($m.expire // 0) > 0 then (($m.expire - $now) / 86400 | floor) else null end) as $d
+		| (if ($m.total // 0) > 0 then ($m.total - (($m.upload // 0) + ($m.download // 0))) else null end) as $left
+		| (if $d != null and $d >= 0 and $d <= 3 then "expire\t\($id)\t\($d)" else empty end),
+		  (if $left != null and $left >= 0 and ($left * 100 / $m.total) <= 10
+		   then "quota\t\($id)\t\($left * 10 / 1073741824 | floor / 10)\t\($left * 100 / $m.total | floor)" else empty end)
+	' "$CONF_DIR/subs.meta.json" 2>/dev/null | while IFS="$(printf '\t')" read -r what sid a b; do
+		name=$(uci -q get "vpnpool.$sid.name"); [ -n "$name" ] || name=$(mask_url "$(uci -q get "vpnpool.$sid.url")")
+		case "$what" in
+			expire) tg_notify "⚠️ vpnpool: subscription $name expires in ${a}d" ;;
+			quota)  tg_notify "⚠️ vpnpool: subscription $name quota low — ${a} GB (${b}%) left" ;;
+		esac
+	done
 }
 
 # ---- dead-node auto-filter (opt-in, on by default) ----

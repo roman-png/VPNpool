@@ -293,3 +293,86 @@ expect_eq "exit code 143" "$KRC" 143
 expect_jq "status: interrupted" "$(cat /tmp/vpnpool/build_status.json 2>/dev/null)" '.ok==false and .error=="interrupted"'
 expect_true "the live config of the earlier build kept" sing-box check -c /tmp/vpnpool/sing-box.json
 end
+
+# ---- stage 6: the data model (ROADMAP 9) — every input of the build, by node id ----
+# The pool = manual links + AWG files + active favourites + every ENABLED subscription (a "pick"
+# one only with its picked ids) - the hidden ids; one id = one node, the user's own copy first.
+mb_run() {   # build after a custom setup (no reset)
+	mock_on
+	run_with_timeout 120 sh /usr/libexec/vpnpool/build.sh > "$T_STATE/build.out" 2>&1; BRC=$?
+	MBN=$(cat /tmp/vpnpool/nodes.json 2>/dev/null); MBC=$(cat /etc/vpnpool/sing-box.json 2>/dev/null)
+}
+sub_raw() {   # <url> <text>: the fetched copy of a subscription, where fetch.sh puts it
+	mkdir -p /tmp/vpnpool/sources
+	printf '%s\n' "$2" > "/tmp/vpnpool/sources/s-$(printf '%s' "$1" | md5sum | cut -c1-12).raw"
+}
+SA='https://a.example.com/sub'; SB='https://b.example.com/pick'; SC='https://c.example.com/off'
+reset_state
+sub_section sa "$SA"; sub_section sb "$SB" pick; sub_section sc "$SC" all 0
+sub_raw "$SA" "$(good 41 Good1)
+$(good 42 Good2)
+$(good 44 ProvName)"
+sub_raw "$SB" "$(good 45 PickMe)
+$(good 46 NotPicked)"
+sub_raw "$SC" "$(good 47 OffSub)"
+# the ids of the build's own parse (the same parser): the user's copy of ProvName, PickMe, Good2
+printf '%s\n%s\n%s\n' "$(good 44 Mine)" "$(good 45 PickMe)" "$(good 42 Good2)" > "$T_STATE/build/ids.links"
+MID=$(ucode /usr/libexec/vpnpool/parser.uc --with-id "$T_STATE/build/ids.links" | jq -r '.[0].id')
+PID=$(ucode /usr/libexec/vpnpool/parser.uc --with-id "$T_STATE/build/ids.links" | jq -r '.[1].id')
+HID=$(ucode /usr/libexec/vpnpool/parser.uc --with-id "$T_STATE/build/ids.links" | jq -r '.[2].id')
+uci add_list vpnpool.sb.pick="$PID"; uci add_list vpnpool.main.manual_node="$(good 44 Mine)"
+uci add_list vpnpool.main.hidden="$HID"; uci commit vpnpool
+mb_run
+begin "build/model-inputs-sources-and-filters"
+expect_eq "build.sh exit code" "$BRC" 0
+expect_jq "the pool: Mine (user's copy of ProvName), Good1, PickMe — not Good2 (hidden), NotPicked, OffSub" "$MBN" \
+	'map(.tag)|sort == ["Good1","Mine","PickMe"]'
+expect_jq "each node's source" "$MBN" \
+	'(map({(.tag): ._src}) | add) == {"Mine":"manual","Good1":"sub:sa","PickMe":"sub:sb"}'
+expect_jq "one id per node" "$MBN" '(map(.id)|unique|length)==3 and all(.[]; (.id|length)==12)'
+expect_jq "no id / _src reaches the config" "$MBC" '[(.outbounds[]), ((.endpoints // [])[]) | select(has("id") or has("_src") or has("_link"))] | length == 0'
+expect_true "sing-box check accepts it" sing-box check -c /etc/vpnpool/sing-box.json
+expect_jq "links.json: tag, id, link, source" "$(cat /tmp/vpnpool/links.json)" \
+	"length==3 and (map(select(.id==\"$MID\"))[0] | .tag==\"Mine\" and .src==\"manual\" and (.link|startswith(\"vless://\")))"
+end
+begin "build/model-hidden-listed-with-name"
+expect_jq "hidden.json: the hidden node a source still has, with its name and source" "$(cat /tmp/vpnpool/hidden.json)" \
+	"length==1 and .[0].id==\"$HID\" and .[0].tag==\"Good2\" and .[0].src==\"sub:sa\" and .[0].server==\"203.0.113.42\""
+expect_jq "hidden / not picked are not counted as dropped lines" "$(cat /tmp/vpnpool/build_status.json)" \
+	'.ok==true and .skipped==0 and ([.dropped[].reason] | index("hidden")==null and index("not_picked")==null)'
+end
+# auto-pool members by id, the dead ids, "favourites only", the preferred node with auto_switch=0
+GID=$(jq -r 'map(select(.tag=="Good1"))[0].id' /tmp/vpnpool/nodes.json)
+uci add_list vpnpool.main.auto_member="$GID"; uci add_list vpnpool.main.auto_member="$MID"; uci commit vpnpool
+jq -nc --arg m "$MID" '[$m]' > /tmp/vpnpool/.dead_ids.json
+mb_run
+begin "build/model-auto-members-and-dead-by-id"
+expect_jq "urltest = the members (by id) minus the dead id" "$MBC" '(.outbounds[] | select(.tag=="auto") | .outbounds) == ["Good1"]'
+expect_jq "the dead node still selectable by hand" "$MBC" '(.outbounds[] | select(.tag=="proxy") | .outbounds | index("Mine")) != null'
+end
+rm -f /tmp/vpnpool/.dead_ids.json; uci -q delete vpnpool.main.auto_member
+echo "{\"$PID\":{\"tag\":\"PickMe\",\"link\":null,\"active\":false,\"auto\":false}}" > /etc/vpnpool/favorites.map.json
+uci set vpnpool.main.favorites_only=1; uci set vpnpool.main.auto_switch=0; uci set vpnpool.main.preferred_node="$PID"; uci commit vpnpool
+mb_run
+begin "build/model-favourites-only-and-preferred-default"
+expect_jq "favourites only: the automatic choice = the favourite" "$MBC" '(.outbounds[] | select(.tag=="auto") | .outbounds) == ["PickMe"]'
+expect_jq "auto_switch off: the selector stays on the preferred node (by id -> its tag)" "$MBC" '(.outbounds[] | select(.tag=="proxy") | .default) == "PickMe"'
+end
+echo '{"aaaaaaaaaaaa":{"tag":"Nobody","active":false}}' > /etc/vpnpool/favorites.map.json
+uci set vpnpool.main.auto_switch=1; uci commit vpnpool
+mb_run
+begin "build/model-favourites-only-never-empties-the-pool"
+expect_jq "no favourite in the pool: every node in the automatic choice" "$MBC" '(.outbounds[] | select(.tag=="auto") | .outbounds | length) == 3'
+expect_jq "auto_switch on: the selector starts on the automatic choice" "$MBC" '(.outbounds[] | select(.tag=="proxy") | .default) == "auto"'
+end
+# favourites that join the pool from the archive (active) although no source has them
+uci -q delete vpnpool.main.favorites_only; uci -q delete vpnpool.main.preferred_node; uci commit vpnpool
+jq -nc --arg l "$(good 48 Archived)" --arg l2 "$(good 49 Sleeping)" '{"bbbbbbbbbbbb": {tag:"Archived", link:$l, active:true, auto:false},
+	"cccccccccccc": {tag:"Sleeping", link:$l2, active:false, auto:true},
+	"dddddddddddd": {tag:"JsonFav", ob:{type:"vless", server:"203.0.113.50", server_port:443, uuid:"9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce", tls:{enabled:true}}, active:true, auto:false}}' > /etc/vpnpool/favorites.map.json
+mb_run
+begin "build/model-active-favourites-join-the-pool"
+expect_jq "the active ones (a link and a JSON outbound) joined, the archived-only one did not" "$MBN" \
+	'(map(.tag) | index("Archived") != null and index("JsonFav") != null and index("Sleeping") == null) and (map(select(.tag=="Archived"))[0]._src == "fav")'
+expect_true "sing-box check accepts it" sing-box check -c /etc/vpnpool/sing-box.json
+end

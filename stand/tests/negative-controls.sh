@@ -110,15 +110,13 @@ ctl parser-reserved-off parser fail 'parser/reserved-tags-renamed ;parser/json-o
 ctl parser-id-skips-tls parser fail 'parser/id-covers-every-config-field ' \
 	"$LIBX/parser.uc" "k != '_link') c[k] = ob[k];" "k != '_link' && k != 'tls') c[k] = ob[k];"
 # id depends on the display name -> renaming changes it
-ctl parser-id-uses-name parser fail 'parser/id-stable-across-order-and-name ;parser/id-changes-with-port-and-credential ;parser/id-json-key-order-and-link-agree ;XPASS parser/id-unique-in-output ' \
+ctl parser-id-uses-name parser fail 'parser/id-stable-across-order-and-name ;parser/id-changes-with-port-and-credential ;parser/id-json-key-order-and-link-agree ;parser/dedup-same-config-other-name-is-one-node ;parser/dedup-users-file-first-keeps-users-name ;parser/id-unique-in-output ' \
 	"$LIBX/parser.uc" "if (k != 'tag' && k != 'id' && k != '_link')" "if (k != 'id' && k != '_link')"
 # id leaks into the default output -> sing-box check rejects the config
-ctl parser-id-always parser fail 'parser/id-not-in-default-output ;parser/corpus-accepted-by-sing-box-check ;parser/json-source-guards ;parser/awg-id-is-sha256-of-private-key ' \
-	"$LIBX/parser.uc" 'let id = !(WITH_ID || REPORT) ? null :' 'let id = false ? null :' \
+ctl parser-id-always parser fail 'parser/id-not-in-default-output ;parser/corpus-accepted-by-sing-box-check ;parser/json-source-guards ;parser/awg-id-is-sha256-of-private-key ;parser/src-and-filters-off-by-default ' \
 	"$LIBX/parser.uc" 'if (WITH_ID && id) ob.id = id;' 'if (id) ob.id = id;'
 # dedup without the name -> a user's copy of a subscription node vanishes
-ctl parser-dedup-without-name parser fail 'parser/dedup-keeps-differently-named-node ;parser/dedup-subscription-vs-imported-file ;XPASS parser/id-unique-in-output ' \
-	"$LIBX/parser.uc" "return base + '\x1f' + canon(bare(ob));" 'return canon(bare(ob));'
+# (stage 6) control parser-dedup-without-name retired: the dedup IS by the id now (no name in it); the opposite break is s6-parser-dedup-by-name
 # canonical form keeps the JSON key order -> permuted JSON = another node / id
 ctl parser-canon-unsorted parser fail 'parser/json-key-order-dedup ;parser/id-json-key-order-and-link-agree ' \
 	"$LIBX/parser.uc" 'let ks = sort(keys(v), (a, b) => (a < b) ? -1 : ((a > b) ? 1 : 0));' 'let ks = keys(v);'
@@ -154,8 +152,8 @@ ctl adaptive-regex-regression adaptive fail 'adaptive/blocked-direct-routed-via-
 	"$LIBX/adaptive.sh" '((explode | map(select((. < 48 or . > 57) and . != 46)) | length) > 0)' '(test("^[0-9.]+$") | not)'
 ctl adaptive-ttl-ignored adaptive fail 'adaptive/verdict-cache-ttl ' \
 	"$LIBX/adaptive.sh" 'if type=="object" and ((.t // 0) + $ttl) > $now then "y"' 'if type=="object" then "y"'
-ctl fetch-userinfo-lost fetch fail 'fetch/all-sources-ok ' \
-	"$LIBX/fetch.sh" "grep -o 'expire=[0-9]*'" "grep -o 'expireX=[0-9]*'"
+ctl fetch-userinfo-lost fetch fail 'fetch/all-sources-ok ;fetch/primary-fails-extra-ok-keeps-primary-nodes ' \
+	"$LIBX/fetch.sh" '		| {expire: ($u.expire // null),' '		| {expire: null,'
 # stage 2 (2.5 / 2.11): fetch
 ctl fetch-no-per-source-cache fetch fail 'fetch/primary-fails-extra-ok-keeps-primary-nodes ;fetch/status-per-source ;fetch/all-fail-serves-cache ;fetch/removed-source-dropped-from-cache ;fetch/fetch-due-throttle ' \
 	"$LIBX/fetch.sh" 'if [ -s "$cached" ]; then' 'if false; then'
@@ -273,8 +271,7 @@ ctl api-analyze-no-dup-check rpcd fail 'rpcd/analyze/statuses ' \
 	"$LIBX/api.uc" "				if (exist_ids[r.id]) { it.status = 'dup'; it.reason = 'exists'; }" "				if (false) { it.status = 'dup'; it.reason = 'exists'; }" \
 	"$LIBX/api.uc" "				it.reason = exist_tags[r.dup_of] ? 'exists' : 'repeated';" "				it.reason = 'repeated';"
 # a "not found" answered as success again
-ctl rpcd-del_sub-not-found-ok rpcd fail 'rpcd/del_sub/bad-input ' \
-	"$RPCD" '		need_url extra_sub "$(printf '"'"'%s'"'"' "$input" | jq -r '"'"'.url // ""'"'"')" 1; u=$U' '		need_url extra_sub "$(printf '"'"'%s'"'"' "$input" | jq -r '"'"'.url // ""'"'"')" 0; u=$U'
+# (stage 6) control rpcd-del_sub-not-found-ok retired: del_sub of an unknown URL is refused by api.uc sub del as well (s6-api-sub-del-wrong-one breaks that layer)
 # export hands out the token / subscription URL in clear
 ctl rpcd-export-unmasked rpcd fail 'rpcd/export/telegram-token-masked ;rpcd/export/subscription-url-masked ;rpcd/import/masked-export-refused ' \
 	"$RPCD" '		if ucode "$API" export > /tmp/vpnpool/.export.txt 2>/dev/null; then' '		if uci export vpnpool > /tmp/vpnpool/.export.txt 2>/dev/null; then'
@@ -295,18 +292,17 @@ ctl api-resolve-no-key rpcd fail 'rpcd/del_sub/by-status-key ' \
 	"$LIBX/api.uc" '	for (let x in all) if (str_key(x) == val) return x;' '	;'
 # backup without the AWG files
 ctl rpcd-backup-no-awg rpcd fail 'rpcd/backup/full-copy-with-secrets ;rpcd/restore/without-confirm-changes-nothing ;rpcd/restore/replace-all ;rpcd/backup/members-by-the-restore-rule ;rpcd/restore/own-backup-round-trip ;rpcd/restore/same-archive-without-the-fault ' \
-	"$RPCD" '	for f in /etc/vpnpool/awg/* /etc/vpnpool/$BACKUP_MAPS; do' '	for f in /etc/vpnpool/$BACKUP_MAPS; do'
+	"$LIBX/lib.sh" '	for f in /etc/vpnpool/awg/* /etc/vpnpool/$BACKUP_MAPS; do' '	for f in /etc/vpnpool/$BACKUP_MAPS; do'
 # status: the token / the subscription URL in clear
 ctl status-token-unmasked status fail 'status/telegram-token-masked ' \
 	"$LIBX/status.uc" '		telegram_token: mask_token(token),' '		telegram_token: token,'
-ctl status-url-unmasked status fail 'status/subscription-urls-masked ' \
-	"$LIBX/status.uc" '	subscription: { url: mask_url(sub_url),' '	subscription: { url: sub_url,'
+ctl status-url-unmasked status fail 'status/subscription-urls-masked ;status/subscriptions-last-fetch ' \
+	"$LIBX/status.uc" '		title: clean_text(m.title, 64), url: mask_url(s.url),' '		title: clean_text(m.title, 64), url: s.url,'
 # status: 20 extra processes per poll -> the process threshold must catch it
 ctl status-process-burst status fail 'status/300-nodes-daemon-down-at-most-15-processes ;status/300-nodes-daemon-up-at-most-15-processes ' \
 	"$LIBX/status.uc" "let routing = length(run('nft list table inet vpnpool 2>/dev/null')) > 0;" "for (let i = 0; i < 20; i++) run('true'); let routing = length(run('nft list table inet vpnpool 2>/dev/null')) > 0;"
 # status: no mtime cache -> the small link files are re-parsed on every poll
-ctl status-no-cache status fail 'status/link-parse-cached-by-mtime ' \
-	"$LIBX/status.uc" '	if (c && c.sig == sig) return c.v;' '	if (false) return c.v;'
+# (stage 6) control status-no-cache retired: status no longer parses link files (the node list carries its source): s6-status-source-ignored
 # status: a dead lock owner counted as busy
 ctl status-busy-ignores-owner status fail 'status/build-busy-pause-progress ' \
 	"$LIBX/status.uc" "	if (match(pid, /^[0-9]+\$/)) return !!access('/proc/' + pid);" "	if (match(pid, /^[0-9]+\$/)) return true;"
@@ -448,7 +444,7 @@ ctl engine-installer-leaks-codes engine fail 'engine/install-sh-awg1-unsupported
 # ---- review fixes (REVIEW_stage3) ----
 # V1: backup packs every file of awg/ -> its own archive is refused by restore
 ctl review-v1-backup-ignores-rule rpcd fail 'rpcd/backup/members-by-the-restore-rule ;rpcd/restore/own-backup-round-trip ' \
-	"$RPCD" 'printf '"'"'%s\n'"'"' "$rel" | grep -Eq "$MEMBER_RE"; then' 'true; then'
+	"$LIBX/lib.sh" 'printf '"'"'%s\n'"'"' "$rel" | grep -Eq "$MEMBER_RE"; then' 'true; then'
 # V2: restore / import without the value check
 ctl review-v2-restore-values-unchecked rpcd fail 'rpcd/restore/bad-values-refused ;rpcd/import/bad-values-refused ' \
 	"$RPCD" '		CC=$(ucode "$API" check_config "$D/root/etc/config" "$D/save" 2>/dev/null)' "		CC='{\"ok\":true}'"
@@ -477,8 +473,8 @@ ctl review-v5-fetch-no-trap fetch fail 'fetch/term-records-interrupted ' \
 # V6: a mask that does not resolve is used as the address; masks looked up in every list
 ctl review-v6-mask-used-as-url rpcd fail 'rpcd/probe_source/unknown-mask-refused ' \
 	"$RPCD" "	case \"\$2\" in *'***'*) rep false not_found; exit 0 ;; esac" '	:'
-ctl review-v6-mask-any-list rpcd fail 'rpcd/probe_source/mask-resolved-in-sources-only ' \
-	"$RPCD" '		need_url source "$(printf' '		need_url source,extra_sub,subscription_url "$(printf'
+ctl review-v6-mask-any-list rpcd fail 'rpcd/del_source/mask-resolved-in-pick-subscriptions-only ' \
+	"$RPCD" '		need_url pick "$(printf' "		need_url '*' \"\$(printf"
 ctl review-v6-is-url-takes-mask rpcd fail 'rpcd/add_sub/mask-literal-refused ' \
 	"$LIBX/api.uc" "	if (index(s, '***') >= 0) return false;" '	;'
 # V7: add stores a URL without the trial download; add_node takes a URL
@@ -491,16 +487,13 @@ ctl review-m3-running-by-mention status fail 'status/running-not-fooled-by-a-men
 	"$LIBX/status.uc" "let running = match(dpid, /^[0-9]+\$/) ? runs_script(argv_of(dpid), 'usr/libexec/vpnpool/vpnpoold') : false;" \
 	"let running = false; for (let c in (lsdir('/proc') ?? [])) { let a = argv_of(c); if (a && index(join(' ', a), '/usr/libexec/vpnpool/vpnpoold') >= 0) running = true; }"
 # M4: a fixed temp file name, left behind (overlapping polls share it)
-ctl review-m4-shared-temp status fail 'status/overlapping-polls-no-shared-temp-files ' \
-	"$LIBX/status.uc" "	let p = sprintf('%s/.archive.links.%s', SB, uniq());" "	let p = SB + '/.archive.links';"
+# (stage 6) control review-m4-shared-temp retired: status writes no temp file any more (the archive parse is gone); uniq() keeps its own case (awgb2-temp-names-time-rand)
 # M5: cache key without the inode / without the parser's signature
-ctl review-m5-no-inode status fail 'status/cache-sees-same-size-same-second-rewrite ' \
-	"$LIBX/common.uc" "	return s ? (s.inode + ':' + s.mtime + ':' + s.size) : '-';" "	return s ? (s.mtime + ':' + s.size) : '-';"
-ctl review-m5-no-parser-sig status fail 'status/cache-invalidated-by-another-parser ' \
-	"$LIBX/status.uc" 'let PARSER_SIG = file_sig(PARSER);' "let PARSER_SIG = 'OLD-PARSER';"
+# (stage 6) control review-m5-no-inode retired: the parse cache and file_sig are gone
+# (stage 6) control review-m5-no-parser-sig retired: the parse cache is gone
 # M6: set_url "" refused again
 ctl review-m6-empty-url-refused rpcd fail 'rpcd/set_url/empty-clears ' \
-	"$LIBX/api.uc" "c: (v) => chk_url(v, true), a: 'USR2', secret: 'url' }," "c: (v) => chk_url(v, false), a: 'USR2', secret: 'url' },"
+	"$LIBX/api.uc" "		if (url == '') {" '		if (false) {'
 # M7: the missing section created with the wrong type
 ctl review-m7-section-type rpcd fail 'rpcd/set_config/creates-main-of-type-vpnpool ' \
 	"$LIBX/api.uc" "[ 'main', 'vpnpool' ]" "[ 'main', 'main' ]"
@@ -512,7 +505,7 @@ ctl review-m9-sched-false-failure rpcd fail 'rpcd/set_schedule/cron-failure-is-a
 	"$RPCD" "			res=\$(printf '%s' \"\$res\" | jq -c --arg m \"sched.sh exit \$rc\" '. + {warning:\"schedule_failed\", message:\$m}')" '			rep false script_failed; return'
 # test gap: probe sources in status not masked
 ctl review-status-sources-unmasked status fail 'status/subscription-urls-masked ;status/source-urls-masked ' \
-	"$LIBX/status.uc" '	sources: map(as_list(M.source, true), mask_url),' '	sources: as_list(M.source, true),'
+	"$LIBX/status.uc" "	else { e.kind = 'pick'; push(source_masked, e.url); }" "	else { e.kind = 'pick'; push(source_masked, s.url); }"
 # ================= stage 4b: AmneziaWG inside vpnpool (pack awg-b) =================
 # parser: the AWG 3.1 table and the own value checks
 ctl awgb-hpk-dropped parser fail 'parser/awg3-conf-fields ' \
@@ -540,7 +533,7 @@ ctl awgb-id-not-of-the-key parser fail 'parser/awg-id-is-sha256-of-private-key '
 ctl awgb-sha256-constant parser fail 'parser/awg-id-is-sha256-of-private-key ' \
 	"$LIBX/parser.uc" '	0x428a2f98, 0x71374491,' '	0x428a2f99, 0x71374491,'
 ctl awgb-dedup-by-name parser fail 'parser/awg-name-comment-and-identity ' \
-	"$LIBX/parser.uc" "			let r = add_node(pa.ob, 'awg:' + awg_id(pa.ob.private_key), null);" '			let r = add_node(pa.ob, null, null);'
+	"$LIBX/parser.uc" '	if (is_awg) { if (length(ob.private_key)) id = awg_id(ob.private_key); }' '	if (is_awg) { if (length(ob.private_key)) id = awg_id(ob.private_key + base); }'
 ctl awgb-name-comment-ignored parser fail 'parser/awg-name-comment-and-identity ' \
 	"$LIBX/parser.uc" '	ep.tag = name ?? hp_label(hp.host, port);' '	ep.tag = hp_label(hp.host, port);'
 # ucode regex: \s inside [...] is the letter s
@@ -578,7 +571,7 @@ ctl awgb-guard-no-rollback awg fail 'awg/guard-rolls-back-with-the-binary-of-the
 ctl awgb-guard-no-limit awg fail 'awg/guard-limit-two-repairs ' \
 	"$LIBX/vpnpoold" '		if [ "$n" -gt "$GUARD_MAX" ]; then' '		if [ "$n" -gt 99 ]; then'
 ctl awgb-mark-ignores-node-config awg fail 'awg/guard-mark-ends-when-the-node-changes ' \
-	"$LIBX/build.sh" '$m.cfg == ($n | del(.tag, .id) | tojson)' 'true'
+	"$LIBX/build.sh" '$m.cfg == ($n | del(.tag, .id, ._src) | tojson)' 'true'
 # api / rpcd
 ctl awgb-analyze-no-dup awg fail 'awg/add-same-node-again-dup ' \
 	"$LIBX/api.uc" "	if (awg_known_ids()[r.id] || stat(AWG_DIR + '/' + r.id + '.conf')) {" '	if (false) {'
@@ -589,7 +582,7 @@ ctl awgb-add-no-warning awg fail 'awg/add-vpn-link-no-engine-deferred ;awg/impor
 ctl awgb-no-wrapped-link awg fail 'awg/analyze-vpn-link-wrapped-with-caption ' \
 	"$LIBX/api.uc" '		if (tok && !nowrap && prev_len >= WRAP_MIN' '		if (false && tok && !nowrap && prev_len >= WRAP_MIN'
 ctl awgb-delete-by-id-off awg fail 'awg/delete-by-id ;awg/delete-unknown-id ;awg/delete-deferred-by-tag ' \
-	"$RPCD" '		if [ -n "$aid" ] && [ -z "$tag" ]; then' '		if false; then'
+	"$LIBX/api.uc" "	if (n && (n.type == 'awg' || n.type == 'wireguard') && src == 'awg') {" '	if (false) {'
 # ui: every new reply code needs its text
 ctl awgb-ui-no-engine-text ui-unit fail 'every code the backend answers with has a human text' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "	engine_missing:     _('Saved." "	engine_missing_x:   _('Saved."
@@ -632,6 +625,137 @@ ctl awgb2-temp-names-time-rand status fail 'status/temp-names-unique-across-proc
 	"$LIBX/common.uc" "	return length(u) ? u : sprintf('%d.%d', time(), rand());" "	return sprintf('%d.%d', time(), rand());"
 ctl awgb2-ui-no-awg31-text ui-unit fail 'every code the backend answers with has a human text' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "	engine_no_awg31:    _('Saved." "	engine_no_awg31_x:  _('Saved."
+# ================= stage 6: the data model (pack stage6, ROADMAP 9) =================
+# parser: hidden ids, picks, the source index, one id = one node
+ctl s6-parser-hide-ignored parser fail 'parser/hide-skips-the-id-in-every-input ' \
+	"$LIBX/parser.uc" '	if (id && ((HIDE && HIDE[id]) || (PICK && !PICK[id]))) {' '	if (id && ((PICK && !PICK[id]))) {'
+ctl s6-parser-pick-ignored parser fail 'parser/pick-only-for-the-next-file-before-dedup ' \
+	"$LIBX/parser.uc" '		PICK = f.pick;' '		PICK = null;'
+ctl s6-parser-src-wrong parser fail 'parser/pick-only-for-the-next-file-before-dedup ' \
+	"$LIBX/parser.uc" '	if (WITH_SRC) ob._src = cur_src;' '	if (WITH_SRC) ob._src = 0;'
+ctl s6-parser-dedup-by-name parser fail 'parser/dedup-same-config-other-name-is-one-node ;parser/dedup-users-file-first-keeps-users-name ;parser/id-unique-in-output ' \
+	"$LIBX/parser.uc" "	let dk = id ?? ('noid:' + config_key(ob));" "	let dk = base + '\x1f' + (id ?? config_key(ob));"
+# build: the inputs of the pool
+ctl s6-build-hide-not-passed build fail 'build/model-inputs-sources-and-filters ;build/model-hidden-listed-with-name ' \
+	"$LIBX/build.sh" 'FILES=""; PARGS="--hide $SB_DATA/hidden.ids";' 'FILES=""; PARGS="";'
+ctl s6-build-pick-not-passed build fail 'build/model-inputs-sources-and-filters ' \
+	"$LIBX/build.sh" '	if [ -n "${3:-}" ]; then PARGS="$PARGS --pick $3 $1"; else PARGS="$PARGS $1"; fi' '	PARGS="$PARGS $1"'
+ctl s6-build-disabled-sub-used build fail 'build/model-inputs-sources-and-filters ' \
+	"$LIBX/build.sh" '	[ "$en" = 1 ] || continue' '	:'
+ctl s6-build-manual-after-subs build fail 'build/model-inputs-sources-and-filters ' \
+	"$LIBX/build.sh" '[ -s "$SB_DATA/manual.links" ] && add_input "$SB_DATA/manual.links" manual' ':' \
+	"$LIBX/build.sh" 'for f in "$SRCDIR"/[0-9][0-9][0-9].raw; do' '[ -s "$SB_DATA/manual.links" ] && add_input "$SB_DATA/manual.links" manual; for f in "$SRCDIR"/[0-9][0-9][0-9].raw; do'
+ctl s6-build-fav-active-off build fail 'build/model-active-favourites-join-the-pool ' \
+	"$LIBX/build.sh" '[ -s "$SB_DATA/fav.links" ] && add_input "$SB_DATA/fav.links" fav' ':'
+# generator: the stores by id -> the tags of this build
+ctl s6-gen-auto-member-as-tags build fail 'build/model-auto-members-and-dead-by-id ' \
+	"$LIBX/generator.uc" "for (let t in tags_of(as_array(uci.get('vpnpool', 'main', 'auto_member'))))" "for (let t in as_array(uci.get('vpnpool', 'main', 'auto_member')))"
+ctl s6-gen-dead-as-tags build fail 'build/model-auto-members-and-dead-by-id ' \
+	"$LIBX/generator.uc" '		for (let t in tags_of(dead))' '		for (let t in dead)'
+ctl s6-gen-favorites-only-off build fail 'build/model-favourites-only-and-preferred-default ' \
+	"$LIBX/generator.uc" "if (opt('main', 'favorites_only', '0') == '1') {" 'if (false) {'
+ctl s6-gen-favorites-only-empties build fail 'build/model-favourites-only-never-empties-the-pool ' \
+	"$LIBX/generator.uc" '	if (length(only)) auto_tags = only;' '	auto_tags = only;'
+ctl s6-gen-preferred-default-off build fail 'build/model-favourites-only-and-preferred-default ' \
+	"$LIBX/generator.uc" "	def = preferred_tag ?? (length(node_tags) ? node_tags[0] : 'auto');" "	def = (length(node_tags) ? node_tags[0] : 'auto');"
+# fetch: every subscription its own meta
+ctl s6-fetch-meta-one-key fetch fail 'fetch/all-sources-ok ' \
+	"$LIBX/fetch.sh" "--argjson m \"\$m\" '.[\$s] = \$m')" "--argjson m \"\$m\" '.x = \$m')"
+ctl s6-fetch-meta-always-written fetch fail 'fetch/unchanged-source-cache-not-rewritten ' \
+	"$LIBX/fetch.sh" '	persist_if_changed "$SB_DATA/.meta.new" "$META"' '	cp "$SB_DATA/.meta.new" "$META"'
+ctl s6-fetch-disabled-fetched fetch fail 'fetch/disabled-subscription-not-fetched ' \
+	"$LIBX/fetch.sh" '	[ "$en" = 1 ] && [ -n "$url" ] || continue' '	[ -n "$url" ] || continue'
+ctl s6-fetch-removed-meta-kept fetch fail 'fetch/removed-source-dropped-from-cache ' \
+	"$LIBX/fetch.sh" "'with_entries(select(.key as \$k | \$ids | index(\$k) != null))')" "'.')"
+# status: the stores by id, the older screens' tags, masked values
+ctl s6-status-source-ignored status fail 'status/node-source-from-the-build ;status/subscriptions-last-fetch ' \
+	"$LIBX/status.uc" "	if (substr(src, 0, 4) == 'sub:') return [ 'subscription', substr(src, 4) ];" '	;'
+ctl s6-status-legacy-ids status fail 'status/favorites-hidden-preferred ' \
+	"$LIBX/status.uc" '	dead_nodes: tags_of(dead_ids),' '	dead_nodes: dead_ids,'
+ctl s6-status-hidden-unlisted status fail 'status/favorites-hidden-preferred ' \
+	"$LIBX/status.uc" "for (let id in hidden_ids) if (!hseen[id]) push(hidden, { id: id, tag: null, in_source: false });" ';'
+ctl s6-status-migration-unmasked status fail 'status/migration-unmatched-listed-masked ' \
+	"$LIBX/status.uc" "index(x.value, '://') >= 0) ? mask_url(x.value) :" "index(x.value, '://') >= 0) ? x.value :"
+ctl s6-status-pick-missing-wrong status fail 'status/subscriptions-last-fetch ' \
+	"$LIBX/status.uc" "	if (s.mode == 'pick') for (let i in s.pick) if (!pool_ids[i] && !hidden_set[i]) missing++;" "	if (s.mode == 'pick') for (let i in s.pick) if (!hidden_set[i]) missing++;"
+# daemon: the preferred node by id, the node checker's stores by id, the node tests
+ctl s6-daemon-preferred-as-tag daemon fail 'daemon/preferred-in-dead-set-hands-to-auto-keeps-pin ;daemon/preferred-recovered-switches-back ' \
+	"$LIBX/vpnpoold" "	ptag=\$(jq -r --arg i \"\$pref\" 'map(select(.id == \$i)) | .[0].tag // \"\"' \"\$SB_DATA/nodes.json\" 2>/dev/null)" '	ptag=$pref'
+ctl s6-daemon-pin-cleared-during-rebuild daemon fail 'daemon/preferred-gone-cleared-except-rebuild-or-favourite ' \
+	"$LIBX/vpnpoold" '		[ -f "$SB_DATA/.reload_running" ] && return 0' '		:'
+ctl s6-daemon-pin-cleared-for-favourite daemon fail 'daemon/preferred-gone-cleared-except-rebuild-or-favourite ' \
+	"$LIBX/vpnpoold" "		jq -e --arg i \"\$pref\" 'has(\$i)' \"\$CONF_DIR/favorites.map.json\" >/dev/null 2>&1 && return 0" '		:'
+ctl s6-nodecheck-strikes-by-tag daemon fail 'daemon/nodecheck-wan-up-strikes-dead-node ' \
+	"$LIBX/nodecheck.sh" '	printf '"'"'%s%s%s\n'"'"' "$id" "$TAB" "$cur" >> "$newstrk"' '	printf '"'"'%s%s%s\n'"'"' "$t" "$TAB" "$cur" >> "$newstrk"'
+ctl s6-speedtest-unresolved daemon fail 'daemon/node-tests-use-test-selector-only ;daemon/node-test-unknown-node-touches-nothing ' \
+	"$LIBX/speedtest.sh" 'R=$(node_resolve "$ARG") || {' 'R=$(printf '"'"'%s\t%s'"'"' "$ARG" "$ARG") || {'
+ctl s6-unlock-map-by-tag daemon fail 'daemon/node-tests-use-test-selector-only ' \
+	"$LIBX/unlock.sh" 'jq --arg i "$ID" --argjson r "$RES" '"'"'.[$i]=$r'"'"' "$MAP"' 'jq --arg i "$TAG" --argjson r "$RES" '"'"'.[$i]=$r'"'"' "$MAP"'
+# tgbot: /switch = Connect (no hard pin), /saved = favourites
+ctl s6-tgbot-hard-pin tgbot fail 'tgbot/switch-stores-the-preferred-id ' \
+	"$LIBX/tgbot.sh" '	uci set vpnpool.main.preferred_node="$id" 2>/dev/null' '	uci set vpnpool.main.selected_node="$tag" 2>/dev/null'
+ctl s6-tgbot-saved-from-nodes tgbot fail 'tgbot/saved-lists-the-favourites ' \
+	"$LIBX/tgbot.sh" '		(.favorites // []) as $sv |' '		[ (.nodes // [])[] | select(.saved==true) ] as $sv |'
+# rpcd / api: node operations by id, subscriptions, the schema
+ctl s6-api-sub-del-wrong-one rpcd fail 'rpcd/sub_del/bad-input ' \
+	"$LIBX/api.uc" '		let s = sub_find(u, inp.id ?? inp.url);' '		let s = sub_find(u, inp.id ?? inp.url) ?? subs_of(u)[0];'
+ctl s6-api-fav-without-link rpcd fail 'rpcd/fav/ok ;rpcd/save_node/ok ' \
+	"$LIBX/api.uc" '	let e = { tag: n.tag, link: link_of(n.id), active: old?.active === true, auto: false, at: time(),' '	let e = { tag: n.tag, link: null, active: old?.active === true, auto: false, at: time(),'
+ctl s6-api-hide-not-pruned rpcd fail 'rpcd/hide/ok ' \
+	"$LIBX/api.uc" '		prune_live([ r.id ]); drop_marks([ r.id ]);' '		;'
+ctl s6-api-hide-keeps-preferred rpcd fail 'rpcd/hide/clears-the-preferred-node ' \
+	"$LIBX/api.uc" "		if (u.get('vpnpool', 'main', 'preferred_node') == r.id) u.delete('vpnpool', 'main', 'preferred_node');" '		;'
+ctl s6-api-delete-sub-node-not-hidden rpcd fail 'rpcd/delete_nodes/ok ;rpcd/delete_node/subscription-node-is-hidden ' \
+	"$LIBX/api.uc" "		changed = list_add(u, 'hidden', r.id);" '		changed = true;'
+ctl s6-api-connect-not-live rpcd fail 'rpcd/connect/ok ;rpcd/select/ok ' \
+	"$LIBX/api.uc" "		let c = clash_put('proxy', r.tag);" "		let c = '000';"
+ctl s6-api-connect-archive-inactive rpcd fail 'rpcd/connect/favourite-not-in-a-source-joins-the-pool ' \
+	"$LIBX/api.uc" '			fav[r.id].active = true;' '			;'
+ctl s6-api-auto-keeps-preferred rpcd fail 'rpcd/auto_select/ok ' \
+	"$LIBX/api.uc" "		if (had) { u.delete('vpnpool', 'main', 'preferred_node'); if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' }; }" '		;'
+ctl s6-api-auto-members-tags rpcd fail 'rpcd/set_auto_members/ok ' \
+	"$LIBX/api.uc" "	auto_members:          { s: 'main', o: 'auto_member', list: L_NODE, a: 'USR1' }" "	auto_members:          { s: 'main', o: 'auto_member', list: L_TAG, a: 'USR1' }"
+ctl s6-api-singbox-bin-no-live rpcd fail 'rpcd/set_config/singbox-bin-missing-refused ' \
+	"$LIBX/api.uc" '		if (!r[1] && d.live) r[1] = d.live(r[0]);' '		;'
+ctl s6-api-add-url-not-a-section rpcd fail 'rpcd/add_sub/ok ;rpcd/add_sub/no-daemon-reported ;rpcd/add/ok ;rpcd/add/no-daemon-reported ;rpcd/add/url-in-pick-mode ' \
+	"$LIBX/api.uc" '			let sid = sub_name_for(u, x);' "			let sid = 'main';"
+ctl s6-api-add-mode-ignored rpcd fail 'rpcd/add/url-in-pick-mode ' \
+	"$LIBX/api.uc" '			                         enabled: sub_on, mode: sub_mode, pick: sub_pick }))' "			                         enabled: sub_on, mode: 'all', pick: [] }))"
+ctl s6-api-repick-appends rpcd fail 'rpcd/import_select/re-pick-replaces ' \
+	"$LIBX/api.uc" '		ids = uniq_list(ids);' '		ids = uniq_list([ ...(sub_find(u, inp.url)?.pick ?? []), ...ids ]);'
+ctl s6-api-1x-tags-refused rpcd fail 'rpcd/restore/1x-backup-migrated ' \
+	"$LIBX/api.uc" "		if (f == 'preferred_node') chk = v2 ? ((x) => is_id(x) ? [ x, null ] : [ null, 'bad_tag' ]) : chk_tag;" "		if (f == 'preferred_node') chk = (x) => is_id(x) ? [ x, null ] : [ null, 'bad_tag' ];"
+ctl s6-rpcd-restore-not-migrated rpcd fail 'rpcd/restore/1x-backup-migrated ' \
+	"$RPCD" '		/usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1   # a 1.x backup' '		:   # a 1.x backup'
+# migrate: the backup, the mapping, the report, idempotence, who runs it
+ctl s6-migrate-backup-config-only migrate fail 'migrate/backup-before-changes ' \
+	"$LIBX/migrate.sh" 'tar -czf "$BK.tmp" -C / $(backup_members)' 'tar -czf "$BK.tmp" -C / etc/config/vpnpool'
+ctl s6-migrate-not-idempotent migrate fail 'migrate/idempotent ;migrate/2x-config-untouched ' \
+	"$LIBX/migrate.sh" '[ "$(uci -q get vpnpool.main.schema)" = 2 ] && exit 0' 'false && exit 0' \
+	"$LIBX/migrate.sh" '[ "$(uci -q get vpnpool.main.schema)" = 2 ] && exit 0' 'false && exit 0'
+ctl s6-migrate-hard-pin-lost migrate fail 'migrate/hard-pin-becomes-the-preferred-node ;migrate/the-migrated-config-builds ' \
+	"$LIBX/migrate.uc" "if (length(M.selected_node ?? '')) pref = id_of_tag('selected_node', M.selected_node);" ';'
+ctl s6-migrate-no-running-node-list migrate fail 'migrate/tag-stores-become-ids ;migrate/unmatched-kept-and-reported ' \
+	"$LIBX/migrate.uc" "know_outbounds(read_json(RUN + '/nodes.json', []));" ';'
+ctl s6-migrate-unmatched-silent migrate fail 'migrate/unmatched-kept-and-reported ' \
+	"$LIBX/migrate.uc" 'function unmatched(store, value) { push(report.unmatched, { store: store, value: value }); }' 'function unmatched(store, value) { }'
+ctl s6-migrate-awg-not-renamed migrate fail 'migrate/awg-files-renamed-with-their-name ;migrate/rerun-after-an-interruption ' \
+	"$LIBX/migrate.uc" "	push(awg_plan, { from: path, to: AWG + '/' + r.id + '.conf', body: named ? raw : ('# Name = ' + r.tag + '\n' + raw) });" '	;'
+ctl s6-migrate-awg-no-name migrate fail 'migrate/awg-files-renamed-with-their-name ' \
+	"$LIBX/migrate.uc" "body: named ? raw : ('# Name = ' + r.tag + '\n' + raw) });" 'body: raw });'
+ctl s6-migrate-orphan-import-lost migrate fail 'migrate/imported-without-source-becomes-manual ;migrate/the-migrated-config-builds ' \
+	"$LIBX/migrate.uc" "	if (!manual_set[l]) { push(manual, l); manual_set[l] = true; moved('imported_to_manual'); }" '	;'
+ctl s6-migrate-1x-files-kept migrate fail 'migrate/1x-leftovers-gone ' \
+	"$LIBX/migrate.uc" "for (let f in [ 'saved.map.json', 'snapshot.map.json', 'imported.map.json', 'sub.expire', 'sub.usage' ]) unlink(CONF + '/' + f);" ';'
+ctl s6-initd-no-migration migrate fail 'migrate/init-d-start-migrates ' \
+	package/vpnpool/files/etc/init.d/vpnpool '	[ -x /usr/libexec/vpnpool/migrate.sh ] && /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1' '	:'
+ctl s6-uci-defaults-hides-failure migrate fail 'migrate/uci-defaults-runs-it-and-reports ' \
+	package/vpnpool/files/etc/uci-defaults/90-vpnpool-2.0 '/usr/libexec/vpnpool/migrate.sh' '/usr/libexec/vpnpool/migrate.sh; exit 0'
+# ui: the new reply / field codes need their texts
+ctl s6-ui-no-hidden-text ui-unit fail 'every code the backend answers with has a human text' \
+	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "	hidden:             _('Hidden." "	hidden_x:           _('Hidden."
+ctl s6-ui-no-bad-path-text ui-unit fail 'every code the backend answers with has a human text' \
+	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "	bad_path:      _('There is no such program" "	bad_path_x:    _('There is no such program"
 wait
 for n in $NC_ORDER; do
 	o="$TMPBASE/$n.out"
