@@ -22,11 +22,7 @@ mkdir -p "$CONF_DIR"
 # previous config" still has something to keep when this build fails.
 [ -s "$SB_CONF" ] || { [ -s "$SB_CONF_FLASH" ] && cp "$SB_CONF_FLASH" "$SB_CONF"; }
 
-# Cache whether the installed sing-box supports AmneziaWG (the AWG fork reports it in its
-# version string / build tags). status.sh reads this so the LuCI UI hides AWG import/fields
-# on a stock sing-box that can't run AmneziaWG. Cheap to compute here (once per rebuild)
-# instead of forking `sing-box version` on every dashboard poll.
-if sing-box version 2>/dev/null | grep -qiE 'awg'; then echo true; else echo false; fi | write_atomic "$SB_DATA/.awgcap"
+rm -f "$SB_DATA/.awgcap"   # 1.x guessed AWG support from `version`; now measured (enginecap.uc)
 
 # manual nodes (uci: list manual_node 'vless://...') and imported nodes (uci: list
 # imported_node — links the user hand-picked from a probed source) each as their own
@@ -63,26 +59,31 @@ for f in /etc/vpnpool/awg/*.conf; do
 done
 
 # Result of this build for the UI (status.sh -> "build"): written on EVERY exit, atomically.
-#   {at, ok, nodes, skipped, dropped:[{source,line|item,reason} | {tag,reason,detail?}], error}
+#   {at, ok, nodes, skipped, deferred, engine:{bin,version,awg}|null,
+#    dropped:[{source,line|item,reason,field?} | {tag,reason,detail?}], error}
 # error / reason are machine codes (the human text lives in the UI's translations).
 BUILD_STATUS="$SB_DATA/build_status.json"
 DROPS="$SB_DATA/.build_drops.tsv"; : > "$DROPS"   # tag \t <tag> \t \t <reason> \t <detail>
 echo '[]' > "$SB_DATA/.build_report.json"
+NDEF=0; ENG_JSON=null
 build_status() {   # $1=true|false $2=error code ("" on success)
 	jq -Rn --argjson ok "$1" --arg err "$2" --argjson n "${CNT:-0}" --argjson at "$(date +%s)" \
+		--argjson ndef "${NDEF:-0}" --argjson engine "${ENG_JSON:-null}" \
 		--slurpfile rep "$SB_DATA/.build_report.json" '
 		[inputs | split("\t") | select(.[0] == "tag")
 			| {tag:.[1], reason:.[3]} + (if (.[4] // "") != "" then {detail:.[4]} else {} end)] as $eng
 		| (($rep[0] // []) | map(select(.status == "skip" and .reason != "duplicate" and .reason != "not_a_node"))) as $sk
-		| {at:$at, ok:$ok, nodes:$n, skipped:($sk | length),
-		   dropped: (($sk[:100] | map({source, reason} + (if .line != null then {line} else {item} end))) + $eng),
+		| {at:$at, ok:$ok, nodes:$n, skipped:($sk | length), deferred:$ndef,
+		   engine: (if $engine == null then null else ($engine | {bin, version, awg}) end),
+		   dropped: (($sk[:100] | map({source, reason} + (if .line != null then {line} else {item} end)
+		                                + (if .field != null then {field} else {} end))) + $eng),
 		   error: (if $err == "" then null else $err end)}' "$DROPS" 2>/dev/null | write_atomic "$BUILD_STATUS"
 	rm -f "$DROPS" "$SB_DATA/.build_report.json"
 }
-fail() {   # $1=error code
+fail() {   # $1=error code [$2=exit code, default 1]
 	trap - INT TERM HUP
 	rm -f "$NB" "$NB.x" "$NB.full" "$SB_CONF.new" "$SB_CONF.tmp"
-	build_status false "${1:-build_failed}"; exit 1
+	build_status false "${1:-build_failed}"; exit "${2:-1}"
 }
 # Killed (the daemon stops / restarts: TERM to its child): the result is "interrupted", never
 # the previous build's ok. The live config and nodes.json are untouched (replaced only at the
@@ -147,6 +148,50 @@ fi
 CNT=$(jq 'length' "$NB" 2>/dev/null || echo 0)
 if [ "${CNT:-0}" -lt 1 ]; then
 	log "build: 0 nodes after exclude filter"; fail no_nodes_after_exclude
+fi
+
+# ---- the engine and the deferred nodes (ROADMAP 4.1, 4.7) ----
+# The binary that will run this config (enginecap.uc select): measured, cached by mtime:size.
+# Nodes it can't run are DEFERRED (owner's decision 14.10.2026: an AWG node without the engine is
+# kept, shown greyed out, does not go into the config and does not break the build):
+#   engine_missing / engine_no_awg — an AmneziaWG node, no AWG-capable engine;
+#   start_failed — the start guard (vpnpoold) saw THIS node stop sing-box at start, with this
+#                  very config and engine (a changed node or another engine gets a new try).
+# Plain WireGuard runs on the stock binary: never deferred for the engine.
+DEFERRED="$SB_DATA/deferred.json"
+BAD_NODES="$SB_DATA/.bad_nodes.json"
+HAS_AWG=0; jq -e 'any(.[]; .type == "awg")' "$NB" >/dev/null 2>&1 && HAS_AWG=1
+ENG_JSON=$(ucode "$ENGINECAP" select "$HAS_AWG" 2>/dev/null)
+printf '%s' "$ENG_JSON" | jq -e 'type == "object" and (.bin | type == "string")' >/dev/null 2>&1 \
+	|| ENG_JSON=$(jq -nc --arg b "$SB_BIN_DEFAULT" '{bin:$b, version:null, awg:false, sig:null, reason:null}')
+SB_BIN=$(printf '%s' "$ENG_JSON" | jq -r '.bin')
+SB_VER=$(printf '%s' "$ENG_JSON" | jq -r '.version // ""')
+[ -s "$BAD_NODES" ] || echo '{}' > "$BAD_NODES"
+jq -c --argjson eng "$ENG_JSON" --slurpfile bad "$BAD_NODES" '
+	(($bad[0] // {}) | if type == "object" then . else {} end) as $b
+	| map(. as $n
+		| ($b[$n.id // ""] // null) as $m
+		| (if ($eng.reason // null) != null and $n.type == "awg" then {reason: $eng.reason}
+		   elif $m != null and $m.engine == $eng.sig and $m.cfg == ($n | del(.tag, .id) | tojson)
+		   then {reason: "start_failed", detail: $m.detail}
+		   else null end) as $d
+		| {n: $n, d: $d})
+	| {keep: map(select(.d == null) | .n),
+	   deferred: map(select(.d != null) | (.n | {id, tag, type,
+	                 server: (.server // .peers[0].address), port: (.server_port // .peers[0].port)}
+	                 + (if .random_trailers == true then {hints: ["awg_random_trailers"]} else {} end)) + .d)}' \
+	"$NB" > "$NB.x" 2>/dev/null || { log "build: deferring nodes failed"; fail build_failed; }
+jq -c '.keep' "$NB.x" > "$NB" && jq -c '.deferred' "$NB.x" | write_atomic "$DEFERRED"
+rm -f "$NB.x"
+NDEF=$(jq 'length' "$DEFERRED" 2>/dev/null || echo 0)
+[ "${NDEF:-0}" -gt 0 ] && log "build: $NDEF node(s) deferred: $(jq -r 'map("\(.tag) (\(.reason))") | join(", ")' "$DEFERRED" 2>/dev/null)"
+CNT=$(jq 'length' "$NB" 2>/dev/null || echo 0)
+if [ "${CNT:-0}" -lt 1 ]; then
+	# Nothing the engine can run, but the deferred nodes are there: a clear state for the UI
+	# (build_status error only_deferred + deferred.json), not a failure loop — exit 3 tells
+	# the daemon to wait for a change (an engine install or new nodes signal it).
+	log "build: no node can run on this engine (all $NDEF deferred) — keeping the previous config"
+	fail only_deferred 3
 fi
 
 # ---- auto-pool health prefilter ----
@@ -223,7 +268,8 @@ if [ -s "$ALIVE" ]; then
 fi
 
 # The urltest group probes the SAME URL every other "is it alive" check uses (lib.sh).
-VPNPOOL_PROBE_URL=$(primary_probe_url) ucode /usr/libexec/vpnpool/generator.uc "$NB" > "$SB_CONF.new" 2>>"$SB_DATA/build.err"
+# ... generated for the engine that runs it (VPNPOOL_SB_VERSION: http_clients on >= 1.14).
+VPNPOOL_PROBE_URL=$(primary_probe_url) VPNPOOL_SB_VERSION="$SB_VER" ucode /usr/libexec/vpnpool/generator.uc "$NB" > "$SB_CONF.new" 2>>"$SB_DATA/build.err"
 
 # Resilient validation. A SINGLE malformed node (unsupported flow, reality without
 # uTLS, bad cipher, port out of range, a repeated name, …) makes `sing-box check` reject the
@@ -239,7 +285,7 @@ if ! config_tag_guard "$SB_CONF.new"; then
 fi
 [ -n "$TAG_GUARD_JSON" ] && printf '%s' "$TAG_GUARD_JSON" | jq -r '.[] | "tag\t\(.)\t\trepeated_name\t"' >> "$DROPS" 2>/dev/null
 dropped=$TAG_GUARD_DROPPED; tries=0
-while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
+while ! "$SB_BIN" check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 	tries=$((tries + 1))
 	if [ "$tries" -gt 50 ]; then
 		log "build: >50 bad outbounds (dropped $dropped so far), giving up; keeping previous config — check subscription source quality"
@@ -279,6 +325,9 @@ while ! sing-box check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 done
 
 mv "$SB_CONF.new" "$SB_CONF"
+# the daemon runs exactly the binary this config was checked with (lib.sh sb_bin)
+printf '%s
+' "$SB_BIN" | write_atomic "$SB_BIN_FILE"
 persist_if_changed "$SB_CONF" "$SB_CONF_FLASH"
 
 # Reconcile the node list with what actually survived into the live config, so the

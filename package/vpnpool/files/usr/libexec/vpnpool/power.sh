@@ -40,7 +40,7 @@ boot_hook() { [ -f "$RAM_HOOK" ] || /etc/init.d/vpnpool enable >/dev/null 2>&1; 
 leftovers_down() {
 	local p
 	/usr/libexec/vpnpool/route.sh down >/dev/null 2>&1
-	for p in $( { pgrep -f "sing-box run -c $SB_CONF"; pgrep -f "sing-box run -c $SB_CONF_FLASH"; } 2>/dev/null | sort -u); do
+	for p in $(our_singbox_pids); do   # lib.sh: our config path, any engine binary
 		kill "$p" 2>/dev/null
 	done
 	rm -f /var/run/vpnpool-singbox.pid

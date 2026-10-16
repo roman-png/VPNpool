@@ -1,8 +1,9 @@
 // vpnpool shared ucode helpers (imported by status.uc and api.uc: `import ... from './common.uc'`).
-// Pure functions + small file helpers; no process is spawned here.
+// Pure functions + small file helpers; the only processes spawned here are the engine probes of
+// engine_cap (and only when a sing-box binary changed).
 'use strict';
 
-import { readfile, stat, open, rename, unlink } from 'fs';
+import { readfile, writefile, stat, open, rename, unlink, popen, access, mkdir } from 'fs';
 import { rand } from 'math';
 
 // Community rule-set names (itdoginfo/allow-domains SRS assets). The ONE list: generator.uc
@@ -94,4 +95,89 @@ function nid(n) {
 		(n.tls?.reality?.short_id ?? '');
 }
 
-export { VALID_COMMUNITY, read_json, write_atomic, file_sig, mask_url, mask_token, str_key, as_list, jstr, nid };
+// ---- the sing-box engine (ROADMAP 4.1) ----
+// Which sing-box runs our config, and can it do AmneziaWG. The stock binary (opkg/apk, shared
+// with podkop) stays /usr/bin/sing-box; our AWG build is a separate file /usr/bin/sing-box-awg
+// (engine.sh). uci singbox_bin pins another binary (empty / the stock path = automatic).
+// The capability is MEASURED, never guessed from a version string: `version -n` + `check` of a
+// tiny config with an awg endpoint (the same probe engine.sh uses before it installs a build).
+// Cached per binary by mtime:size in /tmp/vpnpool/engine-cap.json — the only place here that
+// spawns processes, and only when a binary changed (status polls cost nothing).
+// Env overrides (stand tests): VPNPOOL_SB_STOCK, VPNPOOL_SB_AWG, VPNPOOL_ENGINE_CAP.
+const SB_STOCK = getenv('VPNPOOL_SB_STOCK') ?? '/usr/bin/sing-box';
+const SB_AWG = getenv('VPNPOOL_SB_AWG') ?? '/usr/bin/sing-box-awg';
+const ENGINE_CAP = getenv('VPNPOOL_ENGINE_CAP') ?? '/tmp/vpnpool/engine-cap.json';
+const AWG_PROBE = '{"log":{"level":"error"},"endpoints":[{"type":"awg","tag":"engine-check",' +
+	'"private_key":"YBk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk=","address":["10.8.1.9/32"],' +
+	'"jc":4,"jmin":10,"jmax":50,"s1":89,"s2":112,"h1":"1","h2":"2","h3":"3","h4":"4","peers":[' +
+	'{"address":"198.51.100.61","port":443,"public_key":"SrvPUBFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0=",' +
+	'"allowed_ips":["0.0.0.0/0"]}]}],"outbounds":[{"type":"direct","tag":"direct"}]}\n';
+
+function shq(s) { return "'" + replace('' + s, "'", "'\\''") + "'"; }
+
+// "1.14.3-awg.1" -> [1, 14]; null when unknown
+function sb_version_mm(v) {
+	let m = match('' + (v ?? ''), /^([0-9]+)\.([0-9]+)/);
+	return m ? [ int(m[1]), int(m[2]) ] : null;
+}
+
+// engine_cap(bin, force) -> {bin, present, sig, version, major, minor, awg}
+function engine_cap(bin, force) {
+	let st = stat(bin);
+	if (!st || st.type != 'file' || !access(bin, 'x'))
+		return { bin: bin, present: false, sig: null, version: null, major: null, minor: null, awg: false };
+	let sig = st.mtime + ':' + st.size;
+	let cache = read_json(ENGINE_CAP, {});
+	if (type(cache) != 'object') cache = {};
+	let c = cache[bin];
+	if (!force && type(c) == 'object' && c.sig == sig) return c;
+	mkdir(substr(ENGINE_CAP, 0, rindex(ENGINE_CAP, '/')));
+	let f = popen(shq(bin) + ' version -n 2>/dev/null', 'r');
+	let v = f ? trim(split(f.read('all') ?? '', '\n')[0] ?? '') : '';
+	if (f) f.close();
+	let probe = sprintf('%s.probe.%d.%d.json', ENGINE_CAP, time(), rand());
+	let awg = false;
+	if (writefile(probe, AWG_PROBE) != null) {
+		awg = system(shq(bin) + ' check -c ' + shq(probe) + ' >/dev/null 2>&1') == 0;
+		unlink(probe);
+	}
+	let mm = sb_version_mm(v);
+	c = { bin: bin, present: true, sig: sig, version: length(v) ? v : null,
+	      major: mm ? mm[0] : null, minor: mm ? mm[1] : null, awg: awg };
+	cache[bin] = c;
+	write_atomic(ENGINE_CAP, sprintf('%J', cache));
+	return c;
+}
+
+// engine_select(cfg_bin, has_awg) -> the cap of the binary to build/run with + reason:
+//   reason null | "engine_missing" (AWG nodes, no AWG-capable build installed) |
+//   "engine_no_awg" (the configured / installed build cannot run AWG)
+// Rules: uci singbox_bin set to another binary -> that one (if it exists); otherwise the stock
+// one, except when there are AWG nodes and the stock binary cannot run them: then
+// /usr/bin/sing-box-awg when it can. Pure WireGuard runs on the stock binary.
+function engine_select(cfg_bin, has_awg) {
+	let explicit = (type(cfg_bin) == 'string' && length(cfg_bin) && cfg_bin != SB_STOCK) ? cfg_bin : null;
+	let cap = explicit ? engine_cap(explicit) : null;
+	if (!cap?.present) cap = engine_cap(SB_STOCK);
+	let reason = null;
+	if (!cap.present) {                       // no stock binary: the AWG build is all there is
+		let ac = engine_cap(SB_AWG);
+		if (ac.present) cap = ac;
+	}
+	if (has_awg && !cap.awg) {
+		if (explicit && cap.bin == explicit) reason = 'engine_no_awg';
+		else {
+			let ac = engine_cap(SB_AWG);
+			if (ac.present && ac.awg) cap = ac;
+			else reason = ac.present ? 'engine_no_awg' : 'engine_missing';
+		}
+	}
+	let r = {};
+	for (let k, v in cap) r[k] = v;
+	r.reason = reason;
+	r.explicit = explicit;
+	return r;
+}
+
+export { VALID_COMMUNITY, read_json, write_atomic, file_sig, mask_url, mask_token, str_key, as_list, jstr, nid,
+	SB_STOCK, SB_AWG, ENGINE_CAP, sb_version_mm, engine_cap, engine_select };

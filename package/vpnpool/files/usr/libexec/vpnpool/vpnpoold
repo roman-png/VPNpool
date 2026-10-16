@@ -72,11 +72,8 @@ cap_log() {
 # did `kill; sleep 1; start` — if the old process hadn't released tproxy :1603 and the
 # cache.db lock within 1s, the NEW instance died with "address already in use" /
 # "initialize cache-file: timeout", the supervisor restarted it, and it crash-looped.
-# Match OUR sing-box only (by our own -c config path — the RAM one, and the flash one a
-# 1.x instance still runs with right after an upgrade) so we never touch podkop's sing-box.
-our_singbox_pids() {
-	{ pgrep -f "sing-box run -c $SB_CONF" 2>/dev/null; pgrep -f "sing-box run -c $SB_CONF_FLASH" 2>/dev/null; } | sort -u
-}
+# Match OUR sing-box only (lib.sh our_singbox_pids: our -c config path, whichever engine
+# binary runs it) so we never touch podkop's sing-box.
 kill_singbox() {
 	# NOTE: busybox `pkill -f` did NOT reliably match the full cmdline here (it left
 	# instances alive -> orphans piled up, held :1603, and the crash loop / "imports
@@ -101,10 +98,13 @@ kill_singbox() {
 _do_start_singbox() {
 	kill_singbox   # ensure no previous/orphaned instance holds :1603 or the cache lock
 	cap_log
+	# where this start's output begins in the log (the start guard reads its FATAL from here)
+	wc -c < "$SB_LOG" 2>/dev/null > "$SB_DATA/.sb_log_off" || echo 0 > "$SB_DATA/.sb_log_off"
 	# 9>&- : close the flock fd in the child, otherwise the backgrounded sing-box
 	# INHERITS the lock fd and holds it for its whole lifetime — the next
 	# start_singbox would then block forever on flock and never reload the config.
-	sing-box run -c "$SB_CONF" -D "$SB_DATA" >> "$SB_LOG" 2>&1 9>&- &
+	# The binary: the one build.sh checked this config with (lib.sh sb_bin).
+	"$(sb_bin)" run -c "$SB_CONF" -D "$SB_DATA" >> "$SB_LOG" 2>&1 9>&- &
 	echo $! > "$SB_PIDFILE"
 }
 
@@ -128,6 +128,101 @@ singbox_alive() {
 	local p
 	p=$(cat "$SB_PIDFILE" 2>/dev/null)
 	[ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+
+# ---- start guard (ROADMAP 4.8) ----
+# `sing-box check` passes configs that die at START (an AmneziaWG endpoint with values the
+# device refuses, a node whose runtime setup fails): one such node took the whole tunnel down.
+# After every NEW config is started: watch sing-box for GUARD_SECS; if it dies with a FATAL that
+# names one of OUR nodes ("start endpoint/awg[TAG]: ...", outbound/<type>[TAG] alike) -> mark that
+# node bad (build.sh defers it as start_failed while its config and the engine stay the same)
+# and rebuild without it; a FATAL without a node -> back to the previous config
+# (sing-box.json.prev, saved by save_prev before the build) — the one that ran.
+# GUARD_MAX is MY safety limit (not a sing-box limit): at most that many repairs per new
+# config, then the supervisor's crash-loop backoff takes over (the failure stays visible in
+# guard_status.json). Bad marks live in RAM and are cleared at daemon start: a restart gives
+# a marked node one new try.
+GUARD_SECS=${VPNPOOLD_GUARD_SECS:-5}
+GUARD_MAX=2
+BAD_NODES="$SB_DATA/.bad_nodes.json"
+GUARD_STATUS="$SB_DATA/guard_status.json"
+PREV_FILES="$SB_CONF $SB_DATA/nodes.json $SB_BIN_FILE"
+save_prev() {   # the config that runs now (+ its node list and binary) -> *.prev
+	local f
+	[ -s "$SB_CONF" ] || return 0
+	for f in $PREV_FILES; do
+		if [ -s "$f" ]; then cp "$f" "$f.prev"; else rm -f "$f.prev"; fi
+	done
+}
+restore_prev() {
+	local f
+	for f in $PREV_FILES; do
+		if [ -s "$f.prev" ]; then cp "$f.prev" "$f.tmp.$$" && mv -f "$f.tmp.$$" "$f"; else rm -f "$f"; fi
+	done
+}
+# alive through the whole window (1 s steps)
+sb_survives() {
+	local i=0
+	while [ "$i" -lt "$GUARD_SECS" ]; do
+		singbox_alive || return 1
+		nap 1; i=$((i + 1))
+	done
+	singbox_alive
+}
+# the first FATAL line of this start's output (colour codes removed)
+sb_fatal() {
+	local off
+	off=$(cat "$SB_DATA/.sb_log_off" 2>/dev/null); case "$off" in ''|*[!0-9\ ]*) off=0 ;; esac
+	off=$(( off + 0 ))
+	tail -c +$(( off + 1 )) "$SB_LOG" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -m1 'FATAL' | cut -c1-300
+}
+guard_note() {   # <action> <tag> <id> <detail>
+	jq -nc --arg a "$1" --arg t "$2" --arg i "$3" --arg d "$4" --argjson at "$(date +%s)" \
+		'{at:$at, action:$a, tag:(if $t == "" then null else $t end), id:(if $i == "" then null else $i end),
+		  detail:(if $d == "" then null else $d end)}' 2>/dev/null | write_atomic "$GUARD_STATUS"
+}
+mark_bad() {   # <tag> <detail> -> 0 when the tag is a node of the live list (marked)
+	local n sig
+	n=$(jq -c --arg t "$1" '[.[] | select(.tag == $t)][0] // empty' "$SB_DATA/nodes.json" 2>/dev/null)
+	[ -n "$n" ] || return 1
+	printf '%s' "$n" | jq -e '.id | type == "string" and length > 0' >/dev/null 2>&1 || return 1
+	sig=$(ucode "$ENGINECAP" cap "$(sb_bin)" 2>/dev/null | jq -r '.sig // ""')
+	[ -s "$BAD_NODES" ] || echo '{}' > "$BAD_NODES"
+	jq -c --argjson n "$n" --arg d "$2" --arg s "$sig" --argjson at "$(date +%s)" \
+		'.[$n.id] = {tag:$n.tag, detail:$d, engine:$s, cfg:($n | del(.tag, .id) | tojson), at:$at}' \
+		"$BAD_NODES" 2>/dev/null | write_atomic "$BAD_NODES"
+}
+start_guard() {
+	local n=0 fatal tag id
+	while :; do
+		sb_survives && return 0
+		fatal=$(sb_fatal)
+		n=$((n + 1))
+		if [ "$n" -gt "$GUARD_MAX" ]; then
+			log "start guard: sing-box still stops at start after $GUARD_MAX repairs — leaving it to the supervisor (vpnpool's own limit): ${fatal:-no FATAL in the log}"
+			guard_note gave_up "" "" "$fatal"
+			return 1
+		fi
+		tag=$(printf '%s' "$fatal" | sed -n -E 's/.*(endpoint|outbound)\/[a-z0-9_-]*\[([^]]*)\].*/\2/p' | head -1)
+		if [ -n "$tag" ] && mark_bad "$tag" "$fatal"; then
+			id=$(jq -r --arg t "$tag" '[.[] | select(.tag == $t)][0].id // ""' "$SB_DATA/nodes.json" 2>/dev/null)
+			log "start guard: node \"$tag\" stops sing-box at start — rebuilding without it: $fatal"
+			tg_notify "⚠️ vpnpool: node \"$tag\" can't start — it is set aside"
+			guard_note node_excluded "$tag" "$id" "$fatal"
+			if run_child "$LIBEXEC/build.sh"; then start_singbox; continue; fi
+			log "start guard: the rebuild without \"$tag\" failed"
+		fi
+		if [ -s "$SB_CONF.prev" ] && ! cmp -s "$SB_CONF" "$SB_CONF.prev"; then
+			log "start guard: the new config stops sing-box at start — back to the previous one: ${fatal:-no FATAL in the log}"
+			restore_prev
+			guard_note rolled_back "${tag:-}" "" "$fatal"
+			start_singbox
+			continue
+		fi
+		log "start guard: sing-box stops at start and there is nothing to go back to: ${fatal:-no FATAL in the log}"
+		guard_note failed "${tag:-}" "" "$fatal"
+		return 1
+	done
 }
 
 # the node actually carrying traffic (resolve selector 'auto' to the urltest pick)
@@ -405,7 +500,7 @@ do_reload() {
 		log "refetch: fetching sources"
 		run_child "$LIBEXEC/fetch.sh" || log "fetch failed (cached copies are used where present)"
 	fi
-	[ -s "$SB_CONF" ] && cp "$SB_CONF" "$SB_CONF.prev"
+	save_prev   # what runs now: the start guard goes back to it if the new config fails
 	if ! run_child "$LIBEXEC/build.sh"; then
 		log "reload: build failed, keeping the current config and routing"
 		return 1
@@ -414,6 +509,7 @@ do_reload() {
 		log "reload: config unchanged, sing-box keeps running"
 	else
 		start_singbox   # routes stay as they are while it restarts
+		start_guard     # a config that dies at start: drop the node / go back (ROADMAP 4.8)
 	fi
 	RE_ROUNDS=8 routing_eval reapply
 	log "reload complete"
@@ -461,9 +557,16 @@ initial_build() {
 		if fetch_due; then
 			run_child "$LIBEXEC/fetch.sh" || log "fetch failed (will use cache if present)"
 		fi
-		run_child "$LIBEXEC/build.sh" && return 0
-		log "initial build failed (no nodes/cache yet), retrying in 15s"
-		sleep 15 & wait $!
+		run_child "$LIBEXEC/build.sh"
+		case $? in
+			0) return 0 ;;
+			3) # every node is deferred (AWG without the engine, ...): nothing to run until
+			   # something changes — an engine install / a new node signals us (the nap ends)
+			   log "initial build: no node can run on this engine yet — waiting (re-checked every 60s or on a change)"
+			   sleep 60 & wait $! ;;
+			*) log "initial build failed (no nodes/cache yet), retrying in 15s"
+			   sleep 15 & wait $! ;;
+		esac
 	done
 }
 
@@ -525,9 +628,13 @@ log "vpnpoold starting (whole-LAN selective, coexist with podkop)"
 startup_guard  # kill-switch: block now; otherwise: no stale table during the first build
 rm -f "$RESTART_MARK"   # the restart is done: a later plain stop must remove the block
 kill_singbox   # clear any orphaned sing-box left by a previously crashed daemon
+rm -f "$BAD_NODES" "$GUARD_STATUS"   # a (re)start gives every node a new try (start guard)
+[ -s "$SB_CONF" ] || { [ -s "$SB_CONF_FLASH" ] && cp "$SB_CONF_FLASH" "$SB_CONF"; }
+save_prev      # the last config that ran (after a reboot: the flash copy) — the guard's way back
 initial_build
 
 start_singbox
+start_guard
 nap 3
 # Kill-switch: already up (fail-closed). Otherwise wait (bounded) for a working node BEFORE
 # committing the LAN; with none, the LAN stays on DIRECT and the supervise loop routes as

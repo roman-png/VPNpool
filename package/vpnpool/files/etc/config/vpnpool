@@ -107,6 +107,10 @@ config vpnpool 'main'
 	# already marked by podkop/other proxies so we don't double-intercept it.
 	option lan_if ''
 	option coexist 'auto'
+	# sing-box binary. Empty / the stock path = automatic: the stock /usr/bin/sing-box, and
+	# the AmneziaWG build /usr/bin/sing-box-awg (engine.sh install) while AmneziaWG nodes exist.
+	# Another path pins that binary for everything.
+	# option singbox_bin '/usr/bin/sing-box'
 
 # Selective routing lists. Starter set mirrors podkop; fully editable.
 config routing 'routing'

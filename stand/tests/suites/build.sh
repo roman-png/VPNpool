@@ -150,7 +150,10 @@ cp "$T_DIR/fixtures/awg/awg2.conf" /etc/vpnpool/awg/test.conf
 run_with_timeout 120 sh /usr/libexec/vpnpool/build.sh > "$T_STATE/build.out" 2>&1; BRC=$?; BSECS=0
 begin "build/awg-node-on-stock-engine-deferred"
 expect_good_config
-end   # was xfail 4.7: the build no longer breaks (the 2.1 endpoints[N] prune drops the node); showing it as deferred is still stage 4
+# ROADMAP 4.7: deferred BEFORE the generator (not pruned by check), listed with its reason
+expect_jq "the AWG node is deferred: engine_missing" "$(cat /tmp/vpnpool/deferred.json 2>/dev/null)" 'length==1 and .[0].type=="awg" and .[0].reason=="engine_missing"'
+expect_eq "nothing pruned by the engine's check" "$(jq '[.dropped[] | select(.reason=="rejected_by_engine")] | length' /tmp/vpnpool/build_status.json 2>/dev/null)" 0
+end
 
 # ---- flash wear (2.11): the live config is in RAM; flash copies are rewritten only on change ----
 printf '%s\n' "$GOOD" > "$SUB"

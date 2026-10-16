@@ -14,7 +14,7 @@
 import { readfile, stat, lsdir, popen, access, writefile, unlink, open } from 'fs';
 import { cursor } from 'uci';
 import { rand } from 'math';
-import { read_json, write_atomic, file_sig, mask_url, mask_token, str_key, as_list, nid } from './common.uc';
+import { read_json, write_atomic, file_sig, mask_url, mask_token, str_key, as_list, nid, SB_AWG, engine_cap } from './common.uc';
 
 const SB = '/tmp/vpnpool';
 const CONF = '/etc/vpnpool';
@@ -183,7 +183,7 @@ for (let n in nodes_in) {
 		if (h?.delay != null && h.delay > 0) delay = h.delay;
 	if (delay == null && type(ndelay) == 'object') delay = ndelay[n.tag] ?? null;
 	let p0 = (type(n.peers) == 'array') ? n.peers[0] : null;
-	let group = (n.type == 'awg') ? 'amneziawg'
+	let group = (n.type == 'awg' || n.type == 'wireguard') ? 'amneziawg'
 		: ((n.tag in imp_tags) ? 'imported' : ((n.tag in man_tags) ? 'manual' : 'subscription'));
 	push(nodes, {
 		tag: n.tag,
@@ -197,7 +197,23 @@ for (let n in nodes_in) {
 		saved: !!archive_ids[id_legacy],
 		active_saved: !!actsaved_ids[id_legacy],
 		unlock: (type(unlock) == 'object') ? (unlock[n.tag] ?? null) : null,
-		group: group
+		group: group,
+		hints: n.random_trailers ? [ 'awg_random_trailers' ] : null
+	});
+}
+// deferred nodes (build.sh -> deferred.json): kept, NOT in the config (ROADMAP 4.7) — the UI shows
+// them greyed out with the reason: engine_missing / engine_no_awg (AWG without the engine),
+// start_failed (the start guard set the node aside; detail = the engine's message)
+let deferred = read_json(SB + '/deferred.json', []);
+if (type(deferred) != 'array') deferred = [];
+for (let d in deferred) {
+	if (type(d) != 'object') continue;
+	push(nodes, {
+		tag: d.tag, id: d.id ?? null, server: d.server, port: d.port, proto: d.type,
+		delay: null, up: 0, down: 0, saved: false, active_saved: false, unlock: null,
+		group: (d.type == 'awg' || d.type == 'wireguard') ? 'amneziawg' : null,   // others: source not tracked here
+		hints: d.hints ?? null,
+		deferred: true, reason: d.reason, detail: d.detail ?? null
 	});
 }
 
@@ -244,7 +260,16 @@ let ping_progress = read_json(SB + '/.ping-progress.json', null);
 
 let dead = read_json(SB + '/.dead_tags.json', []);
 if (type(dead) != 'array') dead = [];
-let awgcap = trim(readfile(SB + '/.awgcap') ?? '') == 'true';
+// ---- the engine (ROADMAP 4.1): the binary the live config was checked with (build.sh -> .sb_bin),
+// its version and AWG support, measured by engine_cap (cached by mtime:size: a poll spawns nothing
+// unless a binary changed) + the AWG build if it is installed. awg = AmneziaWG nodes can run.
+let sb_bin = trim(readfile(SB + '/.sb_bin') ?? '');
+if (!length(sb_bin)) sb_bin = o('singbox_bin', '/usr/bin/sing-box');
+let ecap = engine_cap(sb_bin);
+let acap = (sb_bin == SB_AWG) ? ecap : engine_cap(SB_AWG);
+let engine = { bin: sb_bin, present: ecap.present, version: ecap.version, awg: ecap.awg,
+	awg_engine: { path: SB_AWG, installed: acap.present, version: acap.version, awg: acap.awg } };
+let awgcap = ecap.awg || (acap.present && acap.awg);
 let antidpi = o('antidpi', 'off');
 if (antidpi == '1') antidpi = 'on';
 else if (!(antidpi in [ 'on', 'off', 'aggressive' ])) antidpi = 'off';
@@ -258,6 +283,8 @@ printf('%J\n', {
 	routing: routing,
 	paused: access(SB + '/.routing_paused') ? true : false,
 	awg: awgcap,
+	engine: engine,
+	guard: read_json(SB + '/guard_status.json', null),
 	mode: o('mode', 'selective'),
 	active: px.proxy?.now ?? '',
 	auto_now: px.auto?.now ?? '',
