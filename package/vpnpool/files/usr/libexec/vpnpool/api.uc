@@ -254,7 +254,7 @@ const SCHEMA = {
 	node_test_port:        { s: 'main', c: I(1, 65535), a: 'USR1' },
 	subscription_interval: { s: 'main', c: chk_interval, a: 'none' },
 	telegram_enabled:      { s: 'main', c: chk_bool, a: 'none' },
-	telegram_token:        { s: 'main', c: (v) => chk_re(v, /^[0-9]+:[A-Za-z0-9_-]+$/, 'bad_token', true), a: 'bot', secret: 'token' },
+	telegram_token:        { s: 'main', c: (v) => chk_re(v, /^[0-9]{1,20}:[A-Za-z0-9_-]{1,100}$/, 'bad_token', true), a: 'bot', secret: 'token' },
 	telegram_chat:         { s: 'main', c: (v) => chk_re(v, /^(-?[0-9]{1,20}|@[A-Za-z0-9_]{4,64})$/, 'bad_chat', true), a: 'bot' },
 	telegram_control:      { s: 'main', c: chk_bool, a: 'bot' },
 	telegram_via_proxy:    { s: 'main', c: chk_bool, a: 'bot' },

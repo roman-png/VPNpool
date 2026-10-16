@@ -338,6 +338,24 @@ begin "rpcd/tg_test/bad-typed-values-refused"
 expect_jq "invalid with both field codes" "$R" '.ok==false and .code=="invalid" and .errors.telegram_token=="bad_token" and .errors.telegram_chat=="bad_chat"'
 expect_eq "no request" "$(gcount . /tmp/curlmock/calls.log)" 0
 end
+# review ui3 Н3: a token is bounded (bot number 1..20 digits, secret 1..100), in tg_test and set_config alike
+rep_ch() { awk -v c="$1" -v n="$2" 'BEGIN { while (i++ < n) printf "%s", c }'; }
+LONG=$(rep_ch a 101)
+tg_typed "{\"token\":\"777:$LONG\",\"chat\":\"42\"}"
+begin "rpcd/tg_test/overlong-token-refused"
+expect_jq "invalid bad_token" "$R" '.ok==false and .code=="invalid" and .errors.telegram_token=="bad_token"'
+expect_eq "no request" "$(gcount . /tmp/curlmock/calls.log)" 0
+end
+reset_state; daemon_start
+rcall set_config "{\"settings\":{\"telegram_token\":\"777:$LONG\"}}"
+begin "rpcd/set_config/overlong-token-refused"
+expect_jq "invalid bad_token" "$R" '.ok==false and .code=="invalid" and .errors.telegram_token=="bad_token"'
+expect_eq "nothing stored" "$(uci -q get vpnpool.main.telegram_token)" ""
+end
+rcall set_config "{\"settings\":{\"telegram_token\":\"12345678901234567890:$(rep_ch b 100)\"}}"
+begin "rpcd/set_config/longest-token-accepted"
+expect_jq "saved (positive control: the bound is not too tight)" "$R" '.ok==true and .code=="saved"'
+end
 tg_typed '{"token":"777:ok\n1:x","chat":"42"}'
 begin "rpcd/tg_test/token-with-a-line-break-refused"
 expect_jq "invalid bad_token" "$R" '.ok==false and .code=="invalid" and .errors.telegram_token=="bad_token"'
