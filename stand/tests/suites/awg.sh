@@ -436,18 +436,26 @@ expect_true "sing-box alive" alive
 expect_jq "the AWG node is in the running config" "$(cat /tmp/vpnpool/sing-box.json)" '[.endpoints[]? | select(.type=="awg")] | length==1'
 end
 sb_kill_all
-# a port in use is the router too: the user's change is NOT rolled back (it starts later)
-: > "$GL"; uhttpd -p 127.0.0.1:1605 -h "$AW"
-_i=0; while ! grep -qi ":0645 00000000:0000 0A" /proc/net/tcp && [ $_i -lt 30 ]; do msleep 100; _i=$((_i + 1)); done   # listening (0A) on 1605
+# a port in use is the router too: the user's change is NOT rolled back (it starts later).
+# The holder: a stock sing-box with its own config (not ours: our_singbox_pids ignores it) — a
+# holder we can wait for. (uhttpd here did not always hold the port: the case was flaky.)
+: > "$GL"
+printf '{"log":{"level":"error"},"inbounds":[{"type":"mixed","tag":"h","listen":"127.0.0.1","listen_port":1605}],"outbounds":[{"type":"direct","tag":"direct"}]}\n' > "$AW/holder.json"
+"$STOCK" run -c "$AW/holder.json" > "$AW/holder.log" 2>&1 & HOLDER=$!
+# wait by the clock (60 s), not by a loop count: under a loaded machine the holder's start is slow
+_t_end=$(( $(cut -d. -f1 /proc/uptime) + 60 ))
+while ! grep -qi ":0645 00000000:0000 0A" /proc/net/tcp && [ "$(cut -d. -f1 /proc/uptime)" -lt "$_t_end" ]; do msleep 100; done   # listening (0A) on 1605
+_held=$(grep -ci ":0645 00000000:0000 0A" /proc/net/tcp)
 cp /tmp/vpnpool/sing-box.json /tmp/vpnpool/sing-box.json.prev; echo '{"older":1}' > /tmp/vpnpool/sing-box.json.prev
 in_vpnpoold sc_start
 begin "awg/guard-port-in-use-keeps-the-change"
+expect_eq "control: the port was held before the start [holder: $(tr '\n' ' ' < "$AW/holder.log" | cut -c1-200); tcp: $(grep -i ":0645" /proc/net/tcp | tr -s " " | cut -c1-120)]" "$_held" 1
 expect_true "control: the FATAL is a taken port" grep -q "address already in use" /tmp/vpnpool/sing-box.log
 expect_eq "guard: rc 2" "$(grep -c '^rc=2' "$GL")" 1
 expect_true "the new config stays" cmp -s /tmp/vpnpool/sing-box.json "$AW/env-cfg.json"
 expect_eq "nothing marked" "$(jq 'length' /tmp/vpnpool/.bad_nodes.json 2>/dev/null || echo 0)" 0
 end
-for p in $(pgrep -f "uhttpd -p 127.0.0.1:1605"); do kill "$p"; done
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
 sb_kill_all; rm -f /etc/vpnpool/awg/owner.conf
 
 # 1) an AWG node whose CONFIG dies at start (overlapping headers: check passes) -> set aside BY
@@ -669,12 +677,13 @@ begin "awg/add-vpn-xray-becomes-link"
 expect_jq "added as a link" "$R" '.ok==true and .added==1'
 expect_true "a vless link stored" sh -c 'uci -q get vpnpool.main.manual_node | grep -q "^vless://"'
 end
-# the stored .conf holds a private key: 0600
-_lastid=$(printf '%s' "$R" | jq -r '.awg_ids[0] // ""')
+# the stored .conf holds a private key: 0600 — whatever the caller's umask (rpcd runs with 077
+# itself, so api.uc is called directly here with the usual 022: the chmod must do it)
 rm -f /etc/vpnpool/awg/*.conf
-rcall add "$(jarg --rawfile t "$AFX/awg3.conf" '{text:$t}')"
+R=$(jarg --rawfile t "$AFX/awg3.conf" '{text:$t}' | (umask 022; ucode $LX/api.uc add 2>/dev/null))
 _pid=$(printf '%s' "$R" | jq -r '.awg_ids[0] // ""')
 begin "awg/add-file-is-0600"
+expect_eq "control: umask of the caller" "$(umask 022; umask)" 0022
 expect_true "control: stored ($_pid)" [ -f "/etc/vpnpool/awg/$_pid.conf" ]
 expect_eq "mode 600" "$(ls -l "/etc/vpnpool/awg/$_pid.conf" | cut -c1-10)" "-rw-------"
 end
