@@ -301,8 +301,18 @@ _o=$(printf '%s\n' "$ID_LINKS" | ucode "$PARSER" 2>/dev/null)
 expect_jq "6 nodes parsed" "$_o" 'length==6'
 expect_jq "no id field without --with-id (sing-box rejects unknown fields)" "$_o" 'all(.[]; has("id")|not)'
 end
-begin "parser/id-none-for-awg"
-expect_jq "awg node has no id (stage 4)" "$(ucode "$PARSER" --with-id "$FX/awg/awg2.conf" 2>/dev/null)" 'length==1 and (.[0]|has("id")|not)'
+# AWG id (ROADMAP 4.4) = first 12 hex of sha256 over the private key (canonical base64): checked
+# against coreutils sha256sum — the pure-ucode SHA-256 must agree with a real one
+begin "parser/awg-id-is-sha256-of-private-key"
+_aw=$(ucode "$PARSER" --with-id "$FX/awg/awg2.conf" 2>/dev/null)
+_want=$(printf '%s' 'YBk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk=' | sha256sum | cut -c1-12)
+expect_true "control: sha256sum gave 12 hex ($_want)" sh -c 'printf %s "$1" | grep -qE "^[0-9a-f]{12}$"' _ "$_want"
+expect_jq "id = sha256(PrivateKey)[:12]" "$_aw" "length==1 and .[0].id==\"$_want\""
+# a second, independent key (the stock WireGuard fixture)
+_wg=$(ucode "$PARSER" --with-id "$FX/awg/wg-plain.conf" 2>/dev/null)
+_want2=$(printf '%s' 'WGcliFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEA0=' | sha256sum | cut -c1-12)
+expect_jq "wireguard id = sha256(PrivateKey)[:12]" "$_wg" "length==1 and .[0].id==\"$_want2\""
+expect_jq "no id without --with-id" "$(ucode "$PARSER" "$FX/awg/awg2.conf" 2>/dev/null)" '.[0]|has("id")|not'
 end
 
 # ---- --report: one record per input line, machine reason codes ----
@@ -408,14 +418,113 @@ PF awg2-conf - "$FX/awg/awg2.conf" \
 	'.[0].h1=="1047436521-1047436999"' '(.[0].i1|startswith("<r 2>"))' '.[0].mtu==1280' \
 	'.[0].address==["10.8.1.9/32","fd00::9/128"]' '.[0].peers[0].address=="198.51.100.61" and .[0].peers[0].port==443' \
 	'.[0].peers[0].preshared_key=="PSKFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE="' '.[0].peers[0].persistent_keepalive_interval==25'
-PF awg3-conf-fields 4.3 "$FX/awg/awg3.conf" \
-	'length==1' '.[0].header_protection_key=="c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0MTI="' \
-	'.[0].random_trailers==true' '.[0].disable_cookies==true' '.[0].rekey_after_time!=null' \
-	'.[0].content_padding_addition!=null'
-PF wireguard-plain-conf 4.3 "$FX/awg/wg-plain.conf" \
-	'length==1' '.[0].type=="wireguard"' '.[0].peers[0].pre_shared_key=="WGpskFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0="'
-PF awg-multi-peer-refused 4.3 "$FX/awg/awg-multipeer.conf" 'length==0'
+# AWG 3.1 (ROADMAP 4.3): every key of the .conf -> the engine's field (patches/sing-box/0001)
+PF awg3-conf-fields - "$FX/awg/awg3.conf" \
+	'length==1' '.[0].type=="awg"' '.[0].header_protection_key=="c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0MTI="' \
+	'.[0].random_trailers==true' '.[0].disable_cookies==true' \
+	'.[0].content_padding_addition=="10-100"' '.[0].rekey_after_time=="100-120"' '.[0].rekey_timeout=="3-7"' \
+	'.[0].reject_after_time=="150-180"' '.[0].keepalive_timeout=="5-15"' '.[0].max_handshake_attempts=="15-20"' \
+	'.[0].jc==3 and .[0].jmin==10 and .[0].jmax==30 and .[0].s1==15 and .[0].s2==18 and .[0].s3==20 and .[0].s4==12' \
+	'.[0].h4=="425489310-425489900"' '(.[0].i1|startswith("<r 2><b 0x8580"))' \
+	'.[0].peers[0].persistent_keepalive_interval=="25-35"' \
+	'.[0].peers[0].preshared_key=="PSKFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE="' \
+	'(.[0]|has("dns") or has("i2"))|not'
+# no AWG parameter -> the STOCK wireguard endpoint (pre_shared_key, numeric keepalive)
+PF wireguard-plain-conf - "$FX/awg/wg-plain.conf" \
+	'length==1' '.[0].type=="wireguard"' '.[0].peers[0].pre_shared_key=="WGpskFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEA0="' \
+	'.[0].peers[0].persistent_keepalive_interval==25' '(.[0].peers[0]|has("preshared_key"))|not' \
+	'(.[0]|has("jc") or has("mtu"))|not' '.[0].address==["10.66.66.2/32"]'
+PF awg-multi-peer-refused - "$FX/awg/awg-multipeer.conf" 'length==0'
 mkdir -p "$T_STATE/parser"
+begin "parser/awg-multi-peer-reason"
+expect_jq "a clear reason" "$(ucode "$PARSER" --report "$FX/awg/awg-multipeer.conf" 2>/dev/null)" \
+	'length==1 and .[0].status=="skip" and .[0].reason=="awg_multi_peer"'
+end
+
+# Own checks of AWG values (ROADMAP 4.3): each one passes `sing-box check` and stops the engine
+# only when it STARTS (measured on vpnpool-engine 1.14.3-awg.1) — so the parser must refuse it.
+# AV <id> <sed on awg3.conf> <reason> [field]
+AWG3_N=0
+AV() {
+	_id=$1; _sed=$2; _why=$3; _fld=${4:-}
+	begin "parser/awg-check-$_id"
+	sed "$_sed" "$FX/awg/awg3.conf" > "$T_STATE/parser/av.conf"
+	expect_true "fixture changed by [$_sed]" sh -c '! cmp -s "$1" "$2"' _ "$FX/awg/awg3.conf" "$T_STATE/parser/av.conf"
+	_r=$(ucode "$PARSER" --report "$T_STATE/parser/av.conf" 2>/dev/null)
+	if [ -n "$_fld" ]; then
+		expect_jq "refused: $_why/$_fld" "$_r" ".[0].status==\"skip\" and .[0].reason==\"$_why\" and .[0].field==\"$_fld\""
+	else
+		expect_jq "refused: $_why" "$_r" ".[0].status==\"skip\" and .[0].reason==\"$_why\""
+	fi
+	expect_jq "no node" "$(ucode "$PARSER" "$T_STATE/parser/av.conf" 2>/dev/null)" 'length==0'
+	end
+	AWG3_N=$((AWG3_N + 1))
+}
+begin "parser/awg-check-positive-control"
+expect_jq "awg3.conf itself is accepted" "$(ucode "$PARSER" --report "$FX/awg/awg3.conf" 2>/dev/null)" '.[0].status=="ok" and .[0].type=="awg"'
+end
+AV h-overlap        's/^H2 = .*/H2 = 1047436600-1047436700/'    awg_bad_value h2
+AV h-not-a-number   's/^H1 = .*/H1 = abc/'                       awg_bad_value h1
+AV i-unknown-tag    's/^I1 = .*/I1 = <zz 2>/'                    awg_bad_value i1
+AV i-unclosed       's/^I1 = .*/I1 = <b 0x12/'                   awg_bad_value i1
+AV i-odd-hex        's/^I1 = .*/I1 = <b 0x123>/'                 awg_bad_value i1
+AV cpa-reversed     's/^ContentPaddingAddition = .*/ContentPaddingAddition = 100-10/' awg_bad_value contentpaddingaddition
+AV s1-too-big       's/^S1 = .*/S1 = 70000/'                     awg_bad_value s1
+AV hpk-s4-below-12  's/^S4 = .*/S4 = 11/'                        awg_bad_value s4
+AV hpk-not-32-bytes 's/^HeaderProtectionKey = .*/HeaderProtectionKey = c2VjcmV0/' bad_key headerprotectionkey
+AV jmin-over-jmax   's/^Jmin = .*/Jmin = 40/'                    awg_bad_value jmin
+AV bool-unknown     's/^RandomTrailers = .*/RandomTrailers = maybe/' awg_bad_value randomtrailers
+AV keepalive-rev    's/^PersistentKeepalive = .*/PersistentKeepalive = 35-25/' awg_bad_value persistentkeepalive
+AV private-key-bad  's/^PrivateKey = .*/PrivateKey = c2hvcnQ=/'  bad_key privatekey
+AV unknown-param    's/^Jc = 3$/Jc = 3\nItime = 5/'              awg_unsupported_param itime
+AV endpoint-port    's/^Endpoint = .*/Endpoint = 198.51.100.61:70000/' bad_port
+AV no-peer          '/^\[Peer\]/,$d'                             awg_no_peer
+begin "parser/awg-checks-counted"
+expect_true "AWG value checks run: $AWG3_N (want 16)" [ "$AWG3_N" -eq 16 ]
+end
+# accepted after normalising: "100 - 120" (the engine does not trim), a key without padding /
+# url-safe (one node = one id), a placeholder value, an empty I2
+begin "parser/awg-normalised-values"
+sed 's/^RekeyAfterTime = .*/RekeyAfterTime = 100 - 120/; s/^PrivateKey = .*/PrivateKey = YBk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk/; s/^MTU = .*//; s/^Jc = 3$/Jc = 3\nI2 =\nTable = $TABLE/' \
+	"$FX/awg/awg3.conf" > "$T_STATE/parser/norm.conf"
+_n=$(ucode "$PARSER" --with-id "$T_STATE/parser/norm.conf" 2>/dev/null)
+_o=$(ucode "$PARSER" --with-id "$FX/awg/awg3.conf" 2>/dev/null)
+expect_jq "accepted" "$_n" 'length==1 and .[0].type=="awg"'
+expect_jq "range without spaces" "$_n" '.[0].rekey_after_time=="100-120"'
+expect_jq "key padded back" "$_n" '.[0].private_key=="YBk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk="'
+expect_eq "same id as the padded key" "$(printf '%s' "$_n" | jq -r '.[0].id')" "$(printf '%s' "$_o" | jq -r '.[0].id')"
+end
+# a keepalive RANGE is AWG 3.x -> awg, never the stock wireguard (that takes a number only)
+begin "parser/awg-keepalive-range-is-awg"
+sed 's/^PersistentKeepalive = .*/PersistentKeepalive = 25-35/' "$FX/awg/wg-plain.conf" > "$T_STATE/parser/ka.conf"
+expect_jq "type awg, range kept, preshared_key" "$(ucode "$PARSER" "$T_STATE/parser/ka.conf" 2>/dev/null)" \
+	'.[0].type=="awg" and .[0].peers[0].persistent_keepalive_interval=="25-35" and (.[0].peers[0].preshared_key|length)==44'
+end
+# identity (ROADMAP 4.4): the name comes from "# Name ="; two clients of one server = two nodes;
+# the same .conf twice = one node
+begin "parser/awg-name-comment-and-identity"
+{ printf '# Name = Мой сервер (10.8.1.9)\n'; cat "$FX/awg/awg3.conf"; } > "$T_STATE/parser/named.conf"
+sed 's/^PrivateKey = .*/PrivateKey = ZZk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk=/' "$FX/awg/awg3.conf" > "$T_STATE/parser/client2.conf"
+_m=$(ucode "$PARSER" --with-id "$T_STATE/parser/named.conf" "$T_STATE/parser/client2.conf" "$FX/awg/awg3.conf" 2>/dev/null)
+expect_jq "two nodes (named + client2; the third file repeats the first key)" "$_m" 'length==2'
+expect_jq "name from the comment" "$_m" '.[0].tag=="Мой сервер (10.8.1.9)"'
+expect_jq "two ids" "$_m" '(map(.id)|unique|length)==2'
+_rp=$(ucode "$PARSER" --report "$T_STATE/parser/named.conf" "$T_STATE/parser/client2.conf" "$FX/awg/awg3.conf" 2>/dev/null)
+expect_jq "the repeat is a duplicate of the named node" "$_rp" '.[2].status=="skip" and .[2].reason=="duplicate" and .[2].dup_of=="Мой сервер (10.8.1.9)"'
+expect_jq "hint: random trailers need 3.1 on the server" "$_rp" '.[0].hints==["awg_random_trailers"]'
+end
+
+# ---- ucode regex: \s inside [...] is the LETTER s (POSIX ERE), not whitespace ----
+# a base64 subscription wrapped over lines (pasted by hand) must still be recognised as base64
+begin "parser/base64-blob-with-line-breaks"
+_b64=$(printf 'vless://%s@203.0.113.71:443?security=tls#W1\nvless://%s@203.0.113.72:443?security=tls#W2\n' "$U" "$U" | base64 | tr -d '\n' | awk '{ for (i = 1; i <= length($0); i += 20) print substr($0, i, 20) }')
+expect_true "control: the blob really has line breaks" sh -c '[ "$(printf "%s\n" "$1" | wc -l)" -gt 3 ]' _ "$_b64"
+expect_jq "both nodes decoded" "$(parse_text "$_b64")" 'length==2 and .[0].tag=="W1" and .[1].tag=="W2"'
+end
+# a vless id that is not a UUID but has an "s" in it (was refused as bad_uuid)
+P vless-id-with-letter-s - "vless://mysecret-pass@203.0.113.73:443?security=tls#S1" \
+	'length==1' '.[0].uuid=="mysecret-pass"'
+P vless-id-with-space-refused - "vless://my%20secret@203.0.113.74:443?security=tls#S2" 'length==0'
 sed 's/^\[Interface\]/[INTERFACE]/; s/^\[Peer\]/[PEER]/' "$FX/awg/awg2.conf" > "$T_STATE/parser/upper.conf"
 # [INTERFACE] / [PEER] in capitals: the .conf must still be recognised (ROADMAP 2.1a)
 PF awg-section-case-insensitive - "$T_STATE/parser/upper.conf" 'length==1 and .[0].type=="awg"'
