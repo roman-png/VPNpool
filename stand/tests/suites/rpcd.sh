@@ -978,6 +978,18 @@ expect_jq "hidden" "$R" '.code=="hidden"'
 expect_eq "it is not the preferred node any more" "$(uci -q get vpnpool.main.preferred_node)" ''
 end
 
+# an AWG file node in no list of the last build (the build failed, or has not run yet): deleted
+# by its id all the same (stage 4b: "delete by id")
+reset_state; daemon_start
+mkdir -p /etc/vpnpool/awg; cp "$T_DIR/fixtures/awg/awg2.conf" /etc/vpnpool/awg/old-name.conf
+_aid=$(ucode /usr/libexec/vpnpool/parser.uc --with-id /etc/vpnpool/awg/old-name.conf | jq -r '.[0].id')
+rcall delete_node "$(jq -nc --arg i "$_aid" '{id:$i}')"
+begin "rpcd/delete_node/awg-file-not-in-the-pool"
+expect_true "control: an id ($_aid), no node list" sh -c '[ ${#1} -eq 12 ] && [ ! -s /tmp/vpnpool/nodes.json ]' _ "$_aid"
+expect_jq "deleted" "$R" '.ok==true and .code=="deleted"'
+expect_true "the file is gone" [ ! -f /etc/vpnpool/awg/old-name.conf ]
+end
+
 # a favourite no source has: "Connect" brings it into the pool (archive -> active) and prefers it
 reset_state; daemon_start
 echo '{"aaaaaaaaaaaa":{"tag":"Gone-Fav","link":"vless://9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce@203.0.113.99:443?security=tls#Gone-Fav","active":false,"auto":false}}' > /etc/vpnpool/favorites.map.json

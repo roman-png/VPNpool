@@ -7,8 +7,8 @@
 //       written and the reply is {ok:false, code:"invalid", errors:{field: code}} (--single: the
 //       code is the one field's own code, the legacy set_option shape). On success ONE uci
 //       commit and {ok:true, code:"saved"|"unchanged", changed:[...], actions:[...]}; actions =
-//       what the caller must do: "USR1" (rebuild) | "USR2" (refetch + rebuild) — at most one of
-//       the two — and/or "bot" (init.d reload: Telegram bot) / "sched" (rewrite the crontab).
+//       what the caller must do: "USR1" (rebuild; a refetch is asked only by the subscription
+//       operations, sub / add) and/or "bot" (init.d reload: Telegram bot) / "sched" (crontab).
 //   api.uc analyze                 stdin {text}  -> {ok, code, items:[{line, kind, status, ...}]}
 //   api.uc add                     stdin {text?, items?, lines?, options?} -> writes manual_node /
 //                                  a subscription section per URL (options {mode all|pick, pick,
@@ -227,7 +227,7 @@ function chk_path(v) {
 // ---------------------------------------------------------------- the settings schema
 // field -> { s: uci section, o: uci option (default = field), c: check, list: bool, a: action,
 //            secret: masked in status (the masked value sent back means "unchanged") }
-// a: USR1 = rebuild the sing-box config, USR2 = refetch + rebuild, bot = init.d reload (the
+// a: USR1 = rebuild the sing-box config, bot = init.d reload (the
 //    Telegram bot instance), sched = rewrite the crontab, none = read live by the daemon.
 let I = (min, max) => (v) => chk_int(v, min, max);
 let E = (...vals) => (v) => chk_enum(v, vals);
@@ -291,7 +291,7 @@ function cur_value(u, f) {
 }
 function masked_of(d, cur) {
 	if (!length(cur)) return null;
-	return (d.secret == 'url') ? mask_url(cur) : ((d.secret == 'token') ? mask_token(cur) : null);
+	return (d.secret == 'token') ? mask_token(cur) : null;
 }
 
 function set_config(input, single) {
@@ -340,7 +340,7 @@ function set_config(input, single) {
 	}
 	if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
 	let actions = [];
-	if (acts.USR2) push(actions, 'USR2'); else if (acts.USR1) push(actions, 'USR1');
+	if (acts.USR1) push(actions, 'USR1');
 	if (acts.bot) push(actions, 'bot');
 	if (acts.sched) push(actions, 'sched');
 	return { ok: true, code: 'saved', changed: changed, actions: actions };
@@ -667,7 +667,9 @@ function list_del(u, opt, ids) {
 function delete_one(u, r) {
 	let n = r.node, src = '' + (n?._src ?? '');
 	let changed = false;
-	if (n && (n.type == 'awg' || n.type == 'wireguard') && src == 'awg') {
+	// an AWG / WireGuard file node — also one in no list of the last build (a failed build, a file
+	// the build has not seen yet): it is found by its id among the files
+	if ((n && (n.type == 'awg' || n.type == 'wireguard') && src == 'awg') || (!n && r.awg_file)) {
 		if (stat(AWG_DIR + '/' + r.id + '.conf')) { unlink(AWG_DIR + '/' + r.id + '.conf'); changed = true; }
 		else for (let f in (lsdir(AWG_DIR) ?? [])) {
 			if (!match(f, /\.conf$/)) continue;
@@ -711,7 +713,8 @@ function node_op(op, inp) {
 		let nodes = live_nodes(), done = [], missing = [];
 		for (let k in keys_) {
 			let r = (type(k) == 'string') ? node_lookup(k, nodes) : null;
-			if (r && r.node && delete_one(u, r)) push(done, r.id); else push(missing, k);
+			if ((!r || !r.node) && is_id(k)) r = { id: k, tag: null, node: null, awg_file: true };
+			if (r && (r.node || r.awg_file) && delete_one(u, r)) push(done, r.id); else push(missing, k);
 		}
 		if (!length(done)) return { ok: false, code: 'not_found', deleted: 0, missing: missing };
 		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
