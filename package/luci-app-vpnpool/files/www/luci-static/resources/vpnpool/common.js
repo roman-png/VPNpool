@@ -62,7 +62,7 @@ var METHODS = {
 	add_node:         { params: [ 'link' ], write: true },
 	del_node:         { params: [ 'link' ], write: true },
 	import_nodes:     { params: [ 'text' ], write: true },
-	delete_node:      { params: [ 'tag' ], write: true },
+	delete_node:      { params: [ 'tag', 'id' ], write: true },
 	delete_nodes:     { params: [ 'tags' ], write: true },
 	restore_node:     { params: [ 'tag' ], write: true },
 	refilter_node:    { params: [ 'tag' ], write: true },
@@ -155,7 +155,22 @@ var CODE_TEXT = {
 	unknown_option:     _('This setting is not supported by the installed version of the service.'),
 	unknown_method:     _('This action is not supported by the installed version of the service. Update VPN Pool.'),
 	// warnings (ok:true + warning:"…")
-	schedule_failed:    _('The settings are saved, but the schedule could not be set up.')
+	schedule_failed:    _('The settings are saved, but the schedule could not be set up.'),
+	engine_missing:     _('Saved. The node waits for the AmneziaWG engine: it starts working once the engine is installed on the router.'),
+	engine_no_awg:      _('Saved. The installed VPN engine cannot run AmneziaWG: the node waits until an engine with AmneziaWG is installed.'),
+	// node states and build results (status: deferred nodes, build.error)
+	start_failed:       _('This node stopped the VPN engine from starting, so it was set aside. Check the node settings or add it again.'),
+	only_deferred:      _('No node can work right now: all nodes are waiting (the reason is shown next to each node).'),
+	awg_random_trailers: _('This node uses random packet trailers: the server must run AmneziaWG 3.1 too, otherwise it will not answer.'),
+	// reasons of AmneziaVPN links and AmneziaWG settings that were not added
+	api_key:            _('This AmneziaVPN link is an account key, not server settings. In the AmneziaVPN app, share the connection as a settings file or link and paste that.'),
+	full_access:        _('This AmneziaVPN link gives full access to the server (the administrator password), so it was not saved. Share a user connection instead.'),
+	unsupported_container: _('This AmneziaVPN link has no protocol the router supports (AmneziaWG, WireGuard, XRay, Shadowsocks).'),
+	no_conf:            _('This AmneziaVPN link has no connection settings inside.'),
+	awg_no_peer:        _('The settings have no server: the [Peer] part with the server address and key is missing.'),
+	awg_multi_peer:     _('The settings list several servers ([Peer] parts). One node holds one server: split them into separate files.'),
+	awg_bad_value:      _('A value in the AmneziaWG settings is not valid.'),
+	awg_unsupported_param: _('The AmneziaWG settings have an option the router does not know. Update VPN Pool or remove that option.')
 };
 
 // Field codes (api.uc: errors{field: code}; set_option/set_schedule/set_url return the one

@@ -563,10 +563,10 @@ expect_jq "line 3: repeated in the paste -> dup repeated" "$R" '.items[2] | .sta
 expect_jq "line 4: same config under another name -> dup exists" "$R" '.items[3] | .status=="dup" and .reason=="exists"'
 expect_jq "line 5: the configured subscription -> dup" "$R" '.items[4] | .kind=="subscription_url" and .status=="dup"'
 expect_jq "line 6: new URL -> add, shown masked" "$R" '.items[5] | .kind=="subscription_url" and .status=="add" and .name=="https://extra.example.com/***"'
-expect_jq "line 7: vpn:// -> awg pending (stage 4)" "$R" '.items[6] | .kind=="awg" and .status=="pending_stage4"'
+expect_jq "line 7: unreadable vpn:// -> awg skip decode_failed" "$R" '.items[6] | .line==7 and .kind=="awg" and .status=="skip" and .reason=="decode_failed"'
 expect_jq "line 8: junk -> unknown skip" "$R" '.items[7] | .kind=="unknown" and .status=="skip" and .reason=="not_a_link"'
 expect_jq "line 9: bad port -> skip with the parser reason" "$R" '.items[8] | .line==9 and .status=="skip" and .reason=="bad_port"'
-expect_jq "summary" "$R" '.summary=={add:2, dup:4, skip:2, pending:1}'
+expect_jq "summary" "$R" '.summary=={add:2, dup:4, skip:3, pending:0}'
 expect_true "config byte-identical (nothing written)" cmp -s /etc/config/vpnpool "$FXR/before.cfg"
 end
 
@@ -585,7 +585,7 @@ expect_eq "still one manual node" "$(ulist vpnpool.main.manual_node | wc -l)" 1
 end
 rcall add '{"items":["vpn://AAAA","hello"]}'
 begin "rpcd/add/failed-lines-reported"
-expect_jq "awg pending + junk, each with its line and reason" "$R" '.ok==false and .failed==[{line:1,reason:"needs_stage4"},{line:2,reason:"not_a_link"}]'
+expect_jq "unreadable vpn:// + junk, each with its line and reason" "$R" '.ok==false and .failed==[{line:1,reason:"decode_failed"},{line:2,reason:"not_a_link"}]'
 end
 
 # ---- backup holds the secrets; restore checks before it replaces ----

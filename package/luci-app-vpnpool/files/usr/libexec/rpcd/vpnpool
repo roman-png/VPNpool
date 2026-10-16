@@ -40,6 +40,8 @@
 #             (set_option / set_schedule / set_url keep the single field's code instead of
 #              invalid: bad_value too_small too_large bad_time bad_url ...)
 #   warnings (ok:true): warning:"schedule_failed" — settings saved, the crontab rewrite failed
+#             warning:"engine_missing" / "engine_no_awg" (add, import_nodes) — an AmneziaWG node
+#             is stored but deferred: no AmneziaWG-capable sing-box (ROADMAP 4.7)
 . /usr/libexec/vpnpool/lib.sh 2>/dev/null
 CLASH=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH" ] || CLASH=127.0.0.1:9091
 API=/usr/libexec/vpnpool/api.uc
@@ -190,6 +192,9 @@ prune_nodes_json() {   # $1=tag
 	local NJ=/tmp/vpnpool/nodes.json
 	[ -n "$1" ] && [ -f "$NJ" ] || return 0
 	jq --arg t "$1" 'map(select(.tag != $t))' "$NJ" > "$NJ.pt" 2>/dev/null && mv "$NJ.pt" "$NJ"
+	NJ=/tmp/vpnpool/deferred.json   # a deferred node (waits for the engine) is listed from here
+	[ -f "$NJ" ] && jq --arg t "$1" 'map(select(.tag != $t))' "$NJ" > "$NJ.pt" 2>/dev/null && mv "$NJ.pt" "$NJ"
+	return 0
 }
 
 # Remove ONE node by tag: resolve its link, drop it from whichever list owns it, prune the
@@ -198,19 +203,33 @@ prune_nodes_json() {   # $1=tag
 # (which commits) and signal_reload. Lets delete_node (one) and delete_nodes (bulk) share the
 # logic so a bulk delete does ONE rebuild+reload instead of N sing-box restarts. Returns 1 if
 # the tag has no resolvable link.
+# Remove the AWG / WireGuard node with this id: /etc/vpnpool/awg/<id>.conf, or a file of an older
+# version (named otherwise) whose node has this id. 1 = no such node.
+awg_delete_id() {   # $1=id
+	local f
+	case "$1" in ''|*[!0-9a-f]*) return 1 ;; esac
+	if [ -f "/etc/vpnpool/awg/$1.conf" ]; then rm -f "/etc/vpnpool/awg/$1.conf"; return 0; fi
+	for f in /etc/vpnpool/awg/*.conf; do
+		[ -f "$f" ] || continue
+		if [ "$(ucode "$PARSER" --with-id "$f" 2>/dev/null | jq -r '.[0].id // ""')" = "$1" ]; then
+			rm -f "$f"; return 0
+		fi
+	done
+	return 1
+}
 _delete_one_tag() {   # $1=tag
 	local tag="$1" link="" removed=0 LINKS=/etc/vpnpool/links.json MAP __af
 	[ -n "$tag" ] || return 1
-	# AmneziaWG nodes are stored as /etc/vpnpool/awg/*.conf files (no vless-style link).
-	# If the tag matches a stored .conf, remove that file and clear its keep-auto state.
-	for __af in /etc/vpnpool/awg/*.conf; do
-		[ -f "$__af" ] || continue
-		if [ "$(ucode "$PARSER" "$__af" 2>/dev/null | jq -r '.[0].tag // ""')" = "$tag" ]; then
-			rm -f "$__af"
-			uci del_list vpnpool.main.keep_auto="$tag" 2>/dev/null
-			return 0
-		fi
-	done
+	# AmneziaWG / WireGuard nodes are /etc/vpnpool/awg/<id>.conf files (no vless-style link):
+	# the tag -> its id (the live list, or the deferred one: a node waiting for the engine is not
+	# in nodes.json) -> the file (ROADMAP 4.4).
+	local aid
+	aid=$(jq -rn --arg t "$tag" '[(inputs | .[]? | select(type == "object" and .tag == $t) | .id // empty)][0] // ""' \
+		/tmp/vpnpool/nodes.json /tmp/vpnpool/deferred.json 2>/dev/null)
+	if [ -n "$aid" ] && awg_delete_id "$aid"; then
+		uci del_list vpnpool.main.keep_auto="$tag" 2>/dev/null
+		return 0
+	fi
 	[ -f "$LINKS" ] && link=$(jq -r --arg t "$tag" 'map(select(.tag==$t)) | .[0].link // ""' "$LINKS" 2>/dev/null)
 	[ -n "$link" ] || link=$(saved_link_for_tag "$tag")
 	[ -n "$link" ] || return 1
@@ -243,7 +262,7 @@ _delete_one_tag() {   # $1=tag
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x" }, "delete_nodes": { "tags": [] }, "restore_node": { "tag": "x" }, "refilter_node": { "tag": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {}, "set_config": { "settings": {} }, "analyze": { "text": "x" }, "add": { "text": "x", "items": [], "lines": [], "options": {} }, "backup": {}, "restore": { "data": "x", "path": "x", "replace_all": false } }
+{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x", "id": "x" }, "delete_nodes": { "tags": [] }, "restore_node": { "tag": "x" }, "refilter_node": { "tag": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {}, "set_config": { "settings": {} }, "analyze": { "text": "x" }, "add": { "text": "x", "items": [], "lines": [], "options": {} }, "backup": {}, "restore": { "data": "x", "path": "x", "replace_all": false } }
 L
 	;;
 call)
@@ -561,7 +580,8 @@ call)
 		;;
 	analyze)
 		# Dry run of a paste for the "Add" dialog: per line kind / status / reason, nothing
-		# written. (AmneziaWG vpn:// and .conf: kind awg, status pending_stage4 until stage 4.)
+		# written. (AmneziaWG vpn:// and .conf: kind awg, id / name / server, deferred when the
+		# engine is missing — see api.uc.)
 		printf '%s' "$input" | ucode "$API" analyze 2>/dev/null | finish n/a \
 			|| rep false script_failed n/a '{"message":"api.uc analyze"}'
 		;;
@@ -584,33 +604,30 @@ call)
 		[ -n "$txt" ] || { rep false invalid n/a '{"errors":{"text":"bad_value"}}'; exit 0; }
 		mkdir -p /tmp/vpnpool
 		RAW=/tmp/vpnpool/.import.raw
-		printf '%s\n' "$txt" > "$RAW"
-		# AmneziaVPN vpn:// link -> decode to a .conf ON THE ROUTER (no browser/zlib dep):
-		# awgdecode.uc base64url-decodes + inflates the zlib payload in pure ucode and prints
-		# the embedded AmneziaWG .conf. Then it flows through the .conf path below.
-		case "$txt" in
-			vpn://*)
-				dec=$(printf '%s' "$txt" | ucode /usr/libexec/vpnpool/awgdecode.uc 2>/dev/null)
-				if [ -n "$dec" ]; then printf '%s\n' "$dec" > "$RAW"; txt="$dec"
-				else rm -f "$RAW"; rep false decode_failed; exit 0; fi
-				;;
-		esac
-		# AmneziaWG / WireGuard .conf: multi-line INI, no single-line link — store the whole
-		# config as its own file under /etc/vpnpool/awg/ (build.sh globs them). A vpn:// link
-		# was already decoded to such a .conf above (awgdecode.uc, on the router).
-		# Validate it parses to an 'awg' endpoint before saving so junk isn't kept.
-		if printf '%s' "$txt" | grep -qF '[Interface]'; then
-			if ucode "$PARSER" "$RAW" 2>/dev/null | jq -e '.[0].type=="awg"' >/dev/null 2>&1; then
-				mkdir -p /etc/vpnpool/awg
-				id=$(md5sum "$RAW" | cut -c1-12)
-				cp "$RAW" "/etc/vpnpool/awg/$id.conf"
-				rm -f "$RAW"
-				rep true added "$(signal_word USR1)" "$(jq -nc --arg id "$id" '{awg:true, added:1, id:$id}')"
+		# AmneziaVPN vpn:// links and AmneziaWG / WireGuard .conf: through the SAME path as the
+		# "Add" dialog (api.uc add): awgdecode.uc --json decodes the link ON THE ROUTER, the parser
+		# checks every AWG 3.1 value, the node is stored as /etc/vpnpool/awg/<id>.conf (id =
+		# sha256 of the private key) and ONE signal is sent. Without the AmneziaWG engine the node
+		# is stored deferred: ok + warning engine_missing (ROADMAP 4.7).
+		if printf '%s' "$txt" | grep -qiE 'vpn://|\[interface\]'; then
+			res=$(apply_add "$(jq -nc --arg t "$txt" '{text:$t}')")
+			if printf '%s' "$res" | jq -e '.ok == true' >/dev/null 2>&1; then
+				printf '%s' "$res" | jq -c '. + {awg:true, id:(.awg_ids[0] // null)}'
+			elif printf '%s' "$res" | jq -e '.dup > 0' >/dev/null 2>&1; then
+				rep true already_exists n/a '{"awg":true}'
 			else
-				rm -f "$RAW"; rep false invalid n/a '{"reason":"bad_awg_config"}'
+				# the reason of the first refused item: decode_failed for a vpn:// link that can't be
+				# read, invalid (+ reason/field) for a .conf the parser refuses
+				why=$(printf '%s' "$res" | jq -c '.failed[0] // {}')
+				case "$(printf '%s' "$why" | jq -r '.reason // ""')" in
+					decode_failed|api_key|full_access|unsupported_container|no_conf)
+						rep false decode_failed n/a "$(printf '%s' "$why" | jq -c '{reason}')" ;;
+					*)	rep false invalid n/a "$(printf '%s' "$why" | jq -c '{reason:(.reason // "bad_awg_config")} + (if .field then {field} else {} end)')" ;;
+				esac
 			fi
 			exit 0
 		fi
+		printf '%s\n' "$txt" > "$RAW"
 		TMP=/tmp/vpnpool/.import.links
 		ucode "$PARSER" --keep-link "$RAW" 2>/dev/null \
 			| jq -r '.[]?._link // empty' 2>/dev/null \
@@ -637,6 +654,19 @@ call)
 		# so we add its link to excluded_node — build.sh filters those out every build, so
 		# a refetch can't bring it back. (excluded_node is wiped on del_subscription.)
 		tag=$(printf '%s' "$input" | jq -r '.tag // ""')
+		# an AmneziaWG / WireGuard node by its id (also one that waits for the engine)
+		aid=$(printf '%s' "$input" | jq -r '.id // ""')
+		if [ -n "$aid" ] && [ -z "$tag" ]; then
+			case "$aid" in *[!0-9a-f]*) rep false invalid n/a '{"errors":{"id":"bad_value"}}'; exit 0 ;; esac
+			if awg_delete_id "$aid"; then
+				jq -c --arg i "$aid" 'map(select(.id != $i))' /tmp/vpnpool/deferred.json > /tmp/vpnpool/.df.t 2>/dev/null \
+					&& mv /tmp/vpnpool/.df.t /tmp/vpnpool/deferred.json
+				rep true deleted "$(signal_word USR1)"
+			else
+				rep false not_found
+			fi
+			exit 0
+		fi
 		[ -n "$tag" ] || { rep false invalid n/a '{"errors":{"tag":"bad_tag"}}'; exit 0; }
 		if _delete_one_tag "$tag"; then
 			prune_nodes_json "$tag"  # reflect the delete on the next poll (pre-rebuild)
