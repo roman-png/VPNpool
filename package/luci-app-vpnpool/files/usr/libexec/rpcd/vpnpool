@@ -40,7 +40,7 @@
 #             (set_option / set_schedule / set_url keep the single field's code instead of
 #              invalid: bad_value too_small too_large bad_time bad_url ...)
 #   warnings (ok:true): warning:"schedule_failed" — settings saved, the crontab rewrite failed
-#             warning:"engine_missing" / "engine_no_awg" (add, import_nodes) — an AmneziaWG node
+#             warning:"engine_missing" / "engine_no_awg" / "engine_no_awg31" (add, import_nodes) — an AmneziaWG node
 #             is stored but deferred: no AmneziaWG-capable sing-box (ROADMAP 4.7)
 . /usr/libexec/vpnpool/lib.sh 2>/dev/null
 CLASH=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH" ] || CLASH=127.0.0.1:9091
@@ -262,7 +262,7 @@ _delete_one_tag() {   # $1=tag
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x", "id": "x" }, "delete_nodes": { "tags": [] }, "restore_node": { "tag": "x" }, "refilter_node": { "tag": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {}, "set_config": { "settings": {} }, "analyze": { "text": "x" }, "add": { "text": "x", "items": [], "lines": [], "options": {} }, "backup": {}, "restore": { "data": "x", "path": "x", "replace_all": false } }
+{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x", "id": "x", "file": "x" }, "delete_nodes": { "tags": [] }, "restore_node": { "tag": "x" }, "refilter_node": { "tag": "x" }, "save_node": { "tag": "x" }, "unsave_node": { "tag": "x" }, "activate_saved": { "tag": "x" }, "deactivate_saved": { "tag": "x" }, "node_link": { "tag": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [] }, "tg_test": {}, "set_config": { "settings": {} }, "analyze": { "text": "x" }, "add": { "text": "x", "items": [], "lines": [], "options": {} }, "backup": {}, "restore": { "data": "x", "path": "x", "replace_all": false } }
 L
 	;;
 call)
@@ -656,6 +656,18 @@ call)
 		tag=$(printf '%s' "$input" | jq -r '.tag // ""')
 		# an AmneziaWG / WireGuard node by its id (also one that waits for the engine)
 		aid=$(printf '%s' "$input" | jq -r '.id // ""')
+		# an AWG file the parser refuses (status "unreadable": no node, no id) — by its file name
+		afile=$(printf '%s' "$input" | jq -r '.file // ""')
+		if [ -n "$afile" ] && [ -z "$tag" ] && [ -z "$aid" ]; then
+			case "$afile" in */*|.*|*[!A-Za-z0-9._\ -]*) rep false invalid n/a '{"errors":{"file":"bad_value"}}'; exit 0 ;; esac
+			case "$afile" in *.conf) ;; *) rep false invalid n/a '{"errors":{"file":"bad_value"}}'; exit 0 ;; esac
+			[ -f "/etc/vpnpool/awg/$afile" ] || { rep false not_found; exit 0; }
+			rm -f "/etc/vpnpool/awg/$afile"
+			jq -c --arg f "$afile" 'map(select(.file != $f))' /tmp/vpnpool/awg_unreadable.json > /tmp/vpnpool/.au.t 2>/dev/null \
+				&& mv /tmp/vpnpool/.au.t /tmp/vpnpool/awg_unreadable.json
+			rep true deleted "$(signal_word USR1)"
+			exit 0
+		fi
 		if [ -n "$aid" ] && [ -z "$tag" ]; then
 			case "$aid" in *[!0-9a-f]*) rep false invalid n/a '{"errors":{"id":"bad_value"}}'; exit 0 ;; esac
 			if awg_delete_id "$aid"; then
@@ -1054,6 +1066,7 @@ call)
 			exit 0
 		fi
 		rm -rf "$NEW" "$OLD" "$D"
+		chmod 600 /etc/vpnpool/awg/*.conf 2>/dev/null   # the AWG files hold private keys
 		# enabled / Telegram may differ now: procd re-reads both instances; then refetch
 		/etc/init.d/vpnpool reload >/dev/null 2>&1
 		rep true restored "$(signal_word USR2)" "{\"report\":$REP}"

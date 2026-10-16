@@ -62,7 +62,7 @@ var METHODS = {
 	add_node:         { params: [ 'link' ], write: true },
 	del_node:         { params: [ 'link' ], write: true },
 	import_nodes:     { params: [ 'text' ], write: true },
-	delete_node:      { params: [ 'tag', 'id' ], write: true },
+	delete_node:      { params: [ 'tag', 'id', 'file' ], write: true },
 	delete_nodes:     { params: [ 'tags' ], write: true },
 	restore_node:     { params: [ 'tag' ], write: true },
 	refilter_node:    { params: [ 'tag' ], write: true },
@@ -158,6 +158,7 @@ var CODE_TEXT = {
 	schedule_failed:    _('The settings are saved, but the schedule could not be set up.'),
 	engine_missing:     _('Saved. The node waits for the AmneziaWG engine: it starts working once the engine is installed on the router.'),
 	engine_no_awg:      _('Saved. The installed VPN engine cannot run AmneziaWG: the node waits until an engine with AmneziaWG is installed.'),
+	engine_no_awg31:    _('Saved. This node needs AmneziaWG 3.1, and the installed VPN engine only has an older AmneziaWG: the node waits until the AmneziaWG engine is installed.'),
 	// node states and build results (status: deferred nodes, build.error)
 	start_failed:       _('This node stopped the VPN engine from starting, so it was set aside. Check the node settings or add it again.'),
 	only_deferred:      _('No node can work right now: all nodes are waiting (the reason is shown next to each node).'),
