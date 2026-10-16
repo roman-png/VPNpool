@@ -13,15 +13,19 @@
 //         results merge cleanly).
 // Flags (leading, any order):
 //   --keep-link  attach the original link as `_link` (probe.sh / rpcd import / links.json)
-//   --with-id    attach the stable node identity `id` (see node_id). NOT for the live build:
-//                sing-box rejects unknown outbound fields, so nodes.json must stay id-free.
+//   --with-id    attach the stable node identity `id` (see node_id; AWG/WireGuard: awg_id).
+//                generator.uc strips it (sing-box rejects unknown outbound fields).
 //   --report     instead of the node array print one record per input line / JSON item:
-//                {src, line|item, status:"ok"|"skip", reason?, tag?, type?, id?, dup_of?,
-//                 tag_changed?}. reason is a machine code (no human text — that lives in po):
+//                {src, line|item, status:"ok"|"skip", reason?, field?, tag?, type?, id?,
+//                 dup_of?, tag_changed?, hints?, server?, port?}. reason is a machine code (no
+//                human text — that lives in po):
 //                not_a_link unknown_scheme parse_error bad_port bad_server bad_uuid
 //                bad_reality_key bad_short_id unsupported_transport unsupported_security
 //                unsupported_encryption unsupported_flow unsupported_method unsupported_plugin
 //                unsupported_obfs bad_key tls_required duplicate not_a_node no_nodes
+//                AWG .conf (field = the .conf key): awg_no_peer awg_multi_peer awg_bad_value
+//                awg_unsupported_param bad_key; hints: awg_random_trailers (the server must
+//                run AmneziaWG 3.1 too). server/port: of an accepted AWG/WireGuard node.
 'use strict';
 
 import { readfile, stdin } from 'fs';
@@ -275,7 +279,8 @@ function parse_vless(line) {
 	let e = check_endpoint(u);
 	if (e) return e;
 	let uuid = norm_uuid(url_decode(u.user ?? ''));
-	if (!length(uuid) || match(uuid, /[\s:]/)) return 'bad_uuid';
+	// [[:space:]] — \s inside [...] is the letter "s" in ucode: every id with an "s" was refused
+	if (!length(uuid) || match(uuid, /[[:space:]:]/)) return 'bad_uuid';
 	let p = u.query;
 	// newer xray "encryption" (ML-KEM etc.) has no sing-box counterpart
 	let enc = lc(p.encryption ?? '');
@@ -548,6 +553,48 @@ function parse_tuic(line) {
 	return ob;
 }
 
+// ---- AmneziaWG / WireGuard .conf (INI) -> sing-box endpoint (ROADMAP 4.3) ----
+// The endpoint field names are those of OUR engine (vpnpool-engine: patches/sing-box/0001
+// option/awg.go, 0003 protocol/awg genIpcConfig). .conf key (case-insensitive) -> field:
+//   [Interface] PrivateKey -> private_key   Address -> address[]   MTU -> mtu
+//               ListenPort -> listen_port   Jc/Jmin/Jmax -> jc/jmin/jmax (int)
+//               S1..S4 -> s1..s4 (int)      H1..H4 -> h1..h4 ("n" or "lo-hi" string)
+//               I1..I5 -> i1..i5 (tag chain string)
+//               HeaderProtectionKey -> header_protection_key (base64, 32 bytes)
+//               ContentPaddingAddition / RekeyAfterTime / RekeyTimeout / RejectAfterTime /
+//               KeepaliveTimeout / MaxHandshakeAttempts -> content_padding_addition /
+//               rekey_after_time / rekey_timeout / reject_after_time / keepalive_timeout /
+//               max_handshake_attempts ("n" or "lo-hi" string)
+//               RandomTrailers / DisableCookies -> random_trailers / disable_cookies (bool)
+//               DNS, Table, FwMark, SaveConfig, Pre/PostUp/Down -> ignored (wg-quick only)
+//   [Peer]      PublicKey -> public_key  PresharedKey -> preshared_key (awg) | pre_shared_key
+//               (stock wireguard)  AllowedIPs -> allowed_ips[]  Endpoint -> address + port
+//               PersistentKeepalive -> persistent_keepalive_interval (int; "lo-hi" string = AWG)
+// A .conf without any AWG parameter becomes a STOCK "wireguard" endpoint (runs on the stock
+// sing-box); with one it is an "awg" endpoint (needs the engine). Every value is checked HERE:
+// `sing-box check` passes most bad AWG values and the engine only fails when it STARTS
+// (measured on vpnpool-engine 1.14.3-awg.1: overlapping H ranges, unknown/unclosed I tags, an
+// odd hex in <b>, a header key that is not 32 bytes, "100 - 120" with spaces, S1=70000, a
+// reversed range) — one such node would take the whole tunnel down at start-up.
+// Placeholders ($PRIMARY_DNS, ...) and empty values count as unset. A key the engine does not
+// know is refused (awg_unsupported_param): dropping it silently gave a node that never
+// handshakes (ROADMAP §1 — the 3.x keys were dropped exactly like that).
+const AWG_INT = { jc: [ 'jc', 4294967295 ], jmin: [ 'jmin', 4294967295 ], jmax: [ 'jmax', 4294967295 ],
+	s1: [ 's1', 65535 ], s2: [ 's2', 65535 ], s3: [ 's3', 65535 ], s4: [ 's4', 65535 ] };
+const AWG_RANGE = { h1: 'h1', h2: 'h2', h3: 'h3', h4: 'h4',
+	contentpaddingaddition: 'content_padding_addition', rekeyaftertime: 'rekey_after_time',
+	rekeytimeout: 'rekey_timeout', rejectaftertime: 'reject_after_time',
+	keepalivetimeout: 'keepalive_timeout', maxhandshakeattempts: 'max_handshake_attempts' };
+const AWG_CHAIN = { i1: 'i1', i2: 'i2', i3: 'i3', i4: 'i4', i5: 'i5' };
+const AWG_BOOL = { randomtrailers: 'random_trailers', disablecookies: 'disable_cookies' };
+const WG_IFACE = { privatekey: 1, address: 1, dns: 1, mtu: 1, listenport: 1, table: 1, fwmark: 1,
+	saveconfig: 1, preup: 1, postup: 1, predown: 1, postdown: 1, headerprotectionkey: 1 };
+const WG_PEER = { publickey: 1, presharedkey: 1, allowedips: 1, endpoint: 1, persistentkeepalive: 1 };
+// I-chain tags of amneziawg-go (device/obf.go obfBuilders) and whether they take a number /
+// hex value / nothing
+const OBF_TAGS = { b: 'hex', t: 'none', r: 'num', rc: 'num', rd: 'num', d: 'none', ds: 'none', dz: 'num' };
+const AWG_TRAILERS_HINT = 'awg_random_trailers';   // RandomTrailers needs AWG 3.1 on the SERVER too
+
 function awg_split_csv(s) {
 	let out = [];
 	for (let p in split(s, ',')) {
@@ -557,63 +604,273 @@ function awg_split_csv(s) {
 	return out;
 }
 
-// AmneziaWG / WireGuard .conf (INI) -> sing-box >=1.13 "wireguard" endpoint object.
-// (The generator routes type=='wireguard' into the top-level "endpoints" array, not
-// "outbounds".) AWG2 junk/obfuscation params (jc/jmin/jmax, s1..s4, h1..h4, i1..i5) are
-// endpoint-root fields; h1..h4 may be a single int OR an AWG2 "lo-hi" range (kept as a
-// string). Endpoint host:port -> peers[0].address + .port.
+// base64 key (std or url-safe, padded or not) of exactly 32 bytes -> canonical padded std
+// base64 (what the engine's base64.StdEncoding accepts), or null. Checked by FORM, not by
+// b64dec: ucode's decoder refuses non-zero padding bits (".../AKE7=") that Go and coreutils
+// accept, i.e. a key the engine takes. 32 bytes = 43 symbols + "=".
+function wg_key(s) {
+	if (type(s) != 'string') return null;
+	s = replace(replace(trim(s), /-/g, '+'), /_/g, '/');
+	if (length(s) == 43) s += '=';
+	return match(s, /^[A-Za-z0-9+\/]{43}=$/) ? s : null;
+}
+
+// "n" / "lo-hi" (spaces around the dash allowed) -> canonical "n" / "lo-hi", or null.
+// Mirrors UintRange.FromString (uint32, hi >= lo) — which itself does NOT trim spaces.
+function urange(v, max) {
+	let m = match(v, /^([0-9]{1,10})[ \t]*(-[ \t]*([0-9]{1,10}))?$/);
+	if (!m) return null;
+	let lo = int(m[1]), hi = (m[3] != null) ? int(m[3]) : lo;
+	if (max == null) max = 4294967295;
+	if (lo > max || hi > max || hi < lo) return null;
+	return (hi == lo && m[3] == null) ? ('' + lo) : (lo + '-' + hi);
+}
+function urange_bounds(r) {
+	let p = split(r, '-');
+	return [ int(p[0]), int(p[length(p) - 1]) ];
+}
+
+// I1..I5 tag chain ("<b 0x...><r 2>..."), checked like newObfChain -> null if ok, else false
+function obf_chain_ok(spec) {
+	let rest = spec, ntags = 0;
+	while (true) {
+		let st = index(rest, '<');
+		if (st < 0) break;
+		let en = index(substr(rest, st), '>');
+		if (en < 0) return false;                          // missing enclosing >
+		let tag = trim(substr(rest, st + 1, en - 1));
+		rest = substr(rest, st + en + 1);
+		let f = split(tag, /[ \t]+/);
+		if (!length(tag) || !length(f)) return false;      // empty tag
+		let kind = OBF_TAGS[f[0]];
+		if (!kind) return false;                           // unknown tag
+		let val = (length(f) > 1) ? f[1] : '';
+		if (kind == 'hex') {
+			if (substr(val, 0, 2) == '0x') val = substr(val, 2);
+			if (!length(val) || length(val) % 2 || !match(val, /^[0-9a-fA-F]+$/)) return false;
+		} else if (kind == 'num') {
+			if (!match(val, /^[0-9]{1,5}$/) || int(val) > 65535) return false;
+		}
+		ntags++;
+	}
+	return true;
+}
+
+// a CIDR (or a bare address: /32 or /128 added) -> canonical "addr/len", or null
+function wg_prefix(s) {
+	let m = match(s, /^([^\/]+)(\/([0-9]{1,3}))?$/);
+	if (!m) return null;
+	let a = m[1], v6 = index(a, ':') >= 0;
+	if (v6) {
+		if (!match(a, /^[0-9a-fA-F:.]+$/)) return null;
+	} else {
+		let o = match(a, /^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$/);
+		if (!o || int(o[1]) > 255 || int(o[2]) > 255 || int(o[3]) > 255 || int(o[4]) > 255) return null;
+	}
+	let len = (m[3] != null) ? int(m[3]) : (v6 ? 128 : 32);
+	if (len > (v6 ? 128 : 32)) return null;
+	return a + '/' + len;
+}
+
+function awg_bool(v) {
+	let l = lc(v);
+	if (l == '1' || l == 'true' || l == 'on' || l == 'yes' || l == 't') return true;
+	if (l == '0' || l == 'false' || l == 'off' || l == 'no' || l == 'f') return false;
+	return null;
+}
+
+// ---- SHA-256 (FIPS 180-4) in pure ucode: the AWG node id (no digest module on the router) ----
+const SHA_K = [
+	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+	0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+	0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+	0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+	0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+	0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+	0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+	0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+];
+function sha256_hex(msg) {
+	const M = 0xffffffff;
+	let h = [ 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 ];
+	let b = [];
+	for (let i = 0; i < length(msg); i++) push(b, ord(msg, i));
+	let bits = length(b) * 8;
+	push(b, 0x80);
+	while (length(b) % 64 != 56) push(b, 0);
+	for (let i = 7; i >= 0; i--) push(b, (bits >> (i * 8)) & 0xff);
+	let rotr = (x, n) => ((x >> n) | (x << (32 - n))) & M;
+	let w = [];
+	for (let off = 0; off < length(b); off += 64) {
+		for (let t = 0; t < 16; t++)
+			w[t] = (b[off + 4 * t] << 24) | (b[off + 4 * t + 1] << 16) | (b[off + 4 * t + 2] << 8) | b[off + 4 * t + 3];
+		for (let t = 16; t < 64; t++) {
+			let s0 = rotr(w[t - 15], 7) ^ rotr(w[t - 15], 18) ^ (w[t - 15] >> 3);
+			let s1 = rotr(w[t - 2], 17) ^ rotr(w[t - 2], 19) ^ (w[t - 2] >> 10);
+			w[t] = (w[t - 16] + s0 + w[t - 7] + s1) & M;
+		}
+		let a = h[0], bb = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+		for (let t = 0; t < 64; t++) {
+			let S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+			let ch = (e & f) ^ ((~e) & g & M);
+			let t1 = (hh + S1 + ch + SHA_K[t] + w[t]) & M;
+			let S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+			let mj = (a & bb) ^ (a & c) ^ (bb & c);
+			let t2 = (S0 + mj) & M;
+			hh = g; g = f; f = e; e = (d + t1) & M; d = c; c = bb; bb = a; a = (t1 + t2) & M;
+		}
+		h[0] = (h[0] + a) & M; h[1] = (h[1] + bb) & M; h[2] = (h[2] + c) & M; h[3] = (h[3] + d) & M;
+		h[4] = (h[4] + e) & M; h[5] = (h[5] + f) & M; h[6] = (h[6] + g) & M; h[7] = (h[7] + hh) & M;
+	}
+	return join('', map(h, (x) => sprintf('%08x', x)));
+}
+
+// AWG / WireGuard node id (ROADMAP 2.2/4.4): first 12 hex of sha256 over the private key in its
+// canonical base64 form — one key = one node (two clients of one server = two nodes; the same
+// .conf pasted twice = one). The file is stored as /etc/vpnpool/awg/<id>.conf.
+function awg_id(private_key) {
+	let k = wg_key(private_key) ?? ('' + private_key);
+	return substr(sha256_hex(k), 0, 12);
+}
+
+// parse_awg_conf(raw) -> { ob } | { err: reason, field? }
+//   reasons: awg_no_peer awg_multi_peer bad_key bad_server bad_port awg_bad_value
+//            awg_unsupported_param (field = the .conf key, lower case)
 function parse_awg_conf(raw) {
-	let iface = {}, peer = {}, sect = '';
+	let iface = {}, peer = {}, sect = '', npeer = 0, name = null, unknown = null;
 	for (let line in split(raw, /\r?\n/)) {
 		line = trim(line);
-		if (!length(line) || substr(line, 0, 1) == '#' || substr(line, 0, 1) == ';') continue;
+		if (!length(line)) continue;
+		let c0 = substr(line, 0, 1);
+		if (c0 == '#' || c0 == ';') {
+			// "# Name = <display name>" (written by vpnpool when it stores the node)
+			let nm = match(line, /^[#;][ \t]*[Nn][Aa][Mm][Ee][ \t]*=[ \t]*(.*)$/);
+			if (nm && name == null && length(trim(nm[1]))) name = trim(nm[1]);
+			continue;
+		}
 		let low = lc(line);
 		if (low == '[interface]') { sect = 'i'; continue; }
-		if (low == '[peer]')      { sect = 'p'; continue; }
+		if (low == '[peer]')      { sect = 'p'; npeer++; continue; }
+		if (substr(line, 0, 1) == '[') { sect = 'x'; continue; }   // an unknown section
 		let eq = index(line, '=');
 		if (eq < 0) continue;
 		let k = lc(trim(substr(line, 0, eq)));
 		let v = trim(substr(line, eq + 1));
-		if (sect == 'i') iface[k] = v;
-		else if (sect == 'p') peer[k] = v;
+		if (!length(v) || substr(v, 0, 1) == '$') continue;          // empty / placeholder
+		if (sect == 'i') {
+			if (!WG_IFACE[k] && !AWG_INT[k] && !AWG_RANGE[k] && !AWG_CHAIN[k] && !AWG_BOOL[k]) { if (unknown == null) unknown = k; }
+			iface[k] = v;
+		} else if (sect == 'p' && npeer == 1) {
+			if (!WG_PEER[k]) { if (unknown == null) unknown = k; }
+			peer[k] = v;
+		}
 	}
-	if (!length(iface.privatekey) || !length(peer.publickey) || !length(peer.endpoint))
-		return null;
+	if (npeer > 1) return { err: 'awg_multi_peer' };
+	if (unknown) return { err: 'awg_unsupported_param', field: unknown };
+	if (!npeer || !length(peer.publickey) || !length(peer.endpoint)) return { err: 'awg_no_peer' };
 
-	// type 'awg' = AmneziaWG endpoint (amnezia-box fork, constant.TypeAwg). jc/jmin/jmax
-	// and s1..s4 are ints; h1..h4 and i1..i5 are STRINGS (h may be a single value or an
-	// AWG2 "lo-hi" range — kept verbatim either way).
-	let ep = { type: 'awg', private_key: iface.privatekey };
-	if (length(iface.address)) ep.address = awg_split_csv(iface.address);
-	for (let f in ['jc', 'jmin', 'jmax', 's1', 's2', 's3', 's4'])
-		if (length(iface[f])) ep[f] = int(iface[f]);
-	for (let f in ['h1', 'h2', 'h3', 'h4'])
-		if (length(iface[f])) ep[f] = iface[f];
-	for (let f in ['i1', 'i2', 'i3', 'i4', 'i5'])
-		if (length(iface[f])) ep[f] = iface[f];
+	let ep = {}, is_awg = false;
+	let pk = wg_key(iface.privatekey);
+	if (!pk) return { err: 'bad_key', field: 'privatekey' };
+	ep.private_key = pk;
+	if (length(iface.address)) {
+		ep.address = [];
+		for (let a in awg_split_csv(iface.address)) {
+			let p = wg_prefix(a);
+			if (!p) return { err: 'awg_bad_value', field: 'address' };
+			push(ep.address, p);
+		}
+	}
+	if (!length(ep.address)) return { err: 'awg_bad_value', field: 'address' };
+	if (length(iface.mtu)) {
+		if (!match(iface.mtu, /^[0-9]{1,5}$/) || int(iface.mtu) < 576 || int(iface.mtu) > 65535)
+			return { err: 'awg_bad_value', field: 'mtu' };
+		ep.mtu = int(iface.mtu);
+	}
+	if (length(iface.listenport)) {
+		if (vport(iface.listenport) == null) return { err: 'awg_bad_value', field: 'listenport' };
+		ep.listen_port = vport(iface.listenport);
+	}
+	for (let k, d in AWG_INT) {
+		if (!length(iface[k])) continue;
+		if (!match(iface[k], /^[0-9]{1,10}$/) || int(iface[k]) > d[1]) return { err: 'awg_bad_value', field: k };
+		ep[d[0]] = int(iface[k]);
+		is_awg = true;
+	}
+	if ((ep.jmin ?? 0) > (ep.jmax ?? 0)) return { err: 'awg_bad_value', field: 'jmin' };   // junk size underflows
+	for (let k, f in AWG_RANGE) {
+		if (!length(iface[k])) continue;
+		let r = urange(iface[k]);
+		if (r == null) return { err: 'awg_bad_value', field: k };
+		ep[f] = r;
+		is_awg = true;
+	}
+	// H1..H4 must not overlap (the unset ones keep the WireGuard types 1..4)
+	let hs = [];
+	for (let i = 1; i <= 4; i++) push(hs, urange_bounds(ep['h' + i] ?? ('' + i)));
+	for (let i = 0; i < 4; i++)
+		for (let j = i + 1; j < 4; j++)
+			if (hs[i][0] <= hs[j][1] && hs[j][0] <= hs[i][1]) return { err: 'awg_bad_value', field: 'h' + (j + 1) };
+	for (let k, f in AWG_CHAIN) {
+		if (!length(iface[k])) continue;
+		if (!obf_chain_ok(iface[k])) return { err: 'awg_bad_value', field: k };
+		if (index(iface[k], '<') >= 0) ep[f] = iface[k];   // no tag at all = no chain (engine: nil)
+		is_awg = true;
+	}
+	for (let k, f in AWG_BOOL) {
+		if (!length(iface[k])) continue;
+		let bv = awg_bool(iface[k]);
+		if (bv == null) return { err: 'awg_bad_value', field: k };
+		if (bv) ep[f] = true;
+		is_awg = true;
+	}
+	if (length(iface.headerprotectionkey)) {
+		let hk = wg_key(iface.headerprotectionkey);
+		if (!hk) return { err: 'bad_key', field: 'headerprotectionkey' };
+		// the engine (and amneziawg-go) need S1..S4 >= 12 (the header nonce) with a header key
+		for (let i = 1; i <= 4; i++)
+			if ((ep['s' + i] ?? 0) < 12) return { err: 'awg_bad_value', field: 's' + i };
+		ep.header_protection_key = hk;
+		is_awg = true;
+	}
 
-	// MTU: honor explicit; else default 1280 for AWG2 (s3/s4 add junk to every packet,
-	// so a too-high MTU lets the handshake pass but stalls data with "message too long").
-	if (length(iface.mtu)) ep.mtu = int(iface.mtu);
-	else if (length(iface.s3) || length(iface.s4)) ep.mtu = 1280;
+	let hp = split_hostport(peer.endpoint);
+	if (!hp || bad_host(hp.host)) return { err: 'bad_server' };
+	let port = vport(hp.port);
+	if (port == null) return { err: 'bad_port' };
+	let pub = wg_key(peer.publickey);
+	if (!pub) return { err: 'bad_key', field: 'publickey' };
+	let pr = { address: hp.host, port: port, public_key: pub };
+	let psk = null;
+	if (length(peer.presharedkey)) {
+		psk = wg_key(peer.presharedkey);
+		if (!psk) return { err: 'bad_key', field: 'presharedkey' };
+	}
+	pr.allowed_ips = [];
+	for (let a in awg_split_csv(peer.allowedips ?? '0.0.0.0/0, ::/0')) {
+		let p = wg_prefix(a);
+		if (!p) return { err: 'awg_bad_value', field: 'allowedips' };
+		push(pr.allowed_ips, p);
+	}
+	let ka = null;
+	if (length(peer.persistentkeepalive) && lc(peer.persistentkeepalive) != 'off') {
+		ka = urange(peer.persistentkeepalive, 65535);
+		if (ka == null) return { err: 'awg_bad_value', field: 'persistentkeepalive' };
+		if (index(ka, '-') >= 0) is_awg = true;            // a keepalive range is AWG 3.x
+	}
 
-	let endp = peer.endpoint;
-	let cc = rindex(endp, ':');
-	if (cc < 0) return null;
-	let host = substr(endp, 0, cc), port = int(substr(endp, cc + 1));
-	if (substr(host, 0, 1) == '[' && substr(host, length(host) - 1) == ']')
-		host = substr(host, 1, length(host) - 2);     // strip IPv6 brackets
-	if (!length(host) || !port) return null;
-
-	let pr = {
-		address: host, port: port, public_key: peer.publickey,
-		allowed_ips: length(peer.allowedips) ? awg_split_csv(peer.allowedips) : ['0.0.0.0/0', '::/0']
-	};
-	if (length(peer.presharedkey)) pr.preshared_key = peer.presharedkey;
-	if (length(peer.persistentkeepalive)) pr.persistent_keepalive_interval = int(peer.persistentkeepalive);
+	ep.type = is_awg ? 'awg' : 'wireguard';
+	if (psk) pr[is_awg ? 'preshared_key' : 'pre_shared_key'] = psk;
+	if (ka != null && ka != '0')
+		pr.persistent_keepalive_interval = (index(ka, '-') >= 0) ? ka : int(ka);
+	// MTU: explicit wins; else 1280 for AWG with S3/S4 (they pad every packet, so a too-high MTU
+	// lets the handshake pass but stalls data with "message too long")
+	if (ep.mtu == null && (ep.s3 != null || ep.s4 != null)) ep.mtu = 1280;
 	ep.peers = [ pr ];
-	ep.tag = host + ':' + port;
-	return ep;
+	ep.tag = name ?? hp_label(hp.host, port);
+	let res = { ob: ep };
+	if (ep.random_trailers) res.hints = [ AWG_TRAILERS_HINT ];
+	return res;
 }
 
 // ---- canonical form, node identity (ROADMAP 2.2) ----
@@ -649,7 +906,7 @@ function bare(ob) {
 // display name, the input order and the JSON key order are not. The parser normalises what is
 // case-insensitive (UUIDs, fingerprint, ss method) before this, so the same node written
 // differently gets one id. Two nodes with the same config and different names share an id
-// (merging them is ROADMAP 2.2). AWG/WireGuard nodes get no id here (stage 4).
+// (merging them is ROADMAP 2.2). AWG/WireGuard nodes: awg_id (sha256 of the private key).
 function fnv1a(s, h) {
 	for (let i = 0; i < length(s); i++)
 		h = ((h ^ ord(s, i)) * 16777619) & 0xffffffff;
@@ -691,7 +948,7 @@ function add_node(ob, dedupkey, link) {
 		return { status: 'skip', reason: 'duplicate', type: ob.type, dup_of: seen[dedupkey] };
 	ob.tag = unique_tag(base);
 	seen[dedupkey] = ob.tag;
-	let id = (is_awg || !(WITH_ID || REPORT)) ? null : node_id(ob);
+	let id = !(WITH_ID || REPORT) ? null : (is_awg ? (length(ob.private_key) ? awg_id(ob.private_key) : null) : node_id(ob));
 	if (WITH_ID && id) ob.id = id;
 	if (KEEP_LINK && type(link) == 'string')
 		ob._link = link;
@@ -712,7 +969,9 @@ function looks_base64(s) {
 	if (index(s, '://') >= 0) return false;
 	let c = substr(s, 0, 1);
 	if (c == '{' || c == '[') return false;
-	return match(s, /^[A-Za-z0-9+\/=_\s-]+$/) ? true : false;
+	// [[:space:]], not \s: inside [...] ucode (POSIX ERE) reads \s as the letter "s", so a
+	// base64 blob wrapped over several lines was not recognised as base64 at all
+	return match(s, /^[A-Za-z0-9+\/=_[:space:]-]+$/) ? true : false;
 }
 
 let PROXY_TYPES = {
@@ -729,7 +988,9 @@ let JSON_TRANSPORTS = { ws: 1, grpc: 1, http: 1, httpupgrade: 1, quic: 1 };
 // -> reason string, or null if the outbound may go into the config
 function check_json_node(o) {
 	let t = o.type;
-	if (t == 'wireguard' || t == 'awg') return null;          // AWG/WG: stage 4
+	// AWG/WG endpoints of a JSON source are taken verbatim (they carry no .conf to check);
+	// `sing-box check` prunes what it rejects and the start guard (vpnpoold) what fails at start
+	if (t == 'wireguard' || t == 'awg') return null;
 	if (o.server != null && (type(o.server) != 'string' || bad_host(o.server))) return 'bad_server';
 	if (o.server_port != null && (type(o.server_port) != 'int' || vport(o.server_port) == null))
 		return 'bad_port';
@@ -850,13 +1111,20 @@ function process_text(raw) {
 	// AmneziaWG / WireGuard .conf (one config per input text block; build.sh writes
 	// each awg_node entry to its own file). Section names are case-insensitive.
 	if (index(lc(raw), '[interface]') >= 0) {
-		let ob = parse_awg_conf(raw);
-		if (ob) {
-			let r = add_node(ob, 'awg:' + ob.peers[0].public_key + '@' + ob.tag, null);
+		let pa = parse_awg_conf(raw);
+		if (pa.ob) {
+			// one private key = one node: the same .conf twice is a duplicate, two clients of
+			// one server are two nodes
+			let r = add_node(pa.ob, 'awg:' + awg_id(pa.ob.private_key), null);
 			r.line = 1;
+			if (pa.hints) r.hints = pa.hints;
+			if (r.status == 'ok') { r.server = pa.ob.peers[0].address; r.port = pa.ob.peers[0].port; }
 			rec(r);
-		} else
-			rec({ line: 1, status: 'skip', reason: 'parse_error' });
+		} else {
+			let r = { line: 1, status: 'skip', reason: pa.err };
+			if (pa.field) r.field = pa.field;
+			rec(r);
+		}
 		return;
 	}
 
