@@ -25,11 +25,11 @@ LUCI_URL:=https://github.com/roman-png/VPNpool
 LUCI_MAINTAINER:=roman-png
 
 define Package/luci-app-vpnpool/description
-  Five-tab LuCI web UI for vpnpool: Dashboard (status, live node pings, traffic and
-  per-client stats, preferred-node pin, auto-pool picker, saved and out-of-pool lists,
-  speed/unlock tests, share link with offline QR, import/export, bulk delete), Sources
-  (subscription + extra subscriptions + source probing + manual nodes + AmneziaWG nodes),
-  Routing (selective/exclude modes, community SRS lists, custom domains, per-client
+  Five-tab LuCI web UI for vpnpool: Overview (status, traffic and per-client stats),
+  Nodes (one "Add" for links, subscription addresses, AmneziaWG settings, files and QR
+  pictures with a check of every line; groups by subscription with expiry, quota and
+  "updated"; Connect / back to automatic choice; favourites, hidden nodes, speed and
+  service tests, share link with offline QR, export, bulk actions), Routes (selective/exclude modes, community SRS lists, custom domains, per-client
   routing by DHCP name/MAC), Settings (failover, service-based node check, kill-switch
   and DNS guard, anti-DPI, adaptive routing, schedule, Telegram, backup/restore) and
   Diagnostics (service state, coexistence, VPN-exit test, logs). Translations come as

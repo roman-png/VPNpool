@@ -6,17 +6,17 @@
 		"depends": { "acl": [ "luci-app-vpnpool" ] }
 	},
 	"admin/services/vpnpool/dashboard": {
-		"title": "Dashboard",
+		"title": "Overview",
 		"order": 1,
 		"action": { "type": "view", "path": "vpnpool/dashboard" }
 	},
-	"admin/services/vpnpool/sources": {
-		"title": "Sources",
+	"admin/services/vpnpool/nodes": {
+		"title": "Nodes",
 		"order": 2,
-		"action": { "type": "view", "path": "vpnpool/sources" }
+		"action": { "type": "view", "path": "vpnpool/nodes" }
 	},
 	"admin/services/vpnpool/routing": {
-		"title": "Routing",
+		"title": "Routes",
 		"order": 3,
 		"action": { "type": "view", "path": "vpnpool/routing" }
 	},
