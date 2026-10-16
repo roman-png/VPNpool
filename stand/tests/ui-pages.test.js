@@ -51,7 +51,8 @@ function schema() {
 		else if (/c: chk_bool\b/.test(b)) kind = 'bool';
 		else if (/c: E\(/.test(b)) { kind = 'enum'; values = [ ...b.match(/E\(([^)]*)\)/)[1].matchAll(/'([^']*)'/g) ].map(q => q[1]); }
 		else if (/chk_enum\(v, \[/.test(b)) { kind = 'enum'; values = [ ...b.match(/chk_enum\(v, \[([^\]]*)\]/)[1].matchAll(/'([^']*)'/g) ].map(q => q[1]); }
-		out[x[1]] = { kind, values };
+		const r = b.match(/c: I\(([0-9]+), ([0-9]+)\)/);
+		out[x[1]] = { kind, values, range: r ? [ +r[1], +r[2] ] : null };
 	}
 	return out;
 }
@@ -70,6 +71,13 @@ function typeProblems(settings, sch) {
 }
 
 // ---- the fake form module (LuCI form.JSONMap and the option classes the pages use)
+// Like LuCI form.js (23.05 / 24.10 / 25.12): the map's data is a CBIJSONConfig-like object
+// ({data: {section: {option: value}}}); Map.load() caches every option's cfgvalue; a widget
+// keeps the value it was drawn with until it is drawn again; Map.parse() WRITES the active
+// options' values into the data and DELETES the hidden ones (no retain); Map.reset() draws
+// again without loading. FAKE.render = 'cache' draws from the cached cfgvalue (LuCI); 'data'
+// draws straight from the data (stricter: a form must survive both — the runner runs both).
+const FAKE = { render: 'cache' };
 function makeForm(env) {
 	const D = env.D, store = new Map();
 	class AbstractValue {
@@ -79,12 +87,18 @@ function makeForm(env) {
 		depends(k, v) { this.deps.push(typeof k === 'object' ? k : { [k]: v }); }
 		value(k, v) { this.keylist.push(String(k)); this.vallist.push(v); }
 		cbid(sid) { return 'cbid.json.' + sid + '.' + this.option; }
-		cfgvalue(sid) { const s = this.map.data[sid]; const v = s ? s[this.option] : undefined; return v === undefined ? null : v; }
+		dataValue(sid) { const s = this.map.data.data[sid]; const v = s ? s[this.option] : undefined; return v === undefined ? null : v; }
+		cfgvalue(sid) {
+			if (FAKE.render === 'data') return this.dataValue(sid);
+			const id = this.cbid(sid);
+			return this.map.cache.has(id) ? this.map.cache.get(id) : null;
+		}
 		defvalue(sid) { const v = this.cfgvalue(sid); return v == null ? (this.default != null ? this.default : '') : v; }
 		formvalue(sid) {
 			const id = this.cbid(sid);
 			if (store.has(id)) return store.get(id);
-			return this.ownFormvalue ? this.ownFormvalue(sid) : this.defvalue(sid);
+			if (this.ownFormvalue) return this.ownFormvalue(sid);
+			return this.map.rendered.has(id) ? this.map.rendered.get(id) : this.defvalue(sid);
 		}
 		getUIElement(sid) { return { getValue: () => this.formvalue(sid), setValue: (v) => store.set(this.cbid(sid), v) }; }
 		renderWidget(sid) { return D.E('span', { 'class': 'fake-widget', 'data-widget-of': this.cbid(sid) }); }
@@ -113,18 +127,39 @@ function makeForm(env) {
 		option(Cls, name, title, description) { const o = new Cls(this.map, this, name, title, description); this.children.push(o); return o; }
 	}
 	class JSONMap {
-		constructor(data) { this.data = JSON.parse(JSON.stringify(data || {})); this.children = []; this.root = null; this.parsed = 0; }
+		constructor(data) {
+			this.data = { data: JSON.parse(JSON.stringify(data || {})) };
+			this.children = []; this.root = null; this.parsed = 0; this.cache = new Map(); this.rendered = new Map();
+		}
 		section(Cls, name, type, title, description) { const s = new Cls(this, name, type, title, description); this.children.push(s); return s; }
 		options() { const out = []; this.children.forEach(s => s.children.forEach(o => out.push([ o, s.name ]))); return out; }
+		optionAt(key, sid) {
+			const p = key.split('.'), name = p.length === 3 ? p[2] : key, sec = p.length === 3 ? p[1] : sid;
+			const s = this.children.find(x => x.name === sec);
+			const o = s && s.children.find(x => x.option === name);
+			return o ? [ o, sec ] : null;
+		}
+		isActive(o, sid) {
+			return !o.deps.length || o.deps.some(d => Object.entries(d).every(([ k, v ]) => {
+				const r = this.optionAt(k, sid);
+				return r && String(r[0].formvalue(r[1])) === String(v);
+			}));
+		}
+		load() {
+			this.options().forEach(([ o, sid ]) => this.cache.set(o.cbid(sid), o.dataValue(sid)));
+			return Promise.resolve();
+		}
 		renderContents() {
 			if (!this.root) this.root = D.E('div', { 'class': 'cbi-map' });
 			this.root.children.forEach(c => { c.parentNode = null; }); this.root.children = [];
+			this.rendered.clear();
 			for (const s of this.children) {
-				if (!this.data[s.name]) continue;   // LuCI: a NamedSection without data is not shown
+				if (!this.data.data[s.name]) continue;   // LuCI: a NamedSection without data is not shown
 				const se = D.E('div', { 'class': 'cbi-section', 'data-section': s.name });
 				s.children.forEach((o, i) => {
 					const fr = D.E('div', { 'class': 'cbi-value', 'data-field': o.cbid(s.name), 'data-name': o.option });
 					const w = o.renderWidget(s.name, i, o.cfgvalue(s.name));
+					if (!(o instanceof DummyValue) && !o.ownFormvalue) this.rendered.set(o.cbid(s.name), o.defvalue(s.name));
 					if (w && w.nodeType) fr.appendChild(w);
 					se.appendChild(fr);
 				});
@@ -133,14 +168,20 @@ function makeForm(env) {
 			return Promise.resolve(this.root);
 		}
 		// a new render = new widgets: what was typed into the old ones is gone
-		render() { this.options().forEach(([ o, sid ]) => store.delete(o.cbid(sid))); return this.renderContents(); }
+		render() { this.options().forEach(([ o, sid ]) => store.delete(o.cbid(sid))); return this.load().then(() => this.renderContents()); }
 		reset() { this.options().forEach(([ o, sid ]) => store.delete(o.cbid(sid))); return this.renderContents(); }
 		parse() {
 			this.parsed++;
 			for (const [ o, sid ] of this.options()) {
-				if (typeof o.validate !== 'function') continue;
+				if (typeof o.validate !== 'function' || !this.isActive(o, sid)) continue;
 				const r = o.validate(sid, o.formvalue(sid));
 				if (r !== true) return Promise.reject(new TypeError('invalid: ' + o.option + ': ' + r));
+			}
+			for (const [ o, sid ] of this.options()) {
+				if (o instanceof DummyValue || !this.data.data[sid]) continue;
+				const fv = o.formvalue(sid);
+				if (this.isActive(o, sid) && !(fv == null || fv === '')) this.data.data[sid][o.option] = Array.isArray(fv) ? fv.slice() : fv;
+				else if (!o.retain) delete this.data.data[sid][o.option];
 			}
 			return Promise.resolve();
 		}
@@ -330,6 +371,24 @@ for (const page of [ 'routing', 'settings' ]) {
 			offered.filter(v => !sch[fd.f].values.includes(v)).forEach(v => bad.push(fd.f + '=' + v));
 		}
 		eq(bad, [], 'choices the router does not accept');
+		// review Н4: number limits of the form = the router's; the ready-made lists = the router's
+		const rng = [];
+		let nr = 0;
+		for (const fd of sv.fields) {
+			if (!sch[fd.f] || sch[fd.f].kind !== 'int') continue;
+			const o = sv.lookup(fd.o)[0], m = String(o.datatype || '').match(/range\(([0-9]+),([0-9]+)\)/);
+			nr++;
+			if (!m || +m[1] !== sch[fd.f].range[0] || +m[2] !== sch[fd.f].range[1]) rng.push(fd.f + ': form ' + (o.datatype || 'none') + ', router ' + JSON.stringify(sch[fd.f].range));
+		}
+		if (page === 'settings') ok(nr >= 6, 'positive control: number fields compared ' + nr);
+		eq(rng, [], 'number limits differ');
+		if (page === 'routing') {
+			const cu = fs.readFileSync(path.join(path.dirname(APIUC), 'common.uc'), 'utf8').match(/const VALID_COMMUNITY = \{([\s\S]*?)\};/);
+			ok(cu, 'positive control: VALID_COMMUNITY found');
+			const valid = [ ...cu[1].matchAll(/([a-z_]+): 1/g) ].map(q => q[1]).sort();
+			ok(valid.length >= 20, 'positive control: lists of the router ' + valid.length);
+			eq(Object.keys(sv.byName.communities.o).sort(), valid, 'ready-made lists on the page vs the router');
+		}
 	});
 
 	test(page + ': one Save = one set_config with the changed fields only; nothing changed = no call', async (S) => {
@@ -366,6 +425,7 @@ for (const page of [ 'routing', 'settings' ]) {
 		const err = toastTexts(P, 'danger');
 		ok(err.length === 1 && err[0].includes(C.CODE_TEXT.invalid) && err[0].includes('another setting'), 'one error toast, names the field not on the page: ' + JSON.stringify(err));
 		ok(P.common.currentForm().dirty(), 'still unsaved after the refusal');
+		if (page === 'settings') ok(P.box.querySelector('details').open, 'an error inside the folded "Advanced" unfolds it');
 		// a successful save afterwards clears the marks
 		P.env.handlers.set_config = () => ({ ok: true, code: 'saved', daemon: 'signalled' });
 		await clickSave(P);
@@ -393,6 +453,57 @@ for (const page of [ 'routing', 'settings' ]) {
 		ok(!P.fire('beforeunload').defaultPrevented, 'after Revert: leaves without asking');
 	});
 }
+
+test('routing: "Search now" only once the automatic search is saved', async (S) => {
+	const P = await open('routing', S);
+	const f = field(P, 'sites.adaptive_run');
+	ok(f, 'positive control: the search field is on the page');
+	eq(f.querySelectorAll('button').length, 0, 'no button while the search is not saved');
+	ok(f.textContent.includes('Save the page first'), 'says to save first');
+	const P2 = await open('routing', S, { status: () => { const s = routingStatus(); s.settings.adaptive_routing = true; return s; }, run_adaptive: () => ({ ok: true, code: 'started', daemon: 'n/a' }) });
+	const b = field(P2, 'sites.adaptive_run').querySelector('button');
+	ok(b, 'the button once saved');
+	P2.env.D.fire(b, 'click', {}); await P2.env.tick(10);
+	eq(calls(P2, 'run_adaptive').length, 1, 'the search started');
+});
+
+// review ui3 O1: LuCI's parse() rewrites the map's data (hidden options deleted) on every Save
+test('routing: Save with nothing changed, a change, Revert: hidden devices and addresses survive', async (S) => {
+	const P = await open('routing', S);
+	eq(P.common.currentForm().collect().client_devices, [ MAC3 ], 'positive control: a saved device (hidden: all devices)');
+	await clickSave(P);
+	eq(calls(P, 'set_config').length, 0, 'nothing sent');
+	setv(P, 'sites.domains', 'zz.example');
+	P.env.D.fire(revertBtn(P), 'click', {}); await P.env.tick(10);
+	eq(P.common.currentForm().changes(), {}, 'changes after Revert');
+	await clickSave(P);
+	eq(calls(P, 'set_config').map(c => c[1].settings), [], 'what a Save after Revert sends');
+});
+test('settings: Save with nothing changed, a change, Revert: the hidden Telegram token and chat survive', async (S) => {
+	const P = await open('settings', S, { status: () => { const s = settingsStatus(); s.settings.telegram_enabled = false; s.settings.telegram_control = false; return s; } });
+	await clickSave(P);
+	setv(P, 'protect.killswitch', '1');
+	P.env.D.fire(revertBtn(P), 'click', {}); await P.env.tick(10);
+	eq(P.common.currentForm().changes(), {}, 'changes after Revert');
+	await clickSave(P);
+	eq(calls(P, 'set_config').map(c => c[1].settings), [], 'what a Save after Revert sends');
+});
+test('routing: after a refused save Revert brings back the loaded values; a later save keeps them', async (S) => {
+	const P = await open('routing', S, { set_config: () => ({ ok: false, code: 'invalid', daemon: 'n/a', error: 'invalid', errors: { 'domains[1]': 'bad_domain' } }) });
+	setv(P, 'mode.mode', 'exclude'); setv(P, 'sites.domains', 'a.example\nbad domain!');
+	await clickSave(P);
+	eq(calls(P, 'set_config').length, 1, 'positive control: the refused save');
+	P.env.D.fire(revertBtn(P), 'click', {}); await P.env.tick(10);
+	const v = P.common.currentForm().collect();
+	eq([ v.mode, v.domains, v.client_devices ], [ 'selective', [ 'a.example' ], [ MAC3 ] ], 'values after Revert');
+	P.env.handlers.set_config = () => ({ ok: true, code: 'saved', daemon: 'signalled' });
+	P.env.handlers.status = () => new Error('RPC call to vpnpool/status failed with HTTP error 502: Bad Gateway');
+	setv(P, 'sites.adaptive_routing', '1');
+	await clickSave(P);
+	eq(calls(P, 'set_config')[1][1].settings, { adaptive_routing: true }, 'the next save sends only its change');
+	P.env.D.fire(revertBtn(P), 'click', {}); await P.env.tick(10);
+	eq(P.common.currentForm().collect().adaptive_routing, true, 'Revert after a save (page not loaded again) keeps the saved value');
+});
 
 test('settings: after a save the page is clean even if loading it again fails', async (S) => {
 	const P = await open('settings', S);
@@ -521,6 +632,20 @@ test('settings: backup download and restore (the router checks first, replacing 
 	ok(toastTexts(P).some(t => t.includes('Nodes: 3') && t.includes('subscriptions: 1')), 'says what it holds');
 	const input = box.querySelectorAll('input').find(i => i.type === 'file');
 	ok(input && rs, 'positive control: the restore button and its file input');
+	// review О3: a file the router's request limit would refuse is refused BEFORE sending
+	const big = Buffer.alloc(45001, 7);
+	restores = [];
+	P.V.restoreFile({ size: big.length, buf: big.buffer.slice(big.byteOffset, big.byteOffset + big.length) });
+	await P.env.tick(10);
+	eq(restores.length, 0, 'a too large file: nothing sent');
+	ok(toastTexts(P, 'danger').some(t => t.includes('too large') && t.includes('43 KB')), 'a too large file: said so: ' + JSON.stringify(toastTexts(P, 'danger')));
+	P.common.clearToast();
+	const fits = Buffer.alloc(45000, 7);
+	const pf = P.V.restoreFile({ size: fits.length, buf: fits.buffer.slice(fits.byteOffset, fits.byteOffset + fits.length) });
+	await P.env.tick(10);
+	eq(restores.length, 1, 'a file at the limit is sent for the check');
+	P.env.D.fire(P.env.doc.getElementById('modal_overlay').firstElementChild.querySelector('.vp-confirm-cancel'), 'click', {});
+	await P.env.tick(10); await pf;
 	const runRestore = async (yes) => {
 		const p = P.V.restoreFile({ size: bytes.length, buf: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length) });
 		await P.env.tick(10);
@@ -568,21 +693,29 @@ test('routing and settings: Revert brings back the loaded values and the panel s
 const UNHANDLED = [];
 process.on('unhandledRejection', (e) => { UNHANDLED.push(String(e && e.message || e)); });
 async function run(srcs, quiet) {
+	// every test in both drawing modes of the fake (see FAKE); a test fails if it fails in either
 	let pass = 0, fail = 0;
 	const failed = [];
 	for (const t of T) {
-		try {
-			const u0 = UNHANDLED.length;
-			await t.fn(srcs);
-			await new Promise(r => setImmediate(r));
-			if (UNHANDLED.length > u0) throw new Error('unhandled rejection in the page: ' + UNHANDLED[u0]);
-			pass++;
-			if (!quiet) console.log('ok   - ' + t.name);
-		} catch (e) {
-			fail++;
-			failed.push(t.name);
-			if (!quiet) console.log('FAIL - ' + t.name + ': ' + (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e));
+		const why = [];
+		for (const mode of [ 'cache', 'data' ]) {
+			FAKE.render = mode;
+			try {
+				const u0 = UNHANDLED.length;
+				// a test whose promise never settles must FAIL, not end the process quietly (node
+				// exits 0 when nothing is pending): a real timer races it
+				let tm;
+				await Promise.race([ t.fn(srcs), new Promise((_, rej) => { tm = setTimeout(() => rej(new Error('test did not finish (hangs)')), 15000); }) ])
+					.finally(() => clearTimeout(tm));
+				await new Promise(r => setImmediate(r));
+				if (UNHANDLED.length > u0) throw new Error('unhandled rejection in the page: ' + UNHANDLED[u0]);
+			} catch (e) {
+				why.push('[' + mode + '] ' + (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e));
+			}
 		}
+		FAKE.render = 'cache';
+		if (!why.length) { pass++; if (!quiet) console.log('ok   - ' + t.name); }
+		else { fail++; failed.push(t.name); if (!quiet) console.log('FAIL - ' + t.name + ': ' + why.join(' || ')); }
 	}
 	return { pass, fail, failed };
 }
@@ -608,7 +741,7 @@ const MUTATIONS = [
 		[ 'routing: leaving the page asks only while there are unsaved changes', 'settings: leaving the page asks only while there are unsaved changes' ] ],
 	[ 'beforeunload never asks', 'common', "\t\tev.preventDefault();\n\t\tev.returnValue = '';", '',
 		[ 'routing: leaving the page asks only while there are unsaved changes', 'settings: leaving the page asks only while there are unsaved changes' ] ],
-	[ 'saved values not taken as the new base', 'common', 'for (var f in ch) if (has(ch, f)) self.base[f] = ch[f];', '',
+	[ 'saved values not taken as the new base', 'common', '{ self.base[f] = ch[f]; self.snapPut', '{ self.snapPut',
 		[ 'settings: after a save the page is clean even if loading it again fails' ] ],
 	[ 'a failed reload after the save jams the panel', 'common', 'return Promise.resolve(self.onSaved ? self.onSaved(r) : r).then(null, function() { return r; });',
 		'return self.onSaved ? self.onSaved(r) : r;', [ 'settings: after a save the page is clean even if loading it again fails' ] ],
@@ -620,6 +753,30 @@ const MUTATIONS = [
 	[ 'the form of a page drawn over keeps working', 'common', [ [ 'if (currentForm !== this) return false;', '' ],
 		[ 'try { r = this.maps[i].lookupOption(p[1], p[0], FORM_CONFIG); } catch (e) { r = null; }', 'r = this.maps[i].lookupOption(p[1], p[0], FORM_CONFIG);' ] ], null,
 		[ 'routing: leaving the page asks only while there are unsaved changes', 'settings: leaving the page asks only while there are unsaved changes' ] ],
+	// both checks (by size before reading, by length after)
+	[ 'a too large file is sent anyway', 'settings', [ [ 'if (Math.ceil(file.size / 3) * 4 > RESTORE_MAX_B64) return Promise.resolve(tooBig());', '' ],
+		[ 'if (b64.length > RESTORE_MAX_B64) return tooBig();', '' ] ], null,
+		[ 'settings: backup download and restore (the router checks first, replacing needs a yes)' ] ],
+	[ 'the request limit taken as the archive limit', 'settings', 'var RESTORE_MAX_B64 = 60000;', 'var RESTORE_MAX_B64 = 5592408;',
+		[ 'settings: backup download and restore (the router checks first, replacing needs a yes)' ] ],
+	[ 'an error inside "Advanced" stays folded', 'common', "if (p.tagName === 'DETAILS' && !p.open) p.open = true;", '',
+		[ 'settings: a field error of the router is shown at its field' ] ],
+	[ '"Search now" before the search is saved', 'routing', 'if (!adaptiveSaved)', 'if (false)',
+		[ 'routing: "Search now" only once the automatic search is saved' ] ],
+	[ 'a form limit differs from the router', 'settings', "o.datatype = 'and(uinteger,range(1,64))';", "o.datatype = 'and(uinteger,range(1,128))';",
+		[ 'settings: the form sends exactly the set_config schema (keys and types), every field reachable' ] ],
+	[ 'a ready-made list the router does not know', 'routing', "[ 'roblox', 'Roblox', null ]", "[ 'roblox', 'Roblox', null ], [ 'spotify', 'Spotify', null ]",
+		[ 'routing: the form sends exactly the set_config schema (keys and types), every field reachable' ] ],
+	// review ui3 O1
+	[ 'Revert draws from the data a Save has rewritten', 'common', '\t\t\trestoreSnap(m, self.snaps[i]);', '',
+		[ 'routing: Save with nothing changed, a change, Revert: hidden devices and addresses survive',
+		  'settings: Save with nothing changed, a change, Revert: the hidden Telegram token and chat survive',
+		  'routing: after a refused save Revert brings back the loaded values; a later save keeps them' ] ],
+	// LuCI draws from the cfgvalue cached at load(): without a load the saved value is not drawn
+	[ 'Revert without loading again (LuCI draws from its cache)', 'common', "return Promise.resolve(typeof m.load === 'function' ? m.load() : null).then(function() { return m.reset(); });", 'return m.reset();',
+		[ 'routing: after a refused save Revert brings back the loaded values; a later save keeps them' ] ],
+	[ 'a saved value is not what Revert goes back to', 'common', ' self.snapPut(self.byName[f], ch[f]); }', ' }',
+		[ 'routing: after a refused save Revert brings back the loaded values; a later save keeps them' ] ],
 	[ 'Revert keeps the error of the refused save', 'common', 'dropSticky(self.method);   // the error of a refused save', '//',
 		[ 'routing and settings: Revert brings back the loaded values and the panel says so' ] ],
 	[ 'an old Telegram test mark stays', 'settings', '\t\tsaver.clearErrors(mine);', '',
@@ -643,15 +800,19 @@ const MUTATIONS = [
 		[ 'settings: backup download and restore (the router checks first, replacing needs a yes)' ] ],
 	[ 'time not checked', 'settings', '\t\t\to.validate = timeOk;', '',
 		[ 'settings: a wrong time stops the save before anything is sent' ] ],
-	[ 'Revert does nothing', 'common', 'return Promise.all(this.maps.map(function(m) { return m.reset(); })).then(function() {', 'return Promise.resolve().then(function() {',
+	[ 'Revert does nothing', 'common', [ [ '\t\t\trestoreSnap(m, self.snaps[i]);', '' ],
+		[ "return Promise.resolve(typeof m.load === 'function' ? m.load() : null).then(function() { return m.reset(); });", 'return null;' ] ], null,
 		[ 'routing and settings: Revert brings back the loaded values and the panel says so', 'routing: leaving the page asks only while there are unsaved changes', 'settings: leaving the page asks only while there are unsaved changes' ] ]
 ];
 
+// the run ended without its summary line (something never settled): a failure, never exit 0
+let FINISHED = false;
+process.on('exit', () => { if (!FINISHED) { console.log('PAGES: aborted before the summary'); process.exitCode = 1; } });
 (async function main() {
 	const srcs = { common: fs.readFileSync(COMMON, 'utf8'), routing: fs.readFileSync(VIEWS.routing, 'utf8'), settings: fs.readFileSync(VIEWS.settings, 'utf8') };
 	if (process.argv.includes('--negative')) {
 		const base = await run(srcs, true);
-		if (base.fail) { console.log('PAGES-NEG: baseline not green: ' + base.failed.join('; ')); console.log('PAGES-NEG: passed=0 failed=1'); process.exit(1); }
+		if (base.fail) { console.log('PAGES-NEG: baseline not green: ' + base.failed.join('; ')); console.log('PAGES-NEG: passed=0 failed=1'); FINISHED = true; process.exit(1); }
 		let p = 0, f = 0;
 		for (const [ name, file, from, to, expect ] of MUTATIONS) {
 			const pairs = Array.isArray(from) ? from : [ [ from, to ] ];
@@ -664,10 +825,10 @@ const MUTATIONS = [
 			if (missing.length) { f++; console.log('FAIL - [' + name + '] stayed green: ' + missing.join('; ') + (r.failed.length ? ' (red: ' + r.failed.join('; ') + ')' : '')); }
 			else { p++; console.log('ok   - [' + name + '] -> red: ' + r.failed.join('; ')); }
 		}
-		console.log('PAGES-NEG: passed=' + p + ' failed=' + f);
+		FINISHED = true; console.log('PAGES-NEG: passed=' + p + ' failed=' + f);
 		process.exit(f || !p ? 1 : 0);
 	}
 	const r = await run(srcs, false);
-	console.log('PAGES: passed=' + r.pass + ' failed=' + r.fail + ' checked=' + CHECKED);
+	FINISHED = true; console.log('PAGES: passed=' + r.pass + ' failed=' + r.fail + ' checked=' + CHECKED);
 	process.exit(r.fail || !r.pass || CHECKED < 50 ? 1 : 0);
 })();

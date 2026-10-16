@@ -348,7 +348,7 @@ ctl ui-backend-code-without-text ui-unit fail 'FAIL - every code the backend ans
 	"$RPCD" '|| { rep false no_nodes; exit 0; }' '|| { rep false brand_new_code; exit 0; }'
 # ui3: the settings pages send only the changed fields (one set_config); the Telegram test uses
 # what is typed (rpcd tg_test {token, chat, via_proxy}), the masked token = the saved one
-ctl ui3-pages-every-field-sent ui-pages fail 'FAIL - routing: every field of the page;FAIL - settings: every field of the page;FAIL - routing: one Save;FAIL - settings: one Save;FAIL - routing: leaving the page;FAIL - settings: leaving the page;FAIL - settings: after a save;FAIL - routing and settings: Revert' \
+ctl ui3-pages-every-field-sent ui-pages fail 'FAIL - routing: every field of the page;FAIL - settings: every field of the page;FAIL - routing: one Save;FAIL - settings: one Save;FAIL - routing: leaving the page;FAIL - settings: leaving the page;FAIL - settings: after a save;FAIL - routing and settings: Revert;FAIL - routing: Save with nothing changed;FAIL - settings: Save with nothing changed;FAIL - routing: after a refused save' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js 'if (has(cur, f) && cur[f] !== undefined && !same(cur[f], this.base[f])) out[f] = cur[f];' 'if (has(cur, f) && cur[f] !== undefined) out[f] = cur[f];'
 ctl ui3-tg-test-ignores-typed rpcd fail 'rpcd/tg_test/typed-values-used ;rpcd/tg_test/empty-typed-token-is-none ;rpcd/tg_test/bad-typed-values-refused ;rpcd/tg_test/token-with-a-line-break-refused ' \
 	"$RPCD" "*) tok=\$v ;; esac; fi" '*) : ;; esac; fi'
@@ -358,6 +358,13 @@ ctl ui3-tg-test-multiline-token rpcd fail 'rpcd/tg_test/token-with-a-line-break-
 	"$RPCD" "{ [ \"\$(printf '%s' \"\$tok\" | wc -l)\" -eq 0 ] && printf" '{ printf'
 ctl ui3-tg-send-ignores-override rpcd fail 'rpcd/tg_test/typed-values-used ' \
 	"$LIBX/lib.sh" 'tok=${2:-$(uci -q get vpnpool.main.telegram_token)}' 'tok=$(uci -q get vpnpool.main.telegram_token)'
+# review ui3: Revert puts the loaded data back (LuCI's parse rewrites it); a token is bounded
+ctl ui3-pages-revert-from-rewritten-data ui-pages fail 'FAIL - routing: Save with nothing changed;FAIL - settings: Save with nothing changed;FAIL - routing: after a refused save;FAIL - routing and settings: Revert' \
+	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js '			restoreSnap(m, self.snaps[i]);' ''
+ctl ui3-token-unbounded-api rpcd fail 'rpcd/set_config/overlong-token-refused ' \
+	"$LIBX/api.uc" 'chk_re(v, /^[0-9]{1,20}:[A-Za-z0-9_-]{1,100}$/, ' 'chk_re(v, /^[0-9]+:[A-Za-z0-9_-]+$/, '
+ctl ui3-token-unbounded-tg-test rpcd fail 'rpcd/tg_test/overlong-token-refused ' \
+	"$RPCD" "grep -Eqx '[0-9]{1,20}:[A-Za-z0-9_-]{1,100}'" "grep -Eqx '[0-9]+:[A-Za-z0-9_-]+'"
 ctl ui-pages-feed-no-i18n ui-unit fail 'FAIL - packaging' \
 	.github/workflows/pages.yml 'expected 3 .ipk' 'expected 2 .ipk'
 ctl deploy-no-translation deploy-tar fail 'Russian translation missing' \
