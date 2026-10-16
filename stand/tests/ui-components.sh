@@ -36,7 +36,7 @@ trap cleanup EXIT
 
 # --- host: syntax + unit tests of the module (no browser needed)
 if command -v node >/dev/null 2>&1; then
-	for f in vpnpool/common.js view/vpnpool/_demo.js; do
+	for f in vpnpool/common.js view/vpnpool/_demo.js view/vpnpool/nodes.js view/vpnpool/dashboard.js; do
 		node --check "$(hostpath "$RES/$f")" 2>"$TMPD/err" && ok "syntax $f" || bad "syntax $f: $(head -c 300 "$TMPD/err")"
 	done
 	node "$(hostpath "$HERE/ui-common.test.js")" > "$TMPD/unit" 2>&1
@@ -45,6 +45,13 @@ if command -v node >/dev/null 2>&1; then
 	node "$(hostpath "$HERE/ui-common.test.js")" --negative > "$TMPD/neg" 2>&1
 	N=$(grep -E '^NEG: passed=[0-9]+ failed=[0-9]+( skipped=[0-9]+)?$' "$TMPD/neg")
 	case "$N" in "NEG: passed="[1-9]*" failed=0"|"NEG: passed="[1-9]*" failed=0 skipped="*) ok "negative controls of the unit tests ($N)" ;; *) bad "negative controls: ${N:-no summary line}"; grep '^FAIL' "$TMPD/neg" ;; esac
+	# the Nodes tab: behaviour of the real view on the fakes (+ its own mutations)
+	node "$(hostpath "$HERE/ui-nodes.test.js")" > "$TMPD/nodes" 2>&1
+	U=$(grep -E '^NODES: passed=[0-9]+ failed=[0-9]+ checked=[0-9]+$' "$TMPD/nodes")
+	case "$U" in "NODES: passed="[1-9]*" failed=0 checked="[1-9]*) ok "tests of the Nodes tab ($U)" ;; *) bad "tests of the Nodes tab: ${U:-no summary line}"; grep '^FAIL' "$TMPD/nodes" ;; esac
+	node "$(hostpath "$HERE/ui-nodes.test.js")" --negative > "$TMPD/nneg" 2>&1
+	N=$(grep -E '^NODES-NEG: passed=[0-9]+ failed=[0-9]+$' "$TMPD/nneg")
+	case "$N" in "NODES-NEG: passed="[1-9]*" failed=0") ok "negative controls of the Nodes tab tests ($N)" ;; *) bad "negative controls of the Nodes tab: ${N:-no summary line}"; grep '^FAIL' "$TMPD/nneg" ;; esac
 else
 	bad "node not found: syntax and unit tests of common.js did not run"
 fi
@@ -91,7 +98,7 @@ CODE=$(curl -s -o "$TMPD/page" -w '%{http_code}' -b "$CK" "$B/cgi-bin/luci/admin
 CODE=$(curl -s -o "$TMPD/page0" -w '%{http_code}' "$B/cgi-bin/luci/admin/services/vpnpool/_demo")
 grep -q 'vpnpool/_demo' "$TMPD/page0" && bad "component page without login is refused (HTTP $CODE)" || ok "component page without login is refused (HTTP $CODE)"
 
-for f in vpnpool/common.js view/vpnpool/_demo.js; do
+for f in vpnpool/common.js view/vpnpool/_demo.js view/vpnpool/nodes.js vpnpool/jsqr.min.js; do
 	curl -s -o "$TMPD/served" "$B/luci-static/resources/$f"
 	cmp -s "$TMPD/served" "$RES/$f" && ok "LuCI serves $f (byte-identical)" || bad "LuCI serves $f"
 done
@@ -110,14 +117,19 @@ check_tr() {   # $1 msgid  $2 expected translation (empty = must be absent)
 }
 [ -n "$TRURL" ] && ok "page loads the catalog $TRURL" || bad "page loads a translations catalog"
 check_tr 'Grant access to vpnpool dashboard' 'Доступ к панели VPN Pool'
-check_tr 'Dashboard' 'Дашборд'
+check_tr 'Overview' 'Обзор'
+check_tr 'Nodes' 'Узлы'
+check_tr 'Routes' 'Маршруты'
+# a plural msgid: the key is msgid + \002 + the form index (po2lmo; LuCI's N_)
+check_tr "$(printf '%%d node\002%s' 1)" '%d узла'
+check_tr 'Connected to %s: chosen by you. If it stops working, the automatic choice takes over until it is back.' 'Подключён к %s — выбран вами. Если он перестанет работать, автовыбор подменит его, пока он не вернётся.'
 check_tr 'More actions' 'Ещё действия'
 check_tr 'The service is off. Turn it on and try again.' 'Служба выключена. Включите её и попробуйте ещё раз.'
 check_tr 'VPN exit: %s (IP %s)' 'Выход через VPN: %s  (IP %s)'
 check_tr 'vpnpool stand: this msgid is not in the catalog' ''
 
 curl -s -o "$TMPD/menu" -b "$CK" "$B/cgi-bin/luci/admin/menu"
-grep -q '"_demo"' "$TMPD/menu" && grep -q '"Dashboard"' "$TMPD/menu" && ok "menu has the stand-only route and English msgid titles" || bad "menu JSON: $(head -c 200 "$TMPD/menu")"
+grep -q '"_demo"' "$TMPD/menu" && grep -q '"Overview"' "$TMPD/menu" && grep -q '"Nodes"' "$TMPD/menu" && ok "menu has the stand-only route and English msgid titles" || bad "menu JSON: $(head -c 200 "$TMPD/menu")"
 
 # the module's transport paths: a real method answers, a method outside the ACL is refused
 # (call() turns -32002 into "no permission"), a method rpcd does not know answers ubus 3

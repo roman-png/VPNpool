@@ -23,181 +23,10 @@ const BD = process.env.BACKEND_DIR || '';
 const RPCD = BD ? path.join(BD, 'rpcd') : path.join(APP, 'files/usr/libexec/rpcd/vpnpool');
 const APIUC = BD ? path.join(BD, 'api.uc') : path.join(REPO, 'package/vpnpool/files/usr/libexec/vpnpool/api.uc');
 const ACL = BD ? path.join(BD, 'acl.json') : path.join(APP, 'files/usr/share/rpcd/acl.d/luci-app-vpnpool.json');
+const PARSER = BD ? path.join(BD, 'parser.uc') : path.join(REPO, 'package/vpnpool/files/usr/libexec/vpnpool/parser.uc');
 const XSS = '<img src=x onerror="window.pwned=1">';
 
-// ---------- fake DOM (enough of it for common.js) ----------
-function makeDom() {
-	const doc = { unsafe: [], listeners: [], activeElement: null };
-	class TextNode {
-		constructor(s) { this.nodeType = 3; this.data = String(s); this.parentNode = null; }
-		get textContent() { return this.data; }
-	}
-	class El {
-		constructor(tag) {
-			this.nodeType = 1; this.tagName = String(tag).toUpperCase(); this.children = []; this.parentNode = null;
-			this.attrs = {}; this.ls = {}; this.classes = new Set(); this.hidden = false; this.disabled = false; this.checked = false;
-			const self = this;
-			this.classList = {
-				add: (...c) => c.forEach(x => self.classes.add(x)), remove: (...c) => c.forEach(x => self.classes.delete(x)),
-				contains: c => self.classes.has(c), toggle: (c, v) => { if (v === undefined) v = !self.classes.has(c); v ? self.classes.add(c) : self.classes.delete(c); return v; }
-			};
-		}
-		get className() { return [...this.classes].join(' '); }
-		setAttribute(k, v) { this.attrs[k] = String(v); if (k === 'id') this.id = String(v); if (k === 'class') String(v).split(/\s+/).forEach(c => c && this.classes.add(c)); }
-		getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
-		appendChild(c) { if (c.parentNode) c.parentNode.removeChild(c); c.parentNode = this; this.children.push(c); return c; }
-		insertBefore(c, ref) { if (c.parentNode) c.parentNode.removeChild(c); c.parentNode = this; const i = this.children.indexOf(ref); if (i < 0) this.children.push(c); else this.children.splice(i, 0, c); return c; }
-		removeChild(c) { this.children = this.children.filter(x => x !== c); c.parentNode = null; return c; }
-		get firstElementChild() { return this.children.find(c => c.nodeType === 1) || null; }
-		get lastChild() { return this.children[this.children.length - 1] || null; }
-		contains(n) { while (n) { if (n === this) return true; n = n.parentNode; } return false; }
-		get textContent() { return this.children.map(c => c.textContent).join(''); }
-		set textContent(v) { this.children.forEach(c => { c.parentNode = null; }); this.children = []; this.appendChild(new TextNode(v)); }
-		set innerHTML(v) { doc.unsafe.push({ tag: this.tagName, html: String(v) }); this.children = []; this.appendChild(new TextNode(String(v))); }
-		focus() { doc.activeElement = this; }
-		blur() { if (doc.activeElement === this) doc.activeElement = doc.body; }
-		addEventListener(t, fn) { (this.ls[t] = this.ls[t] || []).push(fn); }
-		removeEventListener(t, fn) { this.ls[t] = (this.ls[t] || []).filter(f => f !== fn); }
-		matches(sel) {
-			return sel.split(',').map(s => s.trim()).some(s => {
-				let m;
-				if ((m = s.match(/^\.([\w-]+)$/))) return this.classes.has(m[1]);
-				if ((m = s.match(/^#(.+)$/))) return this.id === m[1];
-				if ((m = s.match(/^\[([\w-]+)="([^"]*)"\]$/))) return this.attrs[m[1]] === m[2];
-				if ((m = s.match(/^(\w+)\[([\w-]+)\]$/))) return this.tagName === m[1].toUpperCase() && m[2] in this.attrs;
-				if ((m = s.match(/^(\w+)$/))) return this.tagName === m[1].toUpperCase();
-				throw new Error('fake DOM: unsupported selector ' + s);
-			});
-		}
-		querySelectorAll(sel) { const out = []; const walk = n => n.children.forEach(c => { if (c.nodeType === 1) { if (c.matches(sel)) out.push(c); walk(c); } }); walk(this); return out; }
-		querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
-	}
-	function fire(target, type, init) {
-		const ev = Object.assign({ type, target, defaultPrevented: false, bubbles: true }, init || {});
-		ev.preventDefault = () => { ev.defaultPrevented = true; };
-		for (const l of doc.listeners.filter(l => l.type === type && l.capture)) l.fn(ev);
-		for (let n = target; n; n = n.parentNode) for (const fn of (n.ls[type] || []).slice()) { ev.currentTarget = n; fn(ev); }
-		for (const l of doc.listeners.filter(l => l.type === type && !l.capture)) l.fn(ev);
-		return ev;
-	}
-	doc.createTextNode = s => new TextNode(s);
-	doc.createElement = t => new El(t);
-	doc.addEventListener = (type, fn, capture) => doc.listeners.push({ type, fn, capture: !!capture });
-	doc.removeEventListener = (type, fn, capture) => { doc.listeners = doc.listeners.filter(l => !(l.type === type && l.fn === fn && l.capture === !!capture)); };
-	doc.documentElement = new El('html'); doc.head = new El('head'); doc.body = new El('body');
-	doc.documentElement.appendChild(doc.head); doc.documentElement.appendChild(doc.body);
-	doc.getElementById = id => doc.documentElement.querySelectorAll('#' + id)[0] || null;
-	doc.activeElement = doc.body;
-	// LuCI dom.append rule (luci.js): array -> elements appended, other values as TEXT nodes;
-	// a single non-node value -> innerHTML
-	function append(node, children) {
-		if (Array.isArray(children)) {
-			children.forEach(c => { if (c && c.nodeType) node.appendChild(c); else node.appendChild(new TextNode(`${c}`)); });
-		} else if (children && children.nodeType) node.appendChild(children);
-		else if (children !== null && children !== undefined) node.innerHTML = `${children}`;
-	}
-	function E(tag, attrs, children) {
-		const n = new El(tag);
-		for (const k in (attrs || {})) {
-			const v = attrs[k];
-			if (v === null || v === undefined) continue;
-			if (typeof v === 'function') n.addEventListener(k, v);
-			else if (k === 'hidden') n.hidden = true;
-			else if (k === 'disabled') n.disabled = true;
-			else n.setAttribute(k, v);
-		}
-		append(n, children);
-		return n;
-	}
-	return { doc, El, TextNode, E, append, fire };
-}
-
-function makeEnv(opts) {
-	opts = opts || {};
-	const D = makeDom();
-	const clock = { now: 1000000, timers: [], seq: 0 };
-	const setTimeout_ = (fn, ms) => { const id = ++clock.seq; clock.timers.push({ id, at: clock.now + (ms || 0), fn }); return id; };
-	const clearTimeout_ = id => { clock.timers = clock.timers.filter(t => t.id !== id); };
-	async function flush() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
-	async function tick(ms) {
-		const end = clock.now + ms;
-		for (;;) {
-			await flush();
-			clock.timers.sort((a, b) => a.at - b.at);
-			const t = clock.timers[0];
-			if (!t || t.at > end) break;
-			clock.timers.shift();
-			clock.now = t.at;
-			t.fn();
-		}
-		clock.now = end;
-		await flush();
-	}
-	const FakeDate = { now: () => clock.now };
-	const mc = D.E('div', { id: 'maincontent' });
-	D.doc.body.appendChild(mc);
-	const modalDiv = D.E('div', { id: 'modal_overlay' }, [ D.E('div', { 'class': 'modal' }) ]);
-	D.doc.body.appendChild(modalDiv);
-	const ui = {
-		calls: [], modalOpen: false,
-		addNotification(title, children, ...cls) {
-			const n = D.E('div', { 'class': 'alert-message' });
-			if (title != null) n.appendChild(D.E('h4', {}, title));
-			D.append(n, children);
-			cls.forEach(c => n.classes.add(c));
-			mc.insertBefore(n, mc.firstElementChild);
-			ui.calls.push(['add', cls.join(' ')]);
-			return n;
-		},
-		addTimeLimitedNotification(title, children, timeout, ...cls) {
-			const n = ui.addNotification(title, children, ...cls);
-			ui.calls.push(['timed', timeout]);
-			setTimeout_(() => { if (n.parentNode) n.parentNode.removeChild(n); }, timeout);
-			return n;
-		},
-		showModal(title, children, ...cls) {   // ui.js: dom.content(dlg, dom.create('h4', {}, title))
-			const dlg = modalDiv.firstElementChild;
-			dlg.children.forEach(c => { c.parentNode = null; }); dlg.children = []; dlg.classes = new Set([ 'modal', ...cls ]);
-			dlg.appendChild(D.E('h4', {}, title));
-			D.append(dlg, children);
-			ui.modalOpen = true; ui.calls.push(['showModal']);
-			return dlg;
-		},
-		hideModal() { ui.modalOpen = false; ui.calls.push(['hideModal']); if (D.doc.activeElement) D.doc.activeElement.blur(); },
-		createHandlerFn: (ctx, fn) => fn
-	};
-	if (opts.luci2305) delete ui.addTimeLimitedNotification;
-	const handlers = {};
-	const rpcLog = [];
-	const rpc = {
-		declare(o) {
-			return function(...args) {
-				const p = {};
-				(o.params || []).forEach((k, i) => { p[k] = args[i]; });
-				rpcLog.push([o.method, p]);
-				const h = handlers[o.method];
-				return new Promise((resolve, reject) => {
-					try {
-						if (!h) return resolve(3);   // rpcd: method not found -> [3]
-						const r = h(p, rpcLog.filter(x => x[0] === o.method).length);
-						if (r instanceof Error) reject(r); else resolve(r);
-					} catch (e) { reject(e); }
-				});
-			};
-		}
-	};
-	const dom = { content(n, c) { n.children.forEach(x => { x.parentNode = null; }); n.children = []; D.append(n, c); } };
-	const baseclass = { extend(proto) { function C() { if (proto.__init__) proto.__init__.apply(this, arguments); } C.prototype = proto; return C; } };
-	const consoleQuiet = { warn() {}, info() {}, log() {} };
-	const win = { setTimeout: setTimeout_, clearTimeout: clearTimeout_, innerHeight: 800 };
-	return { clock, tick, flush, FakeDate, mc, D, doc: D.doc, ui, rpc, dom, baseclass, handlers, rpcLog, win, consoleQuiet };
-}
-
-function load(src, env) {
-	const fn = new Function('baseclass', 'rpc', 'ui', 'dom', 'E', '_', 'window', 'console', 'Date', 'document', src);
-	const C = fn(env.baseclass, env.rpc, env.ui, env.dom, env.D.E, s => s, env.win, env.consoleQuiet, env.FakeDate, env.doc);
-	return new C();
-}
+const { makeEnv, load } = require('./ui-fake.js');
 
 // ---------- backend sources: codes and methods, extracted by FORM (not by helper name) ----------
 const CODE_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
@@ -317,6 +146,8 @@ test('transport errors -> human codes; a session expiry is passed through withou
 	eq((await rejectsWith(C.call('diag'))).code, 'connection', 'HTTP 502');
 	env.handlers.diag = () => { const e = new Error('Request timed out'); e.name = 'TimeoutError'; return e; };
 	eq((await rejectsWith(C.call('diag'))).code, 'timeout', 'timeout');
+	env.handlers.diag = () => new Error('RPC call to vpnpool/analyze failed with error -32700: Parse error');
+	eq((await rejectsWith(C.call('diag'))).code, 'too_large', '-32700 (a request over the web server limit)');
 	const before = toasts(env).length;
 	env.handlers.diag = () => { const e = new Error('Login session is expired'); e.name = 'SessionError'; return e; };
 	const s = await rejectsWith(C.call('diag'));
@@ -597,7 +428,7 @@ test('packaging: translation in installer, feeds and CI; stand-only pages left o
 	if ((inst.match(/^\tinstall_i18n\b/mg) || []).length < 2) bad.push('install.sh: translation not installed in both flows');
 	if (!/luci-i18n-vpnpool-ru_\*\.ipk/.test(pages) || !/luci-i18n-vpnpool-ru-\[0-9\]\*\.apk/.test(pages) || !/expected 3 \.ipk/.test(pages)) bad.push('pages.yml: translation not published');
 	if (!/luci-i18n-vpnpool-ru_\*\.ipk/.test(build) || !/expected 3/.test(build)) bad.push('build.yml: translation not collected');
-	if (!/ui-common\.test\.js --negative/.test(build) || !/ui-i18n\.sh check/.test(build) || !/ui-components\.sh/.test(build)) bad.push('build.yml: UI checks not run in CI');
+	if (!/ui-common\.test\.js --negative/.test(build) || !/ui-nodes\.test\.js --negative/.test(build) ||!/ui-i18n\.sh check/.test(build) || !/ui-components\.sh/.test(build)) bad.push('build.yml: UI checks not run in CI');
 	if (!/vpnpool\.ru\.lmo/.test(dep) || !/--exclude='\.\/www\/luci-static\/resources\/view\/vpnpool\/_\*'/.test(dep)) bad.push('deploy.sh: translation / stand-only pages');
 	eq(bad, [], 'packaging');
 });
@@ -617,6 +448,32 @@ test('every code the backend answers with has a human text', async (C) => {
 		ok(field.length >= 10, 'positive control: field codes ' + field.length);
 		eq(field.filter(c => !C.FIELD_TEXT[c]), [], 'field codes without a field text');
 	}
+});
+// reasons a pasted line is not added (analyze / add, the "+ Add" dialog of the Nodes tab): the
+// parser's and api.uc's reason codes, read by FORM from their code lines
+function backendReasons() {
+	const out = new Map();
+	const add = (c, w) => { if (CODE_RE.test(c) && !out.has(c)) out.set(c, w); };
+	for (const f of [ PARSER, APIUC ].filter(x => fs.existsSync(x))) {
+		const b = path.basename(f);
+		const s = fs.readFileSync(f, 'utf8').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
+		let m;
+		for (m of s.matchAll(/\breason\s*[:=]\s*'([a-z][a-z0-9_]*)'/g)) add(m[1], b + ': reason');
+		for (m of s.matchAll(/\berr\s*:\s*'([a-z][a-z0-9_]*)'/g)) add(m[1], b + ': err');
+		for (m of s.matchAll(/\bE_[A-Z_]+\s*:\s*'([a-z][a-z0-9_]*)'/g)) add(m[1], b + ': decoder code');
+		if (b === 'parser.uc') for (m of s.matchAll(/\breturn '([a-z][a-z0-9]*_[a-z0-9_]+)';/g)) add(m[1], b + ': check result');
+	}
+	return out;
+}
+test('every reason the backend gives for a pasted line has a human text', async (C) => {
+	const rs = backendReasons();
+	if (process.env.T_CODES) console.log('# backend reasons (' + rs.size + '): ' + [ ...rs.keys() ].sort().join(' '));
+	ok(rs.size >= 25, 'positive control: ' + rs.size + ' reasons extracted from ' + [ PARSER, APIUC ].filter(f => fs.existsSync(f)).join(', ') + ' (want >= 25)');
+	const miss = [ ...rs.keys() ].filter(c => !(C.REASON_TEXT[c] || C.CODE_TEXT[c] || C.FIELD_TEXT[c])).map(c => c + ' (' + rs.get(c) + ')');
+	eq(miss, [], 'reasons without a text');
+	eq(C.reasonText('no_such_reason_x'), C.REASON_TEXT.parse_error, 'unknown reason -> "could not be read"');
+	eq(C.reasonText('exists'), C.REASON_TEXT.exists, 'own reason text first');
+	eq(C.reasonText('fetch_failed'), C.CODE_TEXT.fetch_failed, 'then the code text');
 });
 test('every rpcd method and every ACL method is declared in METHODS with the same arguments', async (C) => {
 	const listed = backendList();
@@ -669,6 +526,7 @@ const MUTATIONS = [
 	{ name: 'waitFor gives up after one poll', from: "\t\t\t\t\tnext();\n\t\t\t\t}, function(e) {", to: "\t\t\t\t\treject(new VpnpoolError('timeout', method));\n\t\t\t\t}, function(e) {", expect: [ 'waitFor polls until the predicate holds' ] },
 	{ name: 'waitIdle: grace = done (В5)', from: "return Date.now() - idleSince >= grace;", to: "if (Date.now() - idleSince >= grace) { done = true; return true; } return false;", expect: [ 'waitIdle: a job never seen running is NOT reported as done' ] },
 	{ name: 'waitIdle: a seen-busy job is enough (В5)', from: "if (sawBusy) return false;                 // a mark exists but did not move yet", to: "if (sawBusy) { done = true; return true; }", expect: [ 'waitIdle(build): done only when build.at moved; an already running build does not count' ] },
+	{ name: 'request over the web server limit = "no connection"', from: "if (/error -32700\\b/.test(msg)) return 'too_large';", to: "", expect: [ 'transport errors -> human codes; a session expiry is passed through without a toast' ] },
 	{ name: 'session expiry toasted', from: "if (code === 'session') throw e;", to: "", expect: [ 'transport errors -> human codes; a session expiry is passed through without a toast' ] },
 	{ name: 'method dropped from METHODS', from: "\trefresh:          { params: [], write: true },\n", to: "", expect: [ 'every rpcd method and every ACL method is declared in METHODS with the same arguments' ] },
 	{ name: 'code text dropped', from: "\tnot_found:          _('Not found: it may have been removed already.'),\n", to: "", expect: [ 'every code the backend answers with has a human text', 'ok:false -> Error with its code and the human text, one error toast' ] },
@@ -688,6 +546,8 @@ const MUTATIONS = [
 	{ name: 'Escape closes a foreign dialog', from: "if (!ours()) { cleanup(); resolve(false); return; }", to: "", expect: [ 'confirm replaced by another dialog: resolves false, never closes the other one' ] },
 	{ name: 'whole dimmed card transparent (М1)', from: "'.vp-card.vp-dimmed .vp-card-head,.vp-card.vp-dimmed .vp-card-state,.vp-card.vp-dimmed .vp-card-badges{opacity:.6}',", to: "'.vp-card.vp-dimmed{opacity:.6}',", expect: [ 'node card: cell updates keep the elements; dimming does not touch the menu' ] },
 	{ name: 'set_config argument renamed (В6)', from: "set_config:       { params: [ 'settings' ]", to: "set_config:       { params: [ 'config' ]", expect: [ 'every rpcd method and every ACL method is declared in METHODS with the same arguments' ], needsListed: 'set_config' },
+	{ name: 'reason text dropped', from: "\tbad_uuid:               _('The user key in the link is not valid.'),\n", to: "", expect: [ 'every reason the backend gives for a pasted line has a human text' ] },
+	{ name: 'reasonText falls back to the code itself', from: "\treturn REASON_TEXT.parse_error;\n}", to: "\treturn code;\n}", expect: [ 'every reason the backend gives for a pasted line has a human text' ] },
 	{ name: 'field text dropped', from: "\tbad_ipv4:      _('Enter an address like 192.168.1.10.'),\n", to: "", expect: [ 'field errors: texts per field and marks next to the form fields' ] }
 ];
 

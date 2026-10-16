@@ -53,9 +53,20 @@ if grep -q '"vpnpool"' "$TMPD/menu" && grep -q '"VPN Pool"' "$TMPD/menu" && grep
 	ok "menu JSON has Services > VPN Pool > dashboard"
 else bad "menu JSON has Services > VPN Pool > dashboard: $(head -c 200 "$TMPD/menu")"; fi
 
+# the tabs of 2.0 (ROADMAP §0): Overview / Nodes / Routes / Settings / Diagnostics; no "Sources"
+if grep -q '"nodes"' "$TMPD/menu" && grep -q '"Nodes"' "$TMPD/menu" && ! grep -q '"sources"' "$TMPD/menu"; then
+	ok "menu has the Nodes tab and no Sources tab"
+else bad "menu: Nodes tab / no Sources tab: $(head -c 300 "$TMPD/menu")"; fi
+CODE=$(curl -s -o "$TMPD/npage" -w '%{http_code}' -b "sysauth_http=$SID; sysauth=$SID" "$B/cgi-bin/luci/admin/services/vpnpool/nodes")
+[ "$CODE" = 200 ] && grep -q 'vpnpool/nodes' "$TMPD/npage" && ok "Nodes page -> HTTP 200, loads view vpnpool/nodes" || bad "Nodes page -> HTTP $CODE"
+
 # the view JS itself is served
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$B/luci-static/resources/view/vpnpool/dashboard.js")
 [ "$CODE" = 200 ] && ok "dashboard.js served" || bad "dashboard.js served (HTTP $CODE)"
+for f in view/vpnpool/nodes.js vpnpool/jsqr.min.js vpnpool/qrcode.min.js; do
+	CODE=$(curl -s -o /dev/null -w '%{http_code}' "$B/luci-static/resources/$f")
+	[ "$CODE" = 200 ] && ok "$f served" || bad "$f served (HTTP $CODE)"
+done
 
 # vpnpool status through rpcd over the HTTP ubus bridge, with the session's ACL
 curl -s -o "$TMPD/st" -H 'Content-Type: application/json' \

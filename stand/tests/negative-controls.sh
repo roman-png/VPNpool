@@ -71,6 +71,8 @@ ctl() {
 		            line=$(grep '^UNIT: ' "$d.log" | tail -1) ;;
 		ui-pages)   REPO_DIR="$d" node "$HERE/ui-pages.test.js" > "$d.log" 2>&1
 		            line=$(grep '^PAGES: ' "$d.log" | tail -1) ;;
+		ui-nodes)   REPO_DIR="$d" node "$HERE/ui-nodes.test.js" > "$d.log" 2>&1
+		            line=$(grep '^NODES: ' "$d.log" | tail -1) ;;
 		*)          REPO_DIR="$d" sh "$HERE/run-in-docker.sh" "$suite" > "$d.log" 2>&1
 		            line=$(grep '^TESTS: ' "$d.log" | tail -1) ;;
 	esac
@@ -320,7 +322,7 @@ ctl build-status-not-written build fail 'build/status-file-success ;build/status
 ctl fetch-status-forgets-last-ok fetch fail 'fetch/status-per-source ;fetch/term-records-interrupted ' \
 	"$LIBX/fetch.sh" 'else ($p[$r[0]].last_ok_at // null) end' 'else null end'
 ctl uitext-new-technical-string uitext fail 'uitext/real-app-no-new-violations ;uitext/baseline-gates-new-violations ;uitext/stale-baseline-line-fails ' \
-	"$VIEW/dashboard.js" "_('Cancel')" "_('Cancel via rpcd')"
+	"$VIEW/nodes.js" "_('Cancel')" "_('Cancel via rpcd')"
 # ui0: the guard reads the shared modules (vpnpool/common.js) and po, counts a po msgid once
 ctl uitext-views-only uitext fail 'uitext/positive-control-bad-fixture-caught ' \
 	stand/tests/ui-text-guard.uc "walk(ROOT + '/files/www/luci-static/resources', '.js', [])" "walk(ROOT + '/files/www/luci-static/resources/view', '.js', [])"
@@ -335,15 +337,15 @@ ctl i18n-untranslated ui-i18n fail 'FAIL untranslated ru: More actions' \
 	package/luci-app-vpnpool/po/ru/vpnpool.po 'msgstr "Ещё действия"' 'msgstr ""'
 ctl i18n-new-string-not-in-po ui-i18n fail 'FAIL pot-missing-msgid A new string;FAIL po-missing-msgid ru: A new string;FAIL pot-stale More actions;FAIL po-obsolete ru: More actions' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "_('More actions')" "_('A new string')"
-ctl i18n-placeholder-mismatch ui-i18n fail 'FAIL placeholders ru: "Switched to %s"' \
-	package/luci-app-vpnpool/po/ru/vpnpool.po 'msgstr "Переключено на %s"' 'msgstr "Переключено на %d"'
+ctl i18n-placeholder-mismatch ui-i18n fail 'FAIL placeholders ru: "Connected to %s."' \
+	package/luci-app-vpnpool/po/ru/vpnpool.po 'msgstr "Подключено к %s."' 'msgstr "Подключено к %d."'
 ctl i18n-nonbmp-msgid ui-i18n fail 'FAIL nonbmp More actions 📌;FAIL pot-missing-msgid More actions 📌;FAIL po-missing-msgid ru: More actions 📌;FAIL pot-stale More actions;FAIL po-obsolete ru: More actions' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "_('More actions')" "_('More actions 📌')"
 # ui0 review: old views keep strings as text; backend codes all have a text; the translation is shipped
 ctl ui-view-raw-E ui-unit fail 'FAIL - old views: E is common.E' \
 	"$VIEW/dashboard.js" 'var E = common.E;' ''
 ctl ui-view-modal-title-html ui-unit fail 'FAIL - old views: E is common.E' \
-	"$VIEW/dashboard.js" "ui.showModal(common.txt(_('Share node') + ': ' + tag), [" "ui.showModal(_('Share node') + ': ' + tag, ["
+	"$VIEW/nodes.js" "ui.showModal(common.txt(_('Node link: %s').format(name)), [" "ui.showModal(_('Node link: %s').format(name), ["
 ctl ui-backend-code-without-text ui-unit fail 'FAIL - every code the backend answers with has a human text' \
 	"$RPCD" '|| { rep false no_nodes; exit 0; }' '|| { rep false brand_new_code; exit 0; }'
 # ui3: the settings pages send only the changed fields (one set_config); the Telegram test uses
@@ -380,6 +382,15 @@ ctl install-no-translation-apk engine fail 'engine/install-sh-awg1-flash ;engine
 ;; esac
 ctl ui-smoke-status-broken ui-smoke fail 'ubus vpnpool.status via /ubus' \
 	"$RPCD" '		/usr/libexec/vpnpool/status.sh' '		echo not-json'
+# ui1: the Nodes tab — 2.0 methods only, reasons of a pasted line, the tabs of 2.0
+ctl ui1-nodes-connect-legacy ui-nodes fail 'FAIL - "Connect" is the soft choice;FAIL - only the 2.0 methods' \
+	"$VIEW/nodes.js" "common.call('connect', { id: id }" "common.call('select', { id: id }"
+ctl ui1-nodes-raw-E ui-nodes fail 'FAIL - groups by source, state words of every kind of card, no innerHTML' \
+	"$VIEW/nodes.js" 'var E = common.E;' 'var E0 = common.E;'
+ctl ui1-reason-without-text ui-unit fail 'FAIL - every reason the backend gives for a pasted line has a human text' \
+	"$LIBX/parser.uc" "return 'bad_uuid';" "return 'bad_brand_new_reason';"
+ctl ui1-sources-tab-back ui-smoke fail 'menu has the Nodes tab and no Sources tab' \
+	package/luci-app-vpnpool/files/usr/share/luci/menu.d/luci-app-vpnpool.json '"admin/services/vpnpool/nodes": {' '"admin/services/vpnpool/sources": { "title": "Sources", "order": 9, "action": { "type": "view", "path": "vpnpool/dashboard" } }, "admin/services/vpnpool/nodes": {'
 # runner: a suite that silently stops early must fail the run (min-cases.txt), not shrink total
 ctl suite-stops-early sched fail 'runner/sched-ran-at-least-6-cases' \
 	stand/tests/suites/sched.sh '# ---- garbage times are rejected' 'return 0   # ---- garbage times are rejected'
