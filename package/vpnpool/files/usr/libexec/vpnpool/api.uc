@@ -38,14 +38,14 @@
 //   reason (skip: the parser.uc --report code, + field for an AWG .conf value; a vpn:// link:
 //   api_key full_access unsupported_container (+found) no_conf decode_failed (+detail);
 //   dup: exists|repeated). awg items: type awg|wireguard, id, name, server, port, hints?
-//   (awg_random_trailers), deferred? (engine_missing|engine_no_awg: stored, waits for the
+//   (awg_random_trailers), ignored? (keys skipped), deferred? (engine_missing|engine_no_awg|engine_no_awg31: stored, waits for the
 //   engine). summary.pending = items that will be stored deferred.
 'use strict';
 
-import { readfile, writefile, stdin, popen, unlink, mkdir, stat, lsdir, rename } from 'fs';
+import { readfile, writefile, stdin, popen, unlink, mkdir, stat, lsdir, rename, chmod } from 'fs';
 import { cursor } from 'uci';
 import { rand } from 'math';
-import { VALID_COMMUNITY, read_json, mask_url, mask_token, str_key, as_list, engine_select } from './common.uc';
+import { VALID_COMMUNITY, uniq, read_json, mask_url, mask_token, str_key, as_list, engine_select } from './common.uc';
 
 const SB = '/tmp/vpnpool';
 const PARSER = '/usr/libexec/vpnpool/parser.uc';
@@ -352,7 +352,14 @@ const BAD_NODES = SB + '/.bad_nodes.json';
 const DEC_REASON = { E_API_KEY: 'api_key', E_FULL_ACCESS: 'full_access',
 	E_NO_SUPPORTED_CONTAINER: 'unsupported_container', E_NO_CONF: 'no_conf' };
 // add(): the node is stored but waits for the engine (ok:true + this warning)
-const ADD_WARN = { engine_missing: { warning: 'engine_missing' }, engine_no_awg: { warning: 'engine_no_awg' } };
+const ADD_WARN = { engine_missing: { warning: 'engine_missing' }, engine_no_awg: { warning: 'engine_no_awg' },
+	engine_no_awg31: { warning: 'engine_no_awg31' } };
+// a file that holds a private key: created empty, made 0600, then filled (never readable by others)
+function write_secret(path, data) {
+	if (writefile(path, '') == null) return false;
+	chmod(path, 0600);
+	return writefile(path, data) != null;
+}
 
 let AN = null;   // per-call state: known AWG ids, engine
 function awg_known_ids() {
@@ -381,8 +388,8 @@ function clean_name(s) {
 // one .conf -> analyze item (nothing written); AN.confs[line] keeps what add() stores
 function awg_item(conf, ln, name, host) {
 	mkdir(SB);
-	let f = sprintf('%s/.an.awg.%d.%d', SB, time(), rand());
-	writefile(f, conf);
+	let f = sprintf('%s/.an.awg.%s', SB, uniq());
+	write_secret(f, conf);
 	let rep = parse_json_file(sprintf('ucode %s --report --with-id %s 2>/dev/null', PARSER, sq(f)));
 	unlink(f);
 	let r = rep[0] ?? { status: 'skip', reason: 'parse_error' };
@@ -396,20 +403,22 @@ function awg_item(conf, ln, name, host) {
 	it.name = clean_name(name) ?? r.tag;
 	it.server = r.server ?? host; it.port = r.port;
 	if (r.hints) it.hints = r.hints;
+	if (r.ignored) it.ignored = r.ignored;   // wg-quick / amneziawg-tools keys that do nothing here
 	if (awg_known_ids()[r.id] || stat(AWG_DIR + '/' + r.id + '.conf')) { it.status = 'dup'; it.reason = 'exists'; }
 	else if (AN.seen[r.id]) { it.status = 'dup'; it.reason = 'repeated'; }
 	else {
 		it.status = 'add'; AN.seen[r.id] = true;
 		AN.confs['' + ln] = { conf: conf, name: it.name, id: r.id };
 		if (r.type == 'awg' && awg_engine().reason) it.deferred = awg_engine().reason;
+		else if (r.type == 'awg' && r.awg31 && !awg_engine().awg31) it.deferred = 'engine_no_awg31';
 	}
 	return it;
 }
 // one vpn:// token (the link, its wrapped continuation lines joined) -> items
 function vpn_items(token, ln) {
 	mkdir(SB);
-	let f = sprintf('%s/.an.vpn.%d.%d', SB, time(), rand());
-	writefile(f, token + '\n');
+	let f = sprintf('%s/.an.vpn.%s', SB, uniq());
+	write_secret(f, token + '\n');
 	let d = null;
 	try { d = json(run(sprintf('ucode %s --json < %s 2>/dev/null', AWGDEC, sq(f)))); } catch (e) { d = null; }
 	unlink(f);
@@ -548,7 +557,7 @@ function analyze(text, nowrap) {
 // from the router must not be stored silently). Short timeouts keep a call inside rpcd's budget.
 function sub_probe(url) {
 	mkdir(SB);
-	let f = sprintf('%s/.subcheck.%d.%d', SB, time(), rand());
+	let f = sprintf('%s/.subcheck.%s', SB, uniq());
 	let http = trim(run(sprintf("curl -sfL --connect-timeout 4 -m 9 -A 'v2rayNG/1.9.5' -o %s -w '%%{http_code}' %s 2>/dev/null", sq(f), sq(url))));
 	let n = 0;
 	if ((stat(f)?.size ?? 0) > 0) {
@@ -612,7 +621,7 @@ function add(input) {
 		for (let l in split(a.conf, /\r?\n/))
 			if (!match(l, /^[#;][ \t]*[Nn][Aa][Mm][Ee][ \t]*=/)) push(body, l);
 		let dst = AWG_DIR + '/' + a.id + '.conf', tmp = dst + '.tmp.' + time();
-		if (writefile(tmp, join('\n', body) + '\n') == null || !rename(tmp, dst)) {
+		if (!write_secret(tmp, join('\n', body) + '\n') || !rename(tmp, dst)) {
 			unlink(tmp);
 			return { ok: false, code: 'write_failed' };
 		}
