@@ -138,7 +138,9 @@ return view.extend({
 				}).then(function(yes) {
 					if (!yes) return null;
 					return common.call('restore', { data: b64, replace_all: true },
-						{ success: _('Restored. The service starts again with the restored settings.') })
+						// the service off: "Restored." + common's note that it waits for the service
+						{ success: function(r) { return (r && r.daemon === 'not_running') ? common.codeText('restored')
+							: _('Restored. The service starts again with the restored settings.'); } })
 						.then(function(r) { return self.reload().then(function() { return r; }); }, function() { return null; });
 				});
 			});

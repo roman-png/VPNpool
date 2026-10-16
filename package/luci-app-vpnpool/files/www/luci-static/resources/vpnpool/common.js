@@ -690,6 +690,7 @@ FormSaver.prototype = {
 		var self = this;
 		return Promise.all(this.maps.map(function(m) { return m.reset(); })).then(function() {
 			self.clearErrors();
+			dropSticky(self.method);   // the error of a refused save is about values that are gone now
 			self.update();
 		});
 	},
