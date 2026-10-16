@@ -183,7 +183,7 @@ RESTORE_MAX_FILES=500
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x", "id": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x", "id": "x", "file": "x" }, "delete_nodes": { "tags": [], "ids": [] }, "restore_node": { "tag": "x", "id": "x" }, "refilter_node": { "tag": "x", "id": "x" }, "save_node": { "tag": "x", "id": "x" }, "unsave_node": { "tag": "x", "id": "x" }, "activate_saved": { "tag": "x", "id": "x" }, "deactivate_saved": { "tag": "x", "id": "x" }, "node_link": { "tag": "x", "id": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x", "id": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x", "id": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x", "id": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [], "ids": [], "name": "x" }, "tg_test": {}, "set_config": { "settings": {} }, "analyze": { "text": "x" }, "add": { "text": "x", "items": [], "lines": [], "options": {} }, "backup": {}, "restore": { "data": "x", "path": "x", "replace_all": false }, "fav": { "id": "x" }, "unfav": { "id": "x" }, "hide": { "id": "x" }, "unhide": { "id": "x" }, "connect": { "id": "x" }, "auto_select": {}, "sub_set": { "id": "x", "name": "x", "url": "x", "enabled": true, "mode": "x", "pick": [] }, "sub_del": { "id": "x" } }
+{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x", "id": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x", "id": "x", "file": "x" }, "delete_nodes": { "tags": [], "ids": [] }, "restore_node": { "tag": "x", "id": "x" }, "refilter_node": { "tag": "x", "id": "x" }, "save_node": { "tag": "x", "id": "x" }, "unsave_node": { "tag": "x", "id": "x" }, "activate_saved": { "tag": "x", "id": "x" }, "deactivate_saved": { "tag": "x", "id": "x" }, "node_link": { "tag": "x", "id": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x", "id": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x", "id": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x", "id": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [], "ids": [], "name": "x" }, "tg_test": { "token": "x", "chat": "x", "via_proxy": true }, "set_config": { "settings": {} }, "analyze": { "text": "x" }, "add": { "text": "x", "items": [], "lines": [], "options": {} }, "backup": {}, "restore": { "data": "x", "path": "x", "replace_all": false }, "fav": { "id": "x" }, "unfav": { "id": "x" }, "hide": { "id": "x" }, "unhide": { "id": "x" }, "connect": { "id": "x" }, "auto_select": {}, "sub_set": { "id": "x", "name": "x", "url": "x", "enabled": true, "mode": "x", "pick": [] }, "sub_del": { "id": "x" } }
 L
 	;;
 call)
@@ -392,10 +392,26 @@ call)
 		apply_api "node prefer_toggle" "$input"
 		;;
 	tg_test)
-		if [ -z "$(uci -q get vpnpool.main.telegram_token)" ] || [ -z "$(uci -q get vpnpool.main.telegram_chat)" ]; then
-			rep false not_configured; exit 0
-		fi
-		code=$(tg_send "✅ vpnpool: test message" 2>/dev/null)
+		# A test message. {token, chat, via_proxy} = what the settings page has TYPED (not saved
+		# yet); a missing one = the saved value; the masked token as status shows it (<id>:***) =
+		# the saved token; an empty typed value = none. Checked like set_config (bad_token,
+		# bad_chat); the values are only used for this one request, nothing is written.
+		tok=$(uci -q get vpnpool.main.telegram_token); chat=$(uci -q get vpnpool.main.telegram_chat)
+		t_arg() {   # $1=key -> the trimmed value; rc 1 if the key is missing / null
+			printf '%s' "$input" | jq -e --arg k "$1" 'has($k) and .[$k] != null' >/dev/null 2>&1 || return 1
+			printf '%s' "$input" | jq -r --arg k "$1" '.[$k] | tostring' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+		}
+		if v=$(t_arg token); then case "$v" in *'***'*) ;; *) tok=$v ;; esac; fi
+		if v=$(t_arg chat); then chat=$v; fi
+		if v=$(t_arg via_proxy); then case "$v" in true|1) TG_VIA_PROXY=1 ;; *) TG_VIA_PROXY=0 ;; esac; fi
+		[ -n "$tok" ] && [ -n "$chat" ] || { rep false not_configured; exit 0; }
+		e=""   # grep -x checks line by line: a value with a line break is refused first
+		{ [ "$(printf '%s' "$tok" | wc -l)" -eq 0 ] && printf '%s' "$tok" | grep -Eqx '[0-9]+:[A-Za-z0-9_-]+'; } \
+			|| e='"telegram_token":"bad_token"'
+		{ [ "$(printf '%s' "$chat" | wc -l)" -eq 0 ] && printf '%s' "$chat" | grep -Eqx -e '-?[0-9]{1,20}' -e '@[A-Za-z0-9_]{4,64}'; } \
+			|| e="${e:+$e,}\"telegram_chat\":\"bad_chat\""
+		[ -z "$e" ] || { rep false invalid n/a "{\"errors\":{$e}}"; exit 0; }
+		code=$(tg_send "✅ vpnpool: test message" "$tok" "$chat" 2>/dev/null)
 		if [ "$code" = "200" ]; then rep true sent
 		else rep false send_failed n/a "$(jq -nc --arg h "${code:-000}" '{http:$h}')"; fi
 		;;
