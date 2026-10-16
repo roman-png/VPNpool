@@ -31,7 +31,6 @@ let POT = ROOT + '/po/templates/' + DOMAIN + '.pot';
 // Known msgids with a non-BMP character, already in a view before this check existed. The
 // screen packs rewrite these strings; the list may only shrink.
 let NONBMP_KNOWN = {
-	'Preferred node is now set right on the Dashboard — click 📌 on any node to pin it (used while reachable, auto-failover if it dies, switch back on recovery).': true
 };
 
 function walk(dir, out) {
