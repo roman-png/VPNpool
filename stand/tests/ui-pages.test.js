@@ -538,6 +538,13 @@ test('settings: backup download and restore (the router checks first, replacing 
 	await runRestore(true);
 	eq(restores.map(r => !!r.replace_all), [ false, true ], 'yes: check, then replace');
 	ok(calls(P, 'status').length >= 2, 'the page is loaded again after the restore');
+	ok(toastTexts(P).some(t => t.includes('starts again')), 'says the service starts again');
+	// the service is off: no "starts again" (common adds that the change waits for the service)
+	P.env.handlers.restore = (p) => (p.replace_all ? { ok: true, code: 'restored', daemon: 'not_running' }
+		: { ok: false, code: 'confirm_required', daemon: 'n/a', error: 'confirm_required', report: { nodes: 7, subscriptions: 2, saved: 1, awg: 0 } });
+	await runRestore(true);
+	const last = toastTexts(P).filter(t => !t.includes('Nodes:'));
+	ok(last.length === 1 && last[0].startsWith(P.common.CODE_TEXT.restored) && !last[0].includes('starts again'), 'service off: ' + JSON.stringify(last));
 });
 
 test('routing and settings: Revert brings back the loaded values and the panel says so', async (S) => {
@@ -545,11 +552,15 @@ test('routing and settings: Revert brings back the loaded values and the panel s
 		const P = await open(page, S);
 		const k = page === 'routing' ? 'mode.mode' : 'auto.auto_switch';
 		setv(P, k, page === 'routing' ? 'exclude' : '0');
+		P.env.handlers.set_config = () => ({ ok: false, code: 'invalid', daemon: 'n/a', error: 'invalid', errors: { [page === 'routing' ? 'mode' : 'auto_switch']: 'bad_value' } });
+		await clickSave(P);
+		ok(toastTexts(P, 'danger').length === 1 && P.box.querySelectorAll('.vp-field-error-text').length === 1, page + ': positive control: a refused save left its error toast and mark');
 		P.common.currentForm().update();
 		ok(P.box.querySelector('.vp-savebar').classes.has('vp-dirty'), page + ': the panel shows unsaved changes');
 		P.env.D.fire(revertBtn(P), 'click', {}); await P.env.tick(10);
 		eq(P.common.currentForm().changes(), {}, page + ': changes after Revert');
 		ok(!P.box.querySelector('.vp-savebar').classes.has('vp-dirty'), page + ': the panel is clean');
+		eq(toastTexts(P, 'danger').length + P.box.querySelectorAll('.vp-field-error-text').length, 0, page + ': the refused save\'s error toast and marks after Revert');
 	}
 });
 
@@ -609,6 +620,8 @@ const MUTATIONS = [
 	[ 'the form of a page drawn over keeps working', 'common', [ [ 'if (currentForm !== this) return false;', '' ],
 		[ 'try { r = this.maps[i].lookupOption(p[1], p[0], FORM_CONFIG); } catch (e) { r = null; }', 'r = this.maps[i].lookupOption(p[1], p[0], FORM_CONFIG);' ] ], null,
 		[ 'routing: leaving the page asks only while there are unsaved changes', 'settings: leaving the page asks only while there are unsaved changes' ] ],
+	[ 'Revert keeps the error of the refused save', 'common', 'dropSticky(self.method);   // the error of a refused save', '//',
+		[ 'routing and settings: Revert brings back the loaded values and the panel says so' ] ],
 	[ 'an old Telegram test mark stays', 'settings', '\t\tsaver.clearErrors(mine);', '',
 		[ 'settings: the Telegram test sends what is typed (not saved); a masked token = the saved one' ] ],
 	[ 'the Telegram test wipes the marks of a save', 'settings', 'saver.showErrors(e, mine);', 'saver.showErrors(e);',
@@ -625,6 +638,8 @@ const MUTATIONS = [
 		[ 'routing: "A site does not open?" adds the site to your sites (saved with the page)' ] ],
 	[ 'restore without the check', 'settings', "return common.call('restore', { data: b64 }, { handle: [ 'confirm_required' ] }).then(function() {",
 		"return common.call('restore', { data: b64, replace_all: true }, { handle: [ 'confirm_required' ] }).then(function() {",
+		[ 'settings: backup download and restore (the router checks first, replacing needs a yes)' ] ],
+	[ 'restored: "starts again" while the service is off', 'settings', "(r && r.daemon === 'not_running') ? common.codeText('restored')", "false ? common.codeText('restored')",
 		[ 'settings: backup download and restore (the router checks first, replacing needs a yes)' ] ],
 	[ 'time not checked', 'settings', '\t\t\to.validate = timeOk;', '',
 		[ 'settings: a wrong time stops the save before anything is sent' ] ],
