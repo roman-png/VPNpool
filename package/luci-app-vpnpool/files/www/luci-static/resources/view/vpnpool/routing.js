@@ -228,7 +228,7 @@ return view.extend({
 		o = s.option(Hint, 'hint_exc', '');
 		o.hint = _('Your sites go directly, past the VPN.');
 		o.depends('json.mode.mode', 'exclude');
-		o = s.option(form.TextValue, 'domains', _('Sites'), _('One per line, for example example.com. Its subdomains are included.'));
+		o = s.option(form.TextValue, 'domains', _('Sites'), _('One per line, for example example.com. Subdomains are included too.'));
 		o.rows = 6;
 		o.placeholder = 'example.com';
 		o = s.option(Action, 'site_help', _('A site does not open?'));
@@ -251,16 +251,21 @@ return view.extend({
 		o.depends('json.mode.mode', 'exclude');
 		o = s.option(form.Flag, 'adaptive_routing', _('Find blocked sites automatically'),
 			_('The router checks which sites do not open directly and sends them through the VPN, in any mode. They appear in the list below.'));
+		// the router searches only with the SAVED setting: until then, say so instead of a button
+		var adaptiveSaved = !!settings(st).adaptive_routing;
 		o = s.option(Action, 'adaptive_run', '');
 		o.build = function() {
+			if (!adaptiveSaved)
+				return E('p', { 'class': 'vp-hint' }, [ txt(_('Save the page first: then the search can be started right away.')) ]);
 			return E('button', { 'class': 'btn cbi-button cbi-button-action', 'type': 'button', 'click': function(ev) {
 				ev.preventDefault();
-				common.call('run_adaptive', {}, { success: _('The search has started. Found sites appear in the list after a while.') }).catch(function() {});
+				common.call('run_adaptive', {}, { success: _('The search has started. Found sites appear in the list when the page is opened again.') }).catch(function() {});
 			} }, [ txt(_('Search now')) ]);
 		};
 		o.depends('adaptive_routing', '1');
+		// generator: the found sites go through the VPN only while the search is on
 		o = s.option(form.TextValue, 'auto_domains', _('Found automatically'),
-			_('These sites always go through the VPN. Delete a line to remove a site.'));
+			_('While the automatic search is on, these sites go through the VPN in any mode. Delete a line to remove a site.'));
 		o.rows = 4;
 
 		// ---- devices
