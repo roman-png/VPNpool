@@ -37,6 +37,8 @@
 #             masked_values      import: the text carries masked secrets (use restore)
 #             invalid_archive    restore: not a vpnpool backup archive
 #             confirm_required   restore without replace_all:true (the reply has the report)
+#             migration_failed   restore/import: a 1.x configuration could not be moved to the 2.0
+#                                data model (.rolled_back: the state before is back)
 #             write_failed unknown_option unknown_method
 #             (set_option / set_schedule / set_url keep the single field's code instead of
 #              invalid: bad_value too_small too_large bad_time bad_url ...)
@@ -222,9 +224,15 @@ call)
 			rm -rf "$D"; printf '%s' "$CC" | finish n/a; exit 0
 		fi
 		uci -q revert vpnpool
+		cp /etc/config/vpnpool "$D/before" 2>/dev/null
 		if ! uci import vpnpool < "$D/vpnpool" || ! uci commit vpnpool; then rm -rf "$D"; rep false write_failed; exit 0; fi
+		# a 1.x export: to the 2.0 data model; if that fails, the config before comes back (never
+		# a 1.x config the 2.0 daemon can't read, never a false "imported")
+		if ! /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1; then
+			cp "$D/before" /etc/config/vpnpool.tmp.$$ && mv -f /etc/config/vpnpool.tmp.$$ /etc/config/vpnpool
+			rm -rf "$D"; rep false migration_failed n/a '{"rolled_back":true}'; exit 0
+		fi
 		rm -rf "$D"
-		/usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1   # a 1.x export: to the 2.0 data model
 		rep true imported "$(signal_word USR2)"
 		;;
 	conntest)
@@ -541,7 +549,7 @@ call)
 		k=$(printf '%s' "$input" | jq -r '.id // .tag // ""')
 		link=""
 		if [ -n "$k" ]; then
-			R=$(node_resolve "$k") && k=${R%%	*}
+			R=$(ucode /usr/libexec/vpnpool/model.uc resolve-any "$k" 2>/dev/null) && k=${R%%	*}
 			link=$(jq -r --arg i "$k" '[.[] | select(.id == $i) | .link][0] // ""' /tmp/vpnpool/links.json /etc/vpnpool/links.json 2>/dev/null | head -n1)
 			[ -n "$link" ] && [ "$link" != null ] || link=$(jq -r --arg i "$k" '.[$i].link // ""' /etc/vpnpool/favorites.map.json 2>/dev/null)
 		fi
@@ -792,7 +800,16 @@ call)
 		fi
 		rm -rf "$NEW" "$OLD" "$D"
 		chmod 600 /etc/vpnpool/awg/*.conf 2>/dev/null   # the AWG files hold private keys
-		/usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1   # a 1.x backup: to the 2.0 data model (no-op for 2.0)
+		# a 1.x backup: to the 2.0 data model (a no-op for a 2.0 one). If that fails, the state
+		# before the restore comes back from its verified copy: the backup's files out, PRE in.
+		if ! /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1   # a 1.x backup
+		then
+			for f in $(backup_members); do rm -f "/$f"; done
+			rb=false; tar -xzf "$PRE" -C / 2>/dev/null && rb=true
+			uci -q revert vpnpool
+			rep false migration_failed n/a "$(jq -nc --argjson r "$rb" --arg b "$PRE" '{rolled_back:$r, backup:$b}')"
+			exit 0
+		fi
 		# enabled / Telegram may differ now: procd re-reads both instances; then refetch
 		/etc/init.d/vpnpool reload >/dev/null 2>&1
 		rep true restored "$(signal_word USR2)" "{\"report\":$REP}"

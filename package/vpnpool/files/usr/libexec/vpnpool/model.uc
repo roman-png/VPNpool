@@ -6,6 +6,7 @@
 //   ucode model.uc fav-active <links> <json>  the favourites that join the pool from the archive
 //                                          (active): their links -> <links>, outbounds -> <json>
 //   ucode model.uc resolve <id|tag>        "<id>\t<tag>" of a node of the last build (exit 1: none)
+//   ucode model.uc resolve-any <id|tag>    the same, a favourite outside the pool included
 //   ucode model.uc snapshot <max>          stdin = the clash /proxies answer: the <max> fastest
 //                                          working nodes become automatic favourites (the user's
 //                                          own favourites are never touched)
@@ -34,10 +35,11 @@ if (cmd == 'subs') {
 	}
 	writefile(ARGV[1], length(links) ? join('\n', links) + '\n' : '');
 	writefile(ARGV[2], length(obs) ? sprintf('%J\n', obs) : '');
-} else if (cmd == 'resolve') {
+} else if (cmd == 'resolve' || cmd == 'resolve-any') {
+	// resolve: a node of the last build; resolve-any: a favourite outside the pool too
 	let r = node_lookup(ARGV[1]);
-	if (!r || !r.node) exit(1);
-	printf('%s\t%s\n', r.id, r.tag);
+	if (!r || (!r.node && cmd == 'resolve')) exit(1);
+	printf('%s\t%s\n', r.id, r.tag ?? '');
 } else if (cmd == 'snapshot') {
 	let max = int(ARGV[1] ?? 20) || 20;
 	let p = null;
@@ -51,14 +53,20 @@ if (cmd == 'subs') {
 		if (d > 0) push(alive, { n: n, d: d });
 	}
 	alive = sort(alive, (a, b) => a.d - b.d);
+	// nothing answers (the provider is down, sing-box just restarted, the subscription expired):
+	// the fallback set is kept as it is — that is the moment it exists for (1.x did the same)
+	if (!length(alive)) { print('0\n'); exit(0); }
 	let fav = fav_read(), now = time(), kept = 0;
-	// the automatic entries are replaced wholesale; the user's own ones stay as they are
-	for (let id in keys(fav)) if (fav[id]?.auto === true) delete fav[id];
+	// the automatic entries are replaced wholesale; the user's own ones stay as they are, and so
+	// does an automatic one the user connected / put into the pool (active)
+	for (let id in keys(fav)) if (fav[id]?.auto === true && fav[id]?.active !== true) delete fav[id];
 	for (let x in alive) {
 		if (kept >= max) break;
 		let id = x.n.id;
 		if (fav[id] != null) continue;
-		let e = { tag: x.n.tag, link: link_of(id), active: false, auto: true, at: now };
+		let p0 = (type(x.n.peers) == 'array') ? x.n.peers[0] : null;
+		let e = { tag: x.n.tag, link: link_of(id), active: false, auto: true, at: now,
+			type: x.n.type, server: x.n.server ?? p0?.address, port: x.n.server_port ?? p0?.port };
 		if (e.link == null && x.n.type != 'awg' && x.n.type != 'wireguard') {
 			let o = { ...x.n };
 			delete o.id; for (let k in keys(o)) if (substr(k, 0, 1) == '_') delete o[k];

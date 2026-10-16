@@ -150,3 +150,16 @@ expect_eq "exit code 143" "$KRC" 143
 expect_jq "both sources interrupted, the last success kept" "$_fs" \
 	".[\"$PRI\"].result==\"interrupted\" and .[\"$EXT\"].result==\"interrupted\" and (.[\"$PRI\"].last_ok_at|type)==\"number\""
 end
+
+# ---- review V8: an answer above the size limit is not parsed (a public list on a 16 MB router) ----
+reset_state; two_subs; uci set vpnpool.main.fetch_max_kb=16; uci commit vpnpool
+fetch_setup 200 200; sh "$FETCH" >/dev/null 2>&1                      # cached copies first (small)
+i=0; : > "$FXF/big.txt"
+while [ $i -lt 400 ]; do printf 'vless://%s@203.0.113.%d:443?security=tls&sni=a.example#Big%d\n' "$U" $((i % 250)) "$i" >> "$FXF/big.txt"; i=$((i + 1)); done
+mock_on; mock_rule "GET $PRI" 200 "$FXF/primary.b64" "$FXF/primary.hdr"; mock_rule "GET $EXT" 200 "$FXF/big.txt"
+sh "$FETCH" > "$FXF/logbig" 2>&1
+begin "fetch/oversized-answer-not-used"
+expect_true "control: the answer is above 16 KiB" [ "$(wc -c < "$FXF/big.txt")" -gt 16384 ]
+expect_eq "the extra subscription served from its cached copy (1 node), not the big answer" "$(pool_tags)" '["Ext1","Pri1","Pri2"]'
+expect_true "the log says why" grep -q 'more than the limit' "$FXF/logbig"
+end

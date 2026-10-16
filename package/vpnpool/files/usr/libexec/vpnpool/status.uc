@@ -309,7 +309,12 @@ function intopt(name, def) { let v = '' + o(name, ''); return match(v, /^[0-9]+$
 let token = o('telegram_token', '');
 // the 1.x -> 2.0 migration (migrate.sh): what it could not match stays listed here
 let mig = read_json(CONF + '/migration.json', null);
-let migration = (type(mig) == 'object') ? { at: mig.at ?? null, from: mig.from ?? null, backup: mig.backup ?? null,
+// state: done | failed (the config is still 1.x: the daemon is not started, migrate.sh ->
+// migration_failed.json {at, reason}) | null (a 2.0 install, nothing was migrated)
+let migfail = read_json(SB + '/migration_failed.json', null);
+let migration = (o('schema', '') != '2' && type(migfail) == 'object')
+	? { state: 'failed', reason: migfail.reason ?? null, at: migfail.at ?? null, unmatched: [] }
+	: (type(mig) == 'object') ? { state: 'done', at: mig.at ?? null, from: mig.from ?? null, backup: mig.backup ?? null,
 	// a link-valued item is shown as scheme://host/*** (it carries the node's credential)
 	unmatched: (type(mig.unmatched) == 'array') ? map(mig.unmatched, (x) => ({ store: x?.store,
 		value: (type(x?.value) == 'string' && index(x.value, '://') >= 0) ? mask_url(x.value) : (x?.value ?? null) })) : [] } : null;

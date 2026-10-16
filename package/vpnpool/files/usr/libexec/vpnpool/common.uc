@@ -145,10 +145,11 @@ function node_lookup(key, nodes) {
 	nodes ??= live_nodes();
 	for (let n in nodes) if (n.id == key) return { id: n.id, tag: n.tag, node: n };
 	for (let n in nodes) if (n.tag == key && n.id) return { id: n.id, tag: n.tag, node: n };
-	if (is_id(key)) {
-		let f = fav_read()[key];
-		if (type(f) == 'object') return { id: key, tag: f.tag, node: null, fav: f };
-	}
+	let fav = fav_read();
+	if (is_id(key) && type(fav[key]) == 'object') return { id: key, tag: fav[key].tag, node: null, fav: fav[key] };
+	// the older screens name a favourite outside the pool by its tag (status saved_inactive)
+	for (let id in sort(keys(fav)))
+		if (type(fav[id]) == 'object' && fav[id].tag == key) return { id: id, tag: key, node: null, fav: fav[id] };
 	return null;
 }
 // link of a node by id: links.json of the last build, else the favourites archive

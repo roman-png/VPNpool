@@ -637,3 +637,11 @@ expect_true "decoder finishes within 20s (rc=$_grc)" [ "$_grc" -ne 124 ]
 expect_true "non-zero exit or ok:false" sh -c '[ "$1" -ne 0 ] && [ "$1" -ne 124 ] || jq -e ".ok==false" "$2"' _ "$_grc" "$T_STATE/parser/garbage.out"
 expect_true "no [Interface] produced" sh -c '! grep -q Interface "$1"' _ "$T_STATE/parser/garbage.out"
 end
+
+# review M4: in a "pick" input a node without an id (an AWG endpoint of a JSON source without a
+# private key) can't have been picked — it is skipped, not taken
+printf '[{"type":"wireguard","tag":"NoKey","address":["10.0.0.2/32"],"peers":[{"address":"198.51.100.70","port":51820,"public_key":"SrvPUBFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0=","allowed_ips":["0.0.0.0/0"]}]}]\n' > "$T_STATE/parser/nokey.json"
+begin "parser/pick-skips-a-node-without-id"
+expect_jq "control: without --pick the node is taken" "$(ucode "$PARSER" "$T_STATE/parser/nokey.json" 2>/dev/null)" 'length==1'
+expect_jq "with --pick: not taken" "$(ucode "$PARSER" --pick "$T_STATE/parser/pick.ids" "$T_STATE/parser/nokey.json" 2>/dev/null)" 'length==0'
+end

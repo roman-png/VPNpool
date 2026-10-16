@@ -1067,7 +1067,70 @@ expect_jq "restored" "$R" '.ok==true and .code=="restored"'
 expect_eq "schema 2" "$(uci -q get vpnpool.main.schema)" 2
 expect_eq "4 subscription sections" "$(subs_tsv | wc -l)" 4
 expect_eq "no 1.x option left" "$(uci -q show vpnpool.main | gcount -e subscription_url -e extra_sub -e '\.source=' -e selected_node -e saved_node)" 0
-expect_true "favourites from the saved maps" jq -e 'length==3' /etc/vpnpool/favorites.map.json
+expect_true "favourites: the saved maps, the imports, the saved_node-only link" jq -e 'length==6' /etc/vpnpool/favorites.map.json
+end
+
+# ---- review stage6 ----
+# B2: a 1.x backup / export whose migration fails: ok:false migration_failed, the state before back
+reset_state; daemon_start
+uci set vpnpool.main.failover_interval=71; uci commit vpnpool; cp /etc/config/vpnpool "$FXR/pre-mig.cfg"
+mkdir -p "$FXR/oldf/etc/config"; cp "$T_DIR/fixtures/migrate/141/etc-config-vpnpool" "$FXR/oldf/etc/config/vpnpool"
+tar -czf "$FXR/oldf.tgz" -C "$FXR/oldf" etc/config/vpnpool
+rm -rf /etc/vpnpool/backup-1.x; : > /etc/vpnpool/backup-1.x          # the migration's backup can't be written
+rcall restore "$(jq -nc --arg d "$(base64 -w0 "$FXR/oldf.tgz")" '{data:$d, replace_all:true}')"
+begin "rpcd/restore/1x-migration-failure-rolled-back"
+expect_jq "migration_failed, rolled back" "$R" '.ok==false and .code=="migration_failed" and .rolled_back==true'
+expect_eq "the config before is back" "$(uci -q get vpnpool.main.failover_interval)/$(uci -q get vpnpool.main.schema)" 71/2
+end
+rcall import "$(jq -nc --rawfile c "$T_DIR/fixtures/migrate/141/etc-config-vpnpool" '{config:$c}')"
+begin "rpcd/import/1x-migration-failure-rolled-back"
+expect_jq "migration_failed, rolled back" "$R" '.ok==false and .code=="migration_failed" and .rolled_back==true'
+expect_true "the config before is back" cmp -s /etc/config/vpnpool "$FXR/pre-mig.cfg"
+end
+rm -f /etc/vpnpool/backup-1.x
+
+# V6: the older screens act on a favourite OUTSIDE the pool by its tag (status saved_inactive)
+reset_state; daemon_start
+echo '{"aaaaaaaaaaaa":{"tag":"Gone-Fav","link":"vless://9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce@203.0.113.99:443?security=tls#Gone-Fav","active":false,"auto":false}}' > /etc/vpnpool/favorites.map.json
+rcall node_link '{"tag":"Gone-Fav"}'
+begin "rpcd/node_link/favourite-outside-the-pool-by-tag"
+expect_jq "its link" "$R" '.ok==true and (.link|startswith("vless://"))'
+end
+rcall activate_saved '{"tag":"Gone-Fav"}'
+begin "rpcd/activate_saved/favourite-outside-the-pool-by-tag"
+expect_jq "saved" "$R" '.ok==true and .code=="saved"'
+expect_true "active now" jq -e '.aaaaaaaaaaaa.active==true' /etc/vpnpool/favorites.map.json
+end
+rcall unsave_node '{"tag":"Gone-Fav"}'
+begin "rpcd/unsave_node/favourite-outside-the-pool-by-tag"
+expect_jq "deleted" "$R" '.ok==true and .code=="deleted"'
+expect_true "gone" jq -e '.==({})' /etc/vpnpool/favorites.map.json
+end
+
+# V7: deleting a subscription node = hiding it: the preference goes too
+reset_state; daemon_start; fx_nodes; uci set vpnpool.main.preferred_node="$ID2"; uci commit vpnpool
+rcall delete_node '{"tag":"Node2"}'
+begin "rpcd/delete_node/subscription-node-clears-the-preferred-node"
+expect_jq "deleted" "$R" '.ok==true'
+expect_eq "no preferred node" "$(uci -q get vpnpool.main.preferred_node)" ''
+end
+
+# Doubt 3 (the integrator's assumption): a deleted subscription's favourites stay in the pool
+reset_state; daemon_start; fx_nodes; sub_section sp 'https://sub.example.com/s'
+jq -nc --arg i "$ID2" --arg l "$L2" '{($i): {tag:"Node2", link:$l, active:false, auto:true}}' > /etc/vpnpool/favorites.map.json
+rcall sub_del '{"id":"sp"}'
+begin "rpcd/sub_del/its-favourites-stay-in-the-pool"
+expect_jq "deleted, one favourite kept" "$R" '.ok==true and .code=="deleted" and .favorites_kept==1'
+expect_true "the favourite joins the pool from the archive (active), the user's now (not automatic)" jq -e --arg i "$ID2" '.[$i].active==true and .[$i].auto==false' /etc/vpnpool/favorites.map.json
+end
+
+# V2: "Connect" / activate turn an automatic favourite into the user's own
+reset_state; daemon_start; fx_nodes; mock_on; mock_rule 'PUT http://127.0.0.1:9091/proxies/proxy' 204
+jq -nc --arg i "$ID2" --arg l "$L2" '{($i): {tag:"Node2", link:$l, active:false, auto:true}}' > /etc/vpnpool/favorites.map.json
+rcall connect "$(jq -nc --arg i "$ID2" '{id:$i}')"
+begin "rpcd/connect/automatic-favourite-becomes-the-users"
+expect_jq "applied" "$R" '.ok==true and .code=="applied"'
+expect_true "auto:false" jq -e --arg i "$ID2" '.[$i].auto==false' /etc/vpnpool/favorites.map.json
 end
 
 # ---------------- coverage: ACL <-> rpcd list <-> this suite ----------------

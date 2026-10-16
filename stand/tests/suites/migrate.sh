@@ -14,8 +14,13 @@ mig_setup() {   # a 1.4.1 router: config + /etc/vpnpool + the RAM node list of t
 	mkdir -p /etc/vpnpool/awg /tmp/vpnpool
 	for f in links.json saved.map.json snapshot.map.json imported.map.json unlock.map.json sub.expire sub.usage; do cp "$FXM/$f" /etc/vpnpool/; done
 	cp "$FXM"/awg/*.conf /etc/vpnpool/awg/
+	mkdir -p /etc/vpnpool/sources_cache; cp "$FXM"/sources_cache/*.raw /etc/vpnpool/sources_cache/
 	cp "$FXM/nodes.json" /tmp/vpnpool/nodes.json
 }
+skey() { printf '%s' "$1" | md5sum | cut -c1-12; }
+# everything of the config the migration must NOT touch: uci show minus the stores it moves (and
+# minus what it adds) — the routing, ports, Telegram, schedule, clients, kill-switch ...
+kept_cfg() { uci -q show vpnpool | grep -v -e '^vpnpool\.main\.\(subscription_url\|extra_sub\|source\|imported_node\|saved_node\|active_saved\|excluded_node\|selected_node\|subscription_ua\|singbox_config\|preferred_node\|auto_member\|keep_auto\|hidden\|manual_node\|schema\|probe_ua\)=' -e '^vpnpool\.sub_'; }
 # id of a link / of a .conf, by the 2.0 parser (what every store must hold after the migration)
 lid() { printf '%s\n' "$1" > "$FXT/one.links"; ucode /usr/libexec/vpnpool/parser.uc --with-id "$FXT/one.links" 2>/dev/null | jq -r '.[0].id // ""'; }
 cid() { ucode /usr/libexec/vpnpool/parser.uc --with-id "$1" 2>/dev/null | jq -r '.[0].id // ""'; }
@@ -28,6 +33,7 @@ ID_DE=$(lid "$L_DE"); ID_NL=$(lid "$L_NL"); ID_NL2=$(lid "$L_NL2"); ID_FREE=$(li
 ID_BAD=$(lid 'vless://11111111-2222-4333-8444-555555555507@203.0.113.17:443?security=tls&sni=sub.example#Sub-Bad')
 ID_JSON=$(jq -c '[.[1]]' "$FXM/nodes.json" > "$FXT/j.json"; ucode /usr/libexec/vpnpool/parser.uc --with-id "$FXT/j.json" 2>/dev/null | jq -r '.[0].id')
 ID_AWG=$(cid "$FXM/awg/0a1b2c3d4e5f.conf")
+ID_ORPH=$(lid "$L_ORPH"); L_UCI='vless://11111111-2222-4333-8444-555555555511@203.0.113.21:443?security=tls&sni=sub.example#Only-In-Uci'; ID_UCI=$(lid "$L_UCI")
 
 begin "migrate/fixture-is-a-1x-config"   # positive control: the fixture holds what is migrated
 mig_setup
@@ -39,7 +45,7 @@ expect_true "Sub-NL and Sub-NL #2 are different nodes" [ "$ID_NL" != "$ID_NL2" ]
 end
 
 mig_setup
-cp /etc/config/vpnpool "$FXT/before.cfg"
+cp /etc/config/vpnpool "$FXT/before.cfg"; kept_cfg > "$FXT/kept.before"
 sh "$MIG" > "$FXT/run1.out" 2>&1; MRC=$?
 MJ=$(cat /etc/vpnpool/migration.json 2>/dev/null)
 begin "migrate/runs-and-journals"
@@ -69,15 +75,31 @@ expect_eq "the pick subscription takes the imported node by id" "$(uci -q get "v
 expect_jq "the 1.x quota / expiry of the primary became its meta" "$(cat /etc/vpnpool/subs.meta.json)" \
 	"(.[\"$(subs_tsv | head -n1 | cut -f1)\"] | .expire==1893456000 and .upload==100 and .download==200 and .total==1000000)"
 end
-begin "migrate/imported-without-source-becomes-manual"
-expect_eq "manual nodes: the user's own + the orphan import" "$(uci -q get vpnpool.main.manual_node | tr ' ' '\n')" "$(printf '%s\n%s' "$L_OWN" "$L_ORPH")"
-end
 FAV=$(cat /etc/vpnpool/favorites.map.json 2>/dev/null)
+begin "migrate/imported-nodes-become-favourites-in-the-pool"
+expect_eq "manual nodes: the user's own only" "$(uci -q get vpnpool.main.manual_node)" "$L_OWN"
+expect_jq "both imports (the one of a source, the orphan): favourites WITH the link, in the pool" "$FAV" \
+	".[\"$ID_FREE\"].link==\"$L_FREE\" and .[\"$ID_FREE\"].active==true and .[\"$ID_FREE\"].auto==false and .[\"$ID_ORPH\"].link==\"$L_ORPH\" and .[\"$ID_ORPH\"].active==true"
+end
 begin "migrate/saved-nodes-become-favourites"
 expect_jq "saved (by hand), snapshot (automatic), active saved (in the pool from the archive) — by id with the link" "$FAV" \
-	"length==3 and .[\"$ID_DE\"].auto==false and .[\"$ID_DE\"].active==false and .[\"$ID_DE\"].link==\"$L_DE\" and .[\"$ID_NL\"].auto==true and .[\"$ID_OLD\"].active==true and .[\"$ID_OLD\"].tag==\"Old-Saved\""
+	".[\"$ID_DE\"].auto==false and .[\"$ID_DE\"].active==false and .[\"$ID_DE\"].link==\"$L_DE\" and .[\"$ID_NL\"].auto==true and .[\"$ID_OLD\"].active==true and .[\"$ID_OLD\"].tag==\"Old-Saved\""
+expect_jq "a saved_node link no map has: a favourite too, not dropped" "$FAV" ".[\"$ID_UCI\"].link==\"$L_UCI\" and .[\"$ID_UCI\"].active==false"
+expect_jq "6 favourites in all" "$FAV" 'length==6'
 expect_jq "with what the screens show" "$FAV" ".[\"$ID_DE\"].server==\"203.0.113.14\" and .[\"$ID_DE\"].type==\"vless\""
 expect_eq "owner-only (links are credentials)" "$(ls -ln /etc/vpnpool/favorites.map.json | cut -c1-10)" -rw-------
+end
+begin "migrate/1x-cache-moves-to-the-subscriptions"
+expect_true "000.raw -> the primary's own copy" cmp -s "/etc/vpnpool/sources_cache/s-$(skey 'https://sub.example.com/sub/TOKENPRIMARY').raw" "$FXM/sources_cache/000.raw"
+expect_true "001.raw -> the first extra's own copy" cmp -s "/etc/vpnpool/sources_cache/s-$(skey 'https://extra.example.com/list/TOKENEXTRA').raw" "$FXM/sources_cache/001.raw"
+end
+begin "migrate/subscription-ua-first-in-the-client-list"
+expect_eq "probe_ua" "$(uci -q get vpnpool.main.probe_ua | cut -d' ' -f1-2)" 'MyPanelClient/2.1 v2rayNG/1.9.5'
+end
+kept_cfg > "$FXT/kept.after"
+begin "migrate/everything-else-byte-for-byte"
+expect_true "control: the routing / ports / Telegram / schedule / clients are in it" sh -c 'grep -q "client_dev=" "$1" && grep -q "telegram_token=" "$1" && grep -q "sched_off=" "$1" && grep -q "auto_domain=" "$1" && grep -q "killswitch=.1" "$1" && [ $(wc -l < "$1") -ge 45 ]' _ "$FXT/kept.before"
+expect_true "the same after the migration" cmp -s "$FXT/kept.before" "$FXT/kept.after"
 end
 begin "migrate/excluded-becomes-hidden"
 expect_eq "hidden = the excluded node's id" "$(uci -q get vpnpool.main.hidden)" "$ID_BAD"
@@ -103,7 +125,7 @@ begin "migrate/unmatched-kept-and-reported"
 expect_jq "listed: the unknown tag of two stores, the unreadable AWG file" "$MJ" \
 	'([.unmatched[] | .store + ":" + .value] | sort) == ["auto_member:Ghost-Node","awg_file:5f4e3d2c1b0a.conf","unlock:Ghost-Node"]'
 rcall status
-expect_jq "status shows them" "$R" '(.migration.unmatched|length)==3 and .migration.from=="1.x"'
+expect_jq "status shows them" "$R" '(.migration.unmatched|length)==3 and .migration.from=="1.x" and .migration.state=="done"'
 end
 begin "migrate/1x-leftovers-gone"
 expect_eq "no 1.x option" "$(uci -q show vpnpool.main | gcount -e '\.subscription_url=' -e '\.extra_sub=' -e '\.source=' -e '\.imported_node=' -e '\.saved_node=' -e '\.active_saved=' -e '\.excluded_node=' -e '\.selected_node=' -e '\.subscription_ua=' -e '\.singbox_config=')" 0
@@ -122,26 +144,36 @@ expect_eq "one backup" "$(ls /etc/vpnpool/backup-1.x/*.tar.gz | wc -l)" 1
 expect_eq "the journal has no second start" "$(gcount 'start: 1.x' /etc/vpnpool/migrate.log)" 1
 end
 
-# the 2.0 pool from the migrated config: the subscriptions' fetched copies + the user's nodes
+# the 2.0 pool from the migrated config: the primary's fetched copy + the user's nodes; the
+# public list of the imported node does NOT answer (it never had a cache: 1.x did not fetch it)
 mkdir -p /tmp/vpnpool/sources
-skey() { printf '%s' "$1" | md5sum | cut -c1-12; }
 printf '%s\n%s\n%s\n%s\n' "$L_DE" "$L_NL" "$L_NL2" 'vless://11111111-2222-4333-8444-555555555507@203.0.113.17:443?security=tls&sni=sub.example#Sub-Bad' \
 	> "/tmp/vpnpool/sources/s-$(skey 'https://sub.example.com/sub/TOKENPRIMARY').raw"
-printf '%s\n%s\n' "$L_FREE" 'vless://11111111-2222-4333-8444-555555555510@203.0.113.20:443?security=tls&sni=free.example#Free-2' \
-	> "/tmp/vpnpool/sources/s-$(skey 'https://free.example.org/list.txt').raw"
 mock_on
 run_with_timeout 120 sh /usr/libexec/vpnpool/build.sh > "$FXT/build.out" 2>&1; BRC=$?
 rcall status
 begin "migrate/the-migrated-config-builds"
 expect_eq "build.sh exit code" "$BRC" 0
-expect_jq "the pool: the subscription (Sub-Bad hidden), the picked Free-1 only, the user's nodes, the active favourite" \
+expect_jq "the pool: the subscription (Sub-Bad hidden), the imports (their list is down), the user's nodes, the active favourite" \
 	"$(cat /tmp/vpnpool/nodes.json)" 'map(.tag) | sort == (["Free-1","My-Own","Old-Saved","Orphan-Import","Sub-DE","Sub-NL","Sub-NL #2"] | sort)'
+expect_jq "the import lives from its link (a favourite), not from the list" "$(cat /tmp/vpnpool/nodes.json)" 'map(select(.tag=="Free-1"))[0]._src=="fav"'
 expect_jq "the AWG node under its new name waits for the engine (stock sing-box here)" "$(cat /tmp/vpnpool/deferred.json)" \
 	"map(select(.id==\"$ID_AWG\"))[0] | .tag==\"198.51.100.61:443\" and .reason==\"engine_missing\""
 expect_jq "the preferred node is 'Sub-NL #2' again" "$R" '.preferred.tag=="Sub-NL #2" and .preferred.in_pool==true and .settings.preferred_node=="Sub-NL #2"'
 expect_jq "status: the hidden one by name, favourites, the subscriptions" "$R" \
-	'(.hidden[0].tag=="Sub-Bad") and (.favorites|length)==3 and (.subscriptions|length)==4 and .subscriptions[0].expire==1893456000'
+	'(.hidden[0].tag=="Sub-Bad") and (.favorites|length)==6 and (.subscriptions|length)==4 and .subscriptions[0].expire==1893456000'
 expect_true "sing-box check accepts the config" sing-box check -c /tmp/vpnpool/sing-box.json
+end
+
+# the first fetch after the upgrade: the primary does not answer, the extra one does — the primary
+# keeps its nodes from the 1.x cache the migration moved to its own copy
+mock_on; mock_rule 'GET https://sub.example.com/sub/TOKENPRIMARY' 500
+printf '%s\n' 'vless://11111111-2222-4333-8444-555555555513@203.0.113.23:443?security=tls&sni=extra.example#Extra-New' > "$FXT/extra.txt"
+mock_rule 'GET https://extra.example.com/list/TOKENEXTRA' 200 "$FXT/extra.txt"
+sh /usr/libexec/vpnpool/fetch.sh > "$FXT/fetch.out" 2>&1
+begin "migrate/first-fetch-primary-down-keeps-its-nodes"
+expect_true "the primary served from the moved cache" cmp -s "/tmp/vpnpool/sources/s-$(skey 'https://sub.example.com/sub/TOKENPRIMARY').raw" "$FXM/sources_cache/000.raw"
+expect_true "the extra one fetched (positive control)" grep -q 'Extra-New' "/tmp/vpnpool/sources/s-$(skey 'https://extra.example.com/list/TOKENEXTRA').raw"
 end
 
 # interrupted after the files, before the commit (power loss): the next run gives the same result
@@ -151,12 +183,39 @@ sh "$MIG" >/dev/null 2>&1
 cp "$FXM/etc-config-vpnpool" /etc/config/vpnpool                 # the commit "never happened"
 for f in saved.map.json snapshot.map.json imported.map.json unlock.map.json sub.expire sub.usage; do cp "$FXM/$f" /etc/vpnpool/; done
 cp "$FXM/awg/0a1b2c3d4e5f.conf" /etc/vpnpool/awg/                 # the rename's old name back too
+ls /etc/vpnpool/backup-1.x/vpnpool-1.x-*.tar.gz > /etc/vpnpool/backup-1.x/.in-progress   # the run "did not finish"
 sh "$MIG" > "$FXT/run3.out" 2>&1; MRC3=$?
 begin "migrate/rerun-after-an-interruption"
 expect_eq "exit code" "$MRC3" 0
 expect_true "same config as one clean run" cmp -s /etc/config/vpnpool "$FXT/single.cfg"
 expect_eq "the AWG node once (the duplicate old name removed)" "$(ls /etc/vpnpool/awg/ | grep -c "^$ID_AWG.conf$") $(ls /etc/vpnpool/awg/0a1b2c3d4e5f.conf 2>/dev/null | wc -l)" '1 0'
 expect_eq "the first backup kept (the true 1.x state)" "$(ls /etc/vpnpool/backup-1.x/*.tar.gz | wc -l)" 1
+expect_true "the mark of the unfinished run is gone" [ ! -e /etc/vpnpool/backup-1.x/.in-progress ]
+end
+# a 1.x config put back AFTER a finished migration (a restore): a backup of ITS state, not the old one
+sleep 1; cp "$FXM/etc-config-vpnpool" /etc/config/vpnpool
+sh "$MIG" > "$FXT/run3b.out" 2>&1
+begin "migrate/second-1x-config-gets-its-own-backup"
+expect_eq "two backups" "$(ls /etc/vpnpool/backup-1.x/*.tar.gz | wc -l)" 2
+expect_jq "the report names the new one" "$(cat /etc/vpnpool/migration.json)" "(.backup) == \"$(ls -t /etc/vpnpool/backup-1.x/*.tar.gz | head -n1)\""
+end
+# the same key twice with DIFFERENT settings: the second file is not deleted, it is reported
+mig_setup
+cp "$FXM/awg/0a1b2c3d4e5f.conf" "/etc/vpnpool/awg/$ID_AWG.conf"; sed -i 's/^Jc = 4$/Jc = 5/' "/etc/vpnpool/awg/$ID_AWG.conf"
+sh "$MIG" >/dev/null 2>&1
+begin "migrate/awg-same-key-other-settings-kept"
+expect_true "control: the two files differ" sh -c '! cmp -s "$1" "$2"' _ "/etc/vpnpool/awg/$ID_AWG.conf" "$FXM/awg/0a1b2c3d4e5f.conf"
+expect_true "the 1.x file kept" [ -f /etc/vpnpool/awg/0a1b2c3d4e5f.conf ]
+expect_jq "and reported" "$(cat /etc/vpnpool/migration.json)" '[.unmatched[] | select(.store=="awg_file") | .value] | index("0a1b2c3d4e5f.conf") != null'
+end
+# a run that waits for another one (init.d and the package scripts meet) instead of going on
+mig_setup
+sleep 3 & HOLD=$!; echo "$HOLD" > /tmp/vpnpool/.migrate.lock
+sh "$MIG" > "$FXT/run5.out" 2>&1; MRC5L=$?
+begin "migrate/waits-for-the-other-run"
+expect_true "control: the holder was alive when it started" [ -n "$HOLD" ]
+expect_eq "exit code" "$MRC5L" 0
+expect_eq "migrated after the other one ended" "$(uci -q get vpnpool.main.schema)" 2
 end
 
 # no backup -> no change
@@ -168,6 +227,17 @@ expect_eq "exit code 1" "$MRC4" 1
 expect_true "the config untouched" cmp -s /etc/config/vpnpool "$FXM/etc-config-vpnpool"
 expect_true "the 1.x maps untouched" cmp -s /etc/vpnpool/saved.map.json "$FXM/saved.map.json"
 expect_true "journal says why" grep -q 'FAILED: the backup' /etc/vpnpool/migrate.log
+end
+rcall status
+begin "migrate/failure-visible-in-status"
+expect_jq "migration failed, with the reason" "$R" '.migration.state=="failed" and .migration.reason=="backup_failed"'
+end
+# init.d start with the migration failing: the 2.0 daemon is NOT started on the 1.x config
+INITD="$REPO/package/vpnpool/files/etc/init.d/vpnpool"
+sh -c "procd_open_instance() { echo \"open \$1\" >> $FXT/procd.log; }; procd_set_param() { :; }; procd_close_instance() { :; }; . /lib/functions.sh; . $INITD; start_service" >/dev/null 2>&1
+begin "migrate/failed-migration-daemon-not-started"
+expect_eq "control: still 1.x, enabled" "$(uci -q get vpnpool.main.schema)/$(uci -q get vpnpool.main.enabled)" "/1"
+expect_eq "no daemon instance opened" "$(gcount '^open vpnpoold' "$FXT/procd.log")" 0
 end
 # the package's uci-defaults script: its exit code is the migration's (default_postinst removes it
 # only on 0, so a failed run is tried again at the next boot)
@@ -181,10 +251,11 @@ expect_eq "rc 0 once it ran" "$URC2" 0
 expect_eq "migrated" "$(uci -q get vpnpool.main.schema)" 2
 end
 # init.d start runs it too (a config sysupgrade kept, ...); on schema 2 it returns at once
-mig_setup
-sh -c ". /lib/functions.sh; . /lib/functions/procd.sh 2>/dev/null; . $REPO/package/vpnpool/files/etc/init.d/vpnpool; start_service" >/dev/null 2>&1
+mig_setup; : > "$FXT/procd.log"
+sh -c "procd_open_instance() { echo \"open \$1\" >> $FXT/procd.log; }; procd_set_param() { :; }; procd_close_instance() { :; }; . /lib/functions.sh; . $INITD; start_service" >/dev/null 2>&1
 begin "migrate/init-d-start-migrates"
 expect_eq "schema 2" "$(uci -q get vpnpool.main.schema)" 2
+expect_eq "then the daemon starts (positive control of the case above)" "$(gcount '^open vpnpoold' "$FXT/procd.log")" 1
 end
 
 # a 2.0 config (the package default) is left alone: no backup, no journal

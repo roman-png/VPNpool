@@ -27,7 +27,7 @@ while [ $# -gt 0 ]; do
 		-x|--proxy) proxy="$2"; shift ;;
 		-X|--request) method="$2"; shift ;;
 		-d|--data|--data-raw|--data-binary|--data-urlencode|-F|--form) hasdata=1; shift ;;
-		-A|--user-agent|-H|--header|-m|--max-time|--connect-timeout|-e|--referer|-u|--user|-b|--cookie|-c|--cookie-jar|--retry|-r|--range|--limit-rate|--resolve|--interface) shift ;;
+		-A|--user-agent|-H|--header|-m|--max-time|--connect-timeout|-e|--referer|-u|--user|-b|--cookie|-c|--cookie-jar|--retry|-r|--range|--limit-rate|--resolve|--interface|--max-filesize) shift ;;
 		-f|--fail) fail=1 ;;
 		-*) case "$1" in -*f*) case "$1" in --*) ;; *) fail=1 ;; esac ;; esac ;;   # e.g. -sfL
 		*) nurl=$((nurl + 1)); eval "url_$nurl=\$1" ;;
