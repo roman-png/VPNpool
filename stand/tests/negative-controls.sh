@@ -335,12 +335,13 @@ ctl uitext-common-js-technical uitext fail 'uitext/real-app-no-new-violations ;u
 # ui0: po completeness (ui-i18n.sh check)
 ctl i18n-untranslated ui-i18n fail 'FAIL untranslated ru: More actions' \
 	package/luci-app-vpnpool/po/ru/vpnpool.po 'msgstr "Ещё действия"' 'msgstr ""'
-ctl i18n-new-string-not-in-po ui-i18n fail 'FAIL pot-missing-msgid A new string;FAIL po-missing-msgid ru: A new string;FAIL pot-stale More actions;FAIL po-obsolete ru: More actions' \
-	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "_('More actions')" "_('A new string')"
+# (ui1: "More actions" is in nodes.js too now, so its msgid stays; the needle is a msgid only common.js has)
+ctl i18n-new-string-not-in-po ui-i18n fail 'FAIL pot-missing-msgid A new string;FAIL po-missing-msgid ru: A new string;FAIL pot-stale Are you sure?;FAIL po-obsolete ru: Are you sure?' \
+	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "_('Are you sure?')" "_('A new string')"
 ctl i18n-placeholder-mismatch ui-i18n fail 'FAIL placeholders ru: "Connected to %s."' \
 	package/luci-app-vpnpool/po/ru/vpnpool.po 'msgstr "Подключено к %s."' 'msgstr "Подключено к %d."'
-ctl i18n-nonbmp-msgid ui-i18n fail 'FAIL nonbmp More actions 📌;FAIL pot-missing-msgid More actions 📌;FAIL po-missing-msgid ru: More actions 📌;FAIL pot-stale More actions;FAIL po-obsolete ru: More actions' \
-	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "_('More actions')" "_('More actions 📌')"
+ctl i18n-nonbmp-msgid ui-i18n fail 'FAIL nonbmp Are you sure? 📌;FAIL pot-missing-msgid Are you sure? 📌;FAIL po-missing-msgid ru: Are you sure? 📌;FAIL pot-stale Are you sure?;FAIL po-obsolete ru: Are you sure?' \
+	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "_('Are you sure?')" "_('Are you sure? 📌')"
 # ui0 review: old views keep strings as text; backend codes all have a text; the translation is shipped
 ctl ui-view-raw-E ui-unit fail 'FAIL - old views: E is common.E' \
 	"$VIEW/dashboard.js" 'var E = common.E;' ''
@@ -389,7 +390,7 @@ ctl ui1-nodes-raw-E ui-nodes fail 'FAIL - groups by source, state words of every
 	"$VIEW/nodes.js" 'var E = common.E;' 'var E0 = common.E;'
 ctl ui1-reason-without-text ui-unit fail 'FAIL - every reason the backend gives for a pasted line has a human text' \
 	"$LIBX/parser.uc" "return 'bad_uuid';" "return 'bad_brand_new_reason';"
-ctl ui1-sources-tab-back ui-smoke fail 'menu has the Nodes tab and no Sources tab' \
+ctl ui1-sources-tab-back ui-smoke fail 'menu: Nodes tab / no Sources tab' \
 	package/luci-app-vpnpool/files/usr/share/luci/menu.d/luci-app-vpnpool.json '"admin/services/vpnpool/nodes": {' '"admin/services/vpnpool/sources": { "title": "Sources", "order": 9, "action": { "type": "view", "path": "vpnpool/dashboard" } }, "admin/services/vpnpool/nodes": {'
 # runner: a suite that silently stops early must fail the run (min-cases.txt), not shrink total
 ctl suite-stops-early sched fail 'runner/sched-ran-at-least-6-cases' \
