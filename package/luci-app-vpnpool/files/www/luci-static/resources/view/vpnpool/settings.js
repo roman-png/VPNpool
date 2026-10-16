@@ -1,293 +1,313 @@
 'use strict';
 'require view';
-'require rpc';
-'require ui';
+'require form';
 'require dom';
-'require vpnpool.i18n as i18n';
 'require vpnpool.common as common';
 
-var _ = function(s) { return i18n.tr(s); };
-// LuCI E(tag, attrs, 'string') = innerHTML; node names and reply fields are foreign data,
-// so every string child goes in as text (common.E)
-var E = common.E;
+// "Settings" page (ROADMAP-2.0 §10.5). Two form.JSONMap (the main settings and the folded
+// "Advanced"), ONE save panel for both (common.formSaver -> one set_config with the changed
+// fields only). Not settings, so not in the save: the Telegram test (it sends what is TYPED,
+// before saving) and the backup (download / restore from a file).
+// Technical parameters (ports, marks, the engine) are shown only on the Diagnostics page.
+// SAFETY: LuCI puts option titles and descriptions into innerHTML — our own texts only.
 
-var callStatus = rpc.declare({ object: 'vpnpool', method: 'status' });
-var callDiag   = rpc.declare({ object: 'vpnpool', method: 'diag' });
-var callSetOpt = rpc.declare({ object: 'vpnpool', method: 'set_option', params: [ 'name', 'value' ] });
-var callTgTest = rpc.declare({ object: 'vpnpool', method: 'tg_test' });
-var callExport = rpc.declare({ object: 'vpnpool', method: 'export' });
-var callImport = rpc.declare({ object: 'vpnpool', method: 'import', params: [ 'config' ] });
-var callSetSchedule = rpc.declare({ object: 'vpnpool', method: 'set_schedule', params: [ 'enabled', 'on', 'off', 'refresh' ] });
-var callAddAutoDom = rpc.declare({ object: 'vpnpool', method: 'add_auto_domain', params: [ 'domain' ] });
-var callDelAutoDom = rpc.declare({ object: 'vpnpool', method: 'del_auto_domain', params: [ 'domain' ] });
-var callRunAdaptive = rpc.declare({ object: 'vpnpool', method: 'run_adaptive' });
+// LuCI E(tag, attrs, 'string') = innerHTML; every string child goes in as text (common.E)
+var E = common.E;
+var txt = common.txt;
+
+var RESTORE_MAX_BYTES = 4194304;   // the router refuses a bigger archive (rpcd restore)
+
+function settings(st) { return (st && st.settings) || {}; }
+function sv(name, def) { return function(st) { var v = settings(st)[name]; return (v == null) ? def : v; }; }
+function bool(name, def) { return function(st) { var v = settings(st)[name]; return (v == null) ? def : !!v; }; }
+
+// The page's settings: set_config field <-> form option (common.formSaver, kinds there).
+var FIELDS = [
+	{ f: 'auto_switch', o: 'auto.auto_switch', t: 'bool', v: bool('auto_switch', true) },
+	{ f: 'favorites_only', o: 'auto.favorites_only', t: 'bool', v: bool('favorites_only', false) },
+	{ f: 'auto_snapshot', o: 'auto.auto_snapshot', t: 'bool', v: bool('auto_snapshot', false) },
+	{ f: 'auto_snapshot_max', o: 'auto.auto_snapshot_max', t: 'int', v: sv('auto_snapshot_max', 20) },
+	{ f: 'check_services', o: 'check.check_services', t: 'words', v: sv('check_services', '') },
+	{ f: 'dead_filter', o: 'check.dead_filter', t: 'bool', v: bool('dead_filter', true) },
+	{ f: 'killswitch', o: 'protect.killswitch', t: 'bool', v: bool('killswitch', false) },
+	{ f: 'dns_protect', o: 'protect.dns_protect', t: 'bool', v: bool('dns_protect', false) },
+	{ f: 'telegram_enabled', o: 'telegram.telegram_enabled', t: 'bool', v: bool('telegram_enabled', false) },
+	{ f: 'telegram_control', o: 'telegram.telegram_control', t: 'bool', v: bool('telegram_control', false) },
+	// the router shows a saved token masked (<bot number>:***); sent back unchanged = keep it
+	{ f: 'telegram_token', o: 'telegram.telegram_token', t: 'str', v: sv('telegram_token', '') },
+	{ f: 'telegram_chat', o: 'telegram.telegram_chat', t: 'str', v: sv('telegram_chat', '') },
+	{ f: 'telegram_via_proxy', o: 'telegram.telegram_via_proxy', t: 'bool', v: bool('telegram_via_proxy', true) },
+	{ f: 'sched_enabled', o: 'schedule.sched_enabled', t: 'bool', v: bool('sched_enabled', false) },
+	{ f: 'sched_on', o: 'schedule.sched_on', t: 'str', v: sv('sched_on', '') },
+	{ f: 'sched_off', o: 'schedule.sched_off', t: 'str', v: sv('sched_off', '') },
+	{ f: 'sched_refresh', o: 'schedule.sched_refresh', t: 'str', v: sv('sched_refresh', '') },
+	// "Advanced" (folded)
+	{ f: 'failover_interval', o: 'adv.failover_interval', t: 'int', v: sv('failover_interval', 60) },
+	{ f: 'failover_tolerance', o: 'adv.failover_tolerance', t: 'int', v: sv('failover_tolerance', 50) },
+	{ f: 'dead_filter_strikes', o: 'adv.dead_filter_strikes', t: 'int', v: sv('dead_filter_strikes', 3) },
+	{ f: 'dead_filter_tries', o: 'adv.dead_filter_tries', t: 'int', v: sv('dead_filter_tries', 3) },
+	{ f: 'subscription_interval', o: 'adv.subscription_interval', t: 'str', v: sv('subscription_interval', '6h') },
+	{ f: 'antidpi', o: 'adv.antidpi', t: 'str', v: sv('antidpi', 'off') },
+	{ f: 'ipv6', o: 'adv.ipv6', t: 'str', v: sv('ipv6', 'block') },
+	{ f: 'log_level', o: 'adv.log_level', t: 'str', v: sv('log_level', 'warn') },
+	{ f: 'prefilter_concurrency', o: 'adv.prefilter_concurrency', t: 'int', v: sv('prefilter_concurrency', 16) }
+];
+
+var INTERVALS = [
+	[ '10m', _('10 minutes') ], [ '30m', _('30 minutes') ], [ '1h', _('1 hour') ], [ '3h', _('3 hours') ],
+	[ '6h', _('6 hours') ], [ '12h', _('12 hours') ], [ '24h', _('24 hours') ]
+];
+var LOG_LEVELS = [
+	[ 'trace', _('Everything (very large)') ], [ 'debug', _('Detailed') ], [ 'info', _('Normal') ],
+	[ 'warn', _('Warnings and errors') ], [ 'error', _('Errors only') ], [ 'fatal', _('Severe errors only') ],
+	[ 'panic', _('Crashes only') ]
+];
+
+function timeOk(section_id, v) {
+	return (v == null || v === '' || /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(String(v).trim())) ? true
+		: common.fieldText('bad_time');
+}
+
+// An input-less option: our own widget (buttons, a line of explanation)
+var Action = form.DummyValue.extend({
+	renderWidget: function(section_id) {
+		return this.build(section_id);
+	}
+});
 
 return view.extend({
-	notify: function(msg) { ui.addNotification(null, E('p', msg), 'info'); },
-	save: function(name, val) { return callSetOpt(name, String(val)).then(L.bind(function() { this.notify(_('Saved: %s').format(name)); }, this)); },
+	FIELDS: FIELDS,
 
-	// Clamp a numeric field, write the corrected value back into the input (so the user
-	// SEES the constraint applied — never a silent drop), and return the clamped string.
-	clampInt: function(inp, min, max, def) {
-		var n = parseInt(inp.value, 10); if (isNaN(n)) n = def;
-		if (n < min) n = min; if (max != null && n > max) n = max;
-		if (String(n) !== String(inp.value)) {
-			inp.value = String(n);
-			this.notify(_('Adjusted to %s (allowed: %s–%s).').format(n, min, (max != null ? max : '∞')));
-		}
-		return String(n);
+	load: function() {
+		return common.call('status');
 	},
-	handleSaveInterval: function(inp) { return this.save('failover_interval', this.clampInt(inp, 10, null, 60)); },
-	handleSaveTolerance: function(inp) { return this.save('failover_tolerance', this.clampInt(inp, 0, 5000, 50)); },
-	handleToggleAuto: function(cb) { return this.save('auto_switch', cb.checked ? '1' : '0'); },
-	handleSaveCheck: function(ta, cb, strk, tries) {
-		var self = this;
-		// store as a single space-separated string (hosts/URLs never contain spaces)
-		var svc = (ta.value || '').split(/\s+/).filter(Boolean).join(' ');
-		var n = this.clampInt(strk, 1, 20, 3);
-		var t = this.clampInt(tries, 1, 10, 3);
-		return callSetOpt('check_services', svc)
-			.then(function() { return callSetOpt('dead_filter', cb.checked ? '1' : '0'); })
-			.then(function() { return callSetOpt('dead_filter_strikes', n); })
-			.then(function() { return callSetOpt('dead_filter_tries', t); })
-			.then(function() { self.notify(_('Node-check settings saved — re-checking nodes.')); });
-	},
-	handleToggleKill: function(cb) { return this.save('killswitch', cb.checked ? '1' : '0'); },
-	handleToggleDns: function(cb) { return this.save('dns_protect', cb.checked ? '1' : '0'); },
-	handleSaveAntidpi: function(sel) { return this.save('antidpi', sel.value); },
-	handleToggleAdaptive: function(cb) { return this.save('adaptive_routing', cb.checked ? '1' : '0'); },
-	renderAutoDomains: function(st) {
-		var self = this;
-		var items = (st.auto_domains || []).map(function(d) {
-			return E('li', { 'style': 'margin:3px 0' }, [
-				E('button', { 'class': 'btn cbi-button cbi-button-remove', 'style': 'margin-right:8px',
-					'click': ui.createHandlerFn(self, 'handleDelAutoDom', d) }, _('Remove')),
-				E('span', { 'style': 'font-family:monospace' }, d)
-			]);
-		});
-		return E('ul', { 'style': 'list-style:none;padding-left:0' },
-			items.length ? items : [ E('li', { 'style': 'color:#888' }, _('(none yet — detected blocked sites will appear here)')) ]);
-	},
-	reloadAutoDomains: function() {
-		var self = this;
-		return callStatus().then(function(st) {
-			var el = document.getElementById('vp-autodom'); if (el) dom.content(el, self.renderAutoDomains(st));
+
+	// Telegram test: what the page shows NOW (typed, not saved). A masked token = the saved one.
+	testTelegram: function() {
+		var saver = this.saver, cur = saver.collect(), mine = [ 'telegram_token', 'telegram_chat' ];
+		saver.clearErrors(mine);   // marks of an earlier test (a save's marks of other fields stay)
+		return common.call('tg_test', { token: cur.telegram_token, chat: cur.telegram_chat, via_proxy: cur.telegram_via_proxy },
+			{ handle: [ 'invalid' ], success: _('The test message is sent: check Telegram.') }).then(null, function(e) {
+			if (e && e.code === 'invalid') {
+				saver.sent = {};
+				saver.showErrors(e, mine);
+				common.toast(common.codeText('invalid'), 'error', 'tg_test');
+			}
+			return null;
 		});
 	},
-	handleAddAutoDom: function(inp) {
-		var v = (inp.value || '').trim(); if (!v) { ui.addNotification(null, E('p', _('Enter a domain first.')), 'warning'); return; }
-		var self = this;
-		return callAddAutoDom(v).then(function() { inp.value = ''; self.notify(_('Domain added to VPN route.')); self.reloadAutoDomains(); });
-	},
-	handleDelAutoDom: function(d) { var self = this; return callDelAutoDom(d).then(function() { self.reloadAutoDomains(); }); },
-	handleRunAdaptive: function() { this.notify(_('Adaptive scan started…')); return callRunAdaptive(); },
-	handleSaveSnapshot: function(cb, maxInp) {
-		var self = this, max = this.clampInt(maxInp, 1, 1000, 20);
-		return callSetOpt('auto_snapshot_max', max).then(function() {
-			return callSetOpt('auto_snapshot', cb.checked ? '1' : '0');
-		}).then(function() { self.notify(_('Auto-snapshot settings saved.')); });
-	},
-	handleSaveSchedule: function(en, on, off, ref) {
-		var self = this;
-		return callSetSchedule(en.checked ? '1' : '0', on.value || '', off.value || '', ref.value || '')
-			.then(function() { self.notify(_('Schedule saved.')); });
-	},
-	handleSaveTg: function(en, tok, chat, ctl, viap) {
-		var self = this;
-		return callSetOpt('telegram_token', tok.value || '')
-			.then(function() { return callSetOpt('telegram_chat', chat.value || ''); })
-			.then(function() { return callSetOpt('telegram_via_proxy', viap.checked ? '1' : '0'); })
-			.then(function() { return callSetOpt('telegram_control', ctl.checked ? '1' : '0'); })
-			.then(function() { return callSetOpt('telegram_enabled', en.checked ? '1' : '0'); })
-			.then(function() { self.notify(_('Telegram settings saved.')); });
-	},
-	handleTgTest: function() {
-		ui.addNotification(null, E('p', _('Sending test message…')), 'info');
-		return callTgTest().then(function(r) {
-			if (r && r.ok)
-				ui.addNotification(null, E('p', _('Test sent — check Telegram.')), 'info');
-			else
-				ui.addNotification(null, E('p', _('Telegram send failed (HTTP %s) — check token/chat id.').format((r && r.http) || '?')), 'warning');
+
+	downloadBackup: function() {
+		return common.call('backup', {}).then(function(r) {
+			if (!r || typeof r.data !== 'string' || !r.data) throw new common.Error('bad_reply', 'backup', r);
+			common.download(r.name || 'vpnpool-backup.tar.gz', r.data, 'application/gzip');
+			var rep = r.report || {};
+			common.toast(_('The backup is downloaded. Nodes: %d, subscriptions: %d, favourites: %d.')
+				.format(+rep.nodes || 0, +rep.subscriptions || 0, +rep.saved || 0));
+			return r;
 		}).catch(function(e) {
-			ui.addNotification(null, E('p', _('Telegram send failed (HTTP %s) — check token/chat id.').format(e)), 'warning');
+			if (e instanceof common.Error && e.code === 'bad_reply') common.toast(e.text, 'error', 'backup');
+			return null;
 		});
 	},
-	handleExport: function(box) {
-		return callExport().then(function(r) { box.value = (r && r.config) || ''; });
-	},
-	handleImport: function(box) {
+
+	// Restore: the router checks the file first and says what it holds; replacing needs a yes
+	restoreFile: function(file) {
 		var self = this;
-		if (!confirm(_('Replace the current vpnpool configuration with the pasted backup?'))) return;
-		return callImport(box.value || '').then(function() { self.notify(_('Configuration imported. Reloading…')); });
+		if (!file) return Promise.resolve(null);
+		if (file.size > RESTORE_MAX_BYTES) { common.toast(common.codeText('too_large'), 'error', 'restore'); return Promise.resolve(null); }
+		return common.readFileBase64(file).then(function(b64) {
+			return common.call('restore', { data: b64 }, { handle: [ 'confirm_required' ] }).then(function() {
+				return null;   // the router never replaces without replace_all: nothing happened
+			}, function(e) {
+				if (!e || e.code !== 'confirm_required') return null;
+				var rep = (e.reply && e.reply.report) || {};
+				var cons = [
+					_('Nodes: %d').format(+rep.nodes || 0),
+					_('Subscriptions: %d').format(+rep.subscriptions || 0),
+					_('Favourites: %d').format(+rep.saved || 0),
+					_('AmneziaWG and WireGuard nodes: %d').format(+rep.awg || 0)
+				];
+				if (self.saver && self.saver.dirty()) cons.push(_('The unsaved changes on this page are lost.'));
+				return common.confirm({
+					title: _('Restore from this backup?'),
+					text: _('All current settings, subscriptions and nodes are replaced by the ones from the file. The file holds:'),
+					consequences: cons,
+					confirm: _('Replace everything'),
+					danger: true
+				}).then(function(yes) {
+					if (!yes) return null;
+					return common.call('restore', { data: b64, replace_all: true },
+						{ success: _('Restored. The service starts again with the restored settings.') })
+						.then(function(r) { return self.reload().then(function() { return r; }); }, function() { return null; });
+				});
+			});
+		}, function() {
+			common.toast(common.codeText('invalid_archive'), 'error', 'restore');
+			return null;
+		});
 	},
 
-	load: function() { return Promise.all([ callStatus(), callDiag().catch(function() { return {}; }) ]); },
-	render: function(res) {
-		var st = res[0] || {}, dg = res[1] || {};
-		var s = st.settings || {};
-		var r = dg.resources || {};
+	render: function(st) {
+		var self = this;
+		st = st || {};
+		var fd = common.formData(FIELDS, st);
+		var adv = { adv: fd.adv };
+		delete fd.adv;
+		fd.backup = {};
+		var m = new form.JSONMap(fd, null, null);
+		var ma = new form.JSONMap(adv, null, null);
+		var s, o;
 
-		var fi = E('input', { 'type': 'number', 'min': '10', 'class': 'cbi-input-text', 'style': 'width:120px', 'value': s.failover_interval || 60 });
-		var tol = E('input', { 'type': 'number', 'min': '0', 'class': 'cbi-input-text', 'style': 'width:120px', 'value': s.failover_tolerance || 50 });
-		var auto = E('input', { 'type': 'checkbox', 'checked': (s.auto_switch !== false) ? 'checked' : null });
+		// ---- automatic switching
+		s = m.section(form.NamedSection, 'auto', 'auto', _('Automatic switching'));
+		s.option(form.Flag, 'auto_switch', _('Switch to a working node automatically'),
+			_('When the current node stops working, the router moves to the fastest working one.'));
+		s.option(form.Flag, 'favorites_only', _('Choose only among favourite nodes'),
+			_('The automatic choice uses only your favourite nodes while at least one of them works.'));
+		s.option(form.Flag, 'auto_snapshot', _('Add working nodes to favourites automatically'),
+			_('From time to time the fastest working nodes are kept in favourites, so they stay when a subscription ends. Your own favourites are never touched.'));
+		o = s.option(form.Value, 'auto_snapshot_max', _('How many to keep'));
+		o.datatype = 'and(uinteger,range(1,1000))';
+		o.placeholder = '20';
+		o.depends('auto_snapshot', '1');
 
-		var chkSvc = E('textarea', { 'class': 'cbi-input-textarea', 'style': 'width:100%;height:80px;font-family:monospace',
-			'placeholder': 'www.youtube.com\nwww.instagram.com' },
-			(s.check_services || '').split(/\s+/).filter(Boolean).join('\n'));
-		var deadFilterCb = E('input', { 'type': 'checkbox', 'checked': (s.dead_filter !== false) ? 'checked' : null });
-		var deadStrikes = E('input', { 'type': 'number', 'min': '1', 'class': 'cbi-input-text', 'style': 'width:90px', 'value': String(s.dead_filter_strikes || 3) });
-		var deadTries = E('input', { 'type': 'number', 'min': '1', 'max': '10', 'class': 'cbi-input-text', 'style': 'width:90px', 'value': String(s.dead_filter_tries || 3) });
+		// ---- checked services
+		s = m.section(form.NamedSection, 'check', 'check', _('Checked sites'));
+		o = s.option(form.TextValue, 'check_services', _('Sites to check'),
+			_('The sites the VPN must really open, one per line — usually the blocked ones, for example youtube.com. The automatic choice uses a node only if it opens every one of them. Empty: a general internet check.'));
+		o.rows = 4;
+		o.placeholder = 'www.youtube.com';
+		s.option(form.Flag, 'dead_filter', _('Set aside nodes that do not open these sites'),
+			_('Such nodes stay in the list and can be chosen by hand, but the automatic choice skips them.'));
 
-		var kill = E('input', { 'type': 'checkbox', 'checked': s.killswitch ? 'checked' : null });
-		var dns  = E('input', { 'type': 'checkbox', 'checked': s.dns_protect ? 'checked' : null });
+		// ---- protection
+		s = m.section(form.NamedSection, 'protect', 'protect', _('Protection'));
+		s.option(form.Flag, 'killswitch', _('Block the internet while the VPN is down'),
+			_('Nothing goes past the VPN while no node works. Off: the network goes directly until a node works again.'));
+		s.option(form.Flag, 'dns_protect', _('Send site name lookups through the VPN'),
+			_('The internet provider does not see which sites the devices look up.'));
 
-		var antidpiVal = (s.antidpi === true || s.antidpi === 1) ? 'on' : (s.antidpi || 'off');
-		var antidpiSel = E('select', { 'class': 'cbi-input-select' }, [
-			E('option', { 'value': 'off',        'selected': antidpiVal === 'off' ? 'selected' : null }, _('off')),
-			E('option', { 'value': 'on',         'selected': antidpiVal === 'on' ? 'selected' : null }, _('on — fragment TLS handshake')),
-			E('option', { 'value': 'aggressive', 'selected': antidpiVal === 'aggressive' ? 'selected' : null }, _('aggressive — also record fragmentation'))
-		]);
-		var adaptiveCb = E('input', { 'type': 'checkbox', 'checked': s.adaptive_routing ? 'checked' : null });
-		var autoDomInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:260px', 'placeholder': 'example.com' });
+		// ---- Telegram
+		s = m.section(form.NamedSection, 'telegram', 'telegram', _('Telegram'));
+		s.option(form.Flag, 'telegram_enabled', _('Send notifications'),
+			_('About node switching, subscription ends, start and stop.'));
+		s.option(form.Flag, 'telegram_control', _('Control from Telegram'),
+			_('Commands to the bot: status, nodes, switching, on and off. The bot obeys only your chat.'));
+		var tgDeps = function(opt) { opt.depends('telegram_enabled', '1'); opt.depends('telegram_control', '1'); };
+		o = s.option(form.Value, 'telegram_token', _('Bot token'), _('Create a bot with @BotFather and paste its token here.'));
+		o.password = true;
+		o.placeholder = '123456789:ABC…';
+		tgDeps(o);
+		o = s.option(form.Value, 'telegram_chat', _('Chat'), _('Your chat number (for example from @userinfobot) or a channel name like @mychannel.'));
+		o.placeholder = '123456789';
+		tgDeps(o);
+		o = s.option(form.Flag, 'telegram_via_proxy', _('Reach Telegram through the VPN'), _('Needed where Telegram is blocked.'));
+		tgDeps(o);
+		o = s.option(Action, 'tg_test', '');
+		o.build = function() {
+			return E('div', {}, [
+				E('button', { 'class': 'btn cbi-button cbi-button-action', 'type': 'button', 'click': function(ev) {
+					ev.preventDefault(); self.testTelegram();
+				} }, [ txt(_('Send a test message')) ]),
+				E('p', { 'class': 'vp-hint' }, [ txt(_('Uses the token and the chat typed above, even before you save them.')) ])
+			]);
+		};
+		tgDeps(o);
 
-		var snapEnable = E('input', { 'type': 'checkbox', 'checked': s.auto_snapshot ? 'checked' : null });
-		var snapMax = E('input', { 'type': 'number', 'min': '1', 'class': 'cbi-input-text', 'style': 'width:90px', 'value': String(s.auto_snapshot_max || 20) });
+		// ---- schedule
+		s = m.section(form.NamedSection, 'schedule', 'schedule', _('Schedule'));
+		s.option(form.Flag, 'sched_enabled', _('Turn on and off by the clock'), _('The router\'s time. Leave a time empty to skip that action.'));
+		[ [ 'sched_on', _('Turn on at') ], [ 'sched_off', _('Turn off at') ], [ 'sched_refresh', _('Update subscriptions at') ] ].forEach(function(x) {
+			o = s.option(form.Value, x[0], x[1]);
+			o.placeholder = '07:30';
+			o.validate = timeOk;
+			o.depends('sched_enabled', '1');
+		});
 
-		var schEnable = E('input', { 'type': 'checkbox', 'checked': s.sched_enabled ? 'checked' : null });
-		var schOn  = E('input', { 'type': 'time', 'class': 'cbi-input-text', 'value': s.sched_on || '' });
-		var schOff = E('input', { 'type': 'time', 'class': 'cbi-input-text', 'value': s.sched_off || '' });
-		var schRef = E('input', { 'type': 'time', 'class': 'cbi-input-text', 'value': s.sched_refresh || '' });
+		// ---- backup (actions, not settings)
+		s = m.section(form.NamedSection, 'backup', 'backup', _('Backup'),
+			_('A file with all settings, subscriptions and nodes, including the Telegram token. Keep it safe.'));
+		o = s.option(Action, 'files', '');
+		o.build = function() {
+			var file = E('input', { 'type': 'file', 'accept': '.gz,.tgz,application/gzip', 'style': 'display:none', 'change': function(ev) {
+				var f = ev.target.files && ev.target.files[0];
+				ev.target.value = '';
+				self.restoreFile(f);
+			} });
+			return E('div', { 'class': 'vp-inline' }, [
+				E('button', { 'class': 'btn cbi-button cbi-button-action', 'type': 'button', 'click': function(ev) {
+					ev.preventDefault(); self.downloadBackup();
+				} }, [ txt(_('Download a backup')) ]),
+				E('button', { 'class': 'btn cbi-button cbi-button-neutral', 'type': 'button', 'click': function(ev) {
+					ev.preventDefault(); file.click();
+				} }, [ txt(_('Restore from a file…')) ]),
+				file
+			]);
+		};
 
-		var tgEnable = E('input', { 'type': 'checkbox', 'checked': s.telegram_enabled ? 'checked' : null });
-		var tgControl = E('input', { 'type': 'checkbox', 'checked': s.telegram_control ? 'checked' : null });
-		var tgViaProxy = E('input', { 'type': 'checkbox', 'checked': (s.telegram_via_proxy !== false) ? 'checked' : null });
-		var tgToken = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:100%', 'value': s.telegram_token || '', 'placeholder': '123456789:ABC…' });
-		var tgChat = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:220px', 'value': s.telegram_chat || '', 'placeholder': 'chat id' });
-		var bkBox = E('textarea', { 'class': 'cbi-input-textarea', 'style': 'width:100%;height:140px;font-family:monospace;font-size:11px' });
+		// ---- advanced (folded)
+		s = ma.section(form.NamedSection, 'adv', 'adv', null);
+		o = s.option(form.Value, 'failover_interval', _('Check the nodes every, seconds'));
+		o.datatype = 'and(uinteger,range(10,86400))';
+		o.placeholder = '60';
+		o = s.option(form.Value, 'failover_tolerance', _('Switch only if faster by, ms'),
+			_('Keeps the router from jumping between nodes of almost the same speed.'));
+		o.datatype = 'and(uinteger,range(0,5000))';
+		o.placeholder = '50';
+		o = s.option(form.Value, 'dead_filter_strikes', _('Failed checks in a row before a node is set aside'));
+		o.datatype = 'and(uinteger,range(1,100))';
+		o.placeholder = '3';
+		o = s.option(form.Value, 'dead_filter_tries', _('Attempts per check'),
+			_('A node passes a check if any attempt succeeds: some nodes miss the first one.'));
+		o.datatype = 'and(uinteger,range(1,10))';
+		o.placeholder = '3';
+		o = s.option(form.ListValue, 'subscription_interval', _('Update subscriptions every'),
+			_('More often than every 10 minutes is not allowed: providers block too frequent updates.'));
+		INTERVALS.forEach(function(x) { o.value(x[0], x[1]); });
+		var curInt = String(settings(st).subscription_interval || '');
+		if (curInt && !INTERVALS.some(function(x) { return x[0] === curInt; })) o.value(curInt, curInt);
+		o = s.option(form.ListValue, 'antidpi', _('Get past the provider\'s filtering'),
+			_('Splits the start of secure connections so that simple provider filters cannot read the site name. Does not help against strong blocking.'));
+		o.value('off', _('Off'));
+		o.value('on', _('Normal'));
+		o.value('aggressive', _('Strong'));
+		o = s.option(form.Flag, 'ipv6', _('Block IPv6 past the VPN'),
+			_('Devices cannot reach the internet over IPv6, so nothing leaks past the VPN.'));
+		o.enabled = 'block';
+		o.disabled = 'off';
+		o = s.option(form.ListValue, 'log_level', _('Log detail'), _('What the log on the Diagnostics page keeps.'));
+		LOG_LEVELS.forEach(function(x) { o.value(x[0], x[1]); });
+		o = s.option(form.Value, 'prefilter_concurrency', _('Nodes checked at once'),
+			_('Lower it on a router with little memory.'));
+		o.datatype = 'and(uinteger,range(1,64))';
+		o.placeholder = '16';
 
-		function row(label, val) {
-			return E('div', { 'style': 'margin:3px 0' }, [ E('b', { 'style': 'display:inline-block;width:180px' }, label), E('span', { 'style': 'font-family:monospace' }, val == null ? '—' : String(val)) ]);
-		}
-
-		return E('div', { 'class': 'cbi-map vpnpool-view' }, [
-			i18n.header(_('VPN Pool — Settings')),
-
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Auto-ping & failover')),
-				E('div', { 'style': 'margin:6px 0' }, [
-					E('b', { 'style': 'display:inline-block;width:220px' }, _('Auto-ping interval (sec)')), fi,
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleSaveInterval', fi) }, _('Save'))
-				]),
-				E('div', { 'style': 'margin:6px 0' }, [
-					E('b', { 'style': 'display:inline-block;width:220px' }, _('Switch tolerance (ms)')), tol,
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleSaveTolerance', tol) }, _('Save'))
-				]),
-				E('div', { 'style': 'margin:6px 0' }, [
-					E('label', {}, [ auto, E('span', { 'style': 'margin-left:6px' }, _('Auto-switch to a working node')) ]),
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleToggleAuto', auto) }, _('Save'))
-				]),
-				E('p', { 'style': 'color:#888' }, _('Preferred node is now set right on the Dashboard — click 📌 on any node to pin it (used while reachable, auto-failover if it dies, switch back on recovery).'))
-			]),
-
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Node check (does the service actually work?)')),
-				E('p', { 'style': 'color:#888;margin-top:0' }, _('The single, accurate node check. List the services the VPN must really open through a node — usually the blocked ones (one per line). A node is used for auto-switching ONLY if it opens EVERY one of them; nodes that ping but can’t reach the service (over-quota / blocked exits) are dropped from the auto-pool but stay manually selectable. Active-node selection, failover and self-heal all use this list.')),
-				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:block;margin-bottom:3px' }, _('Services to verify (one per line)')), chkSvc ]),
-				E('p', { 'style': 'color:#888' }, _('Enter a site name (for example youtube.com) or a full address. Leave empty to use a general internet check.')),
-				E('div', { 'style': 'margin:6px 0' }, [
-					E('label', {}, [ deadFilterCb, E('span', { 'style': 'margin-left:6px' }, _('Drop nodes that ping but can’t reach the services (dead-node filter)')) ])
-				]),
-				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:inline-block;width:220px' }, _('Failures in a row before dropping')), deadStrikes ]),
-				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:inline-block;width:220px' }, _('Retries per check')), deadTries ]),
-				E('p', { 'style': 'color:#888' }, _('A node counts as reaching a service if any of these back-to-back attempts succeeds — absorbs the intermittent cold-handshake flakiness of Reality/Vision nodes so a usable node isn’t wrongly dropped. Default 3.')),
-				E('div', { 'style': 'margin-top:6px' }, [
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'click': ui.createHandlerFn(this, 'handleSaveCheck', chkSvc, deadFilterCb, deadStrikes, deadTries) }, _('Save'))
-				])
-			]),
-
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Security / leak protection')),
-				E('div', { 'style': 'margin:6px 0' }, [
-					E('label', {}, [ kill, E('span', { 'style': 'margin-left:6px' }, _('Kill-switch (block all traffic if VPN is down)')) ]),
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleToggleKill', kill) }, _('Save'))
-				]),
-				E('div', { 'style': 'margin:6px 0' }, [
-					E('label', {}, [ dns, E('span', { 'style': 'margin-left:6px' }, _('DNS-leak protection (route LAN DNS through the tunnel)')) ]),
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleToggleDns', dns) }, _('Save'))
-				]),
-				E('p', { 'style': 'color:#888' }, _('Kill-switch fails closed in full-tunnel (exclude) mode. DNS protection sends LAN DNS queries through the VPN so they can’t leak to your ISP.'))
-			]),
-
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Anti-DPI & adaptive routing')),
-				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'margin-right:6px' }, _('Anti-DPI (TLS fragmentation)')), antidpiSel,
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleSaveAntidpi', antidpiSel) }, _('Save')) ]),
-				E('p', { 'style': 'color:#888' }, _('Splits the TLS handshake so plaintext-SNI DPI can not match it. Defeats BASIC filtering only — not robust censorship (for TSPU/strong DPI use zapret). Needs sing-box ≥ 1.12; ignored if unsupported.')),
-				E('div', { 'style': 'margin:10px 0 6px' }, [ E('label', {}, [ adaptiveCb, E('span', { 'style': 'margin-left:6px' }, _('Adaptive routing: auto-route sites that are blocked for a direct connection')) ]),
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleToggleAdaptive', adaptiveCb) }, _('Save')),
-					E('button', { 'class': 'btn cbi-button cbi-button-action', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleRunAdaptive') }, _('Scan now')) ]),
-				E('div', { 'style': 'margin:6px 0' }, [
-					E('b', { 'style': 'margin-right:6px' }, _('Site is blocked?')), autoDomInput,
-					E('button', { 'class': 'btn cbi-button cbi-button-add', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleAddAutoDom', autoDomInput) }, _('Route via VPN'))
-				]),
-				E('h4', { 'style': 'margin-top:10px' }, _('Auto-routed domains')),
-				E('div', { 'id': 'vp-autodom' }, this.renderAutoDomains(st))
-			]),
-
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Auto-save working nodes')),
-				E('div', { 'style': 'margin:6px 0' }, [ E('label', {}, [ snapEnable, E('span', { 'style': 'margin-left:6px' }, _('Periodically snapshot reachable nodes to the saved store')) ]) ]),
-				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:inline-block;width:220px' }, _('Keep at most (nodes)')), snapMax ]),
-				E('div', { 'style': 'margin-top:6px' }, [
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'click': ui.createHandlerFn(this, 'handleSaveSnapshot', snapEnable, snapMax) }, _('Save'))
-				]),
-				E('p', { 'style': 'color:#888' }, _('Builds a fallback set that survives subscription expiry. Manual ⭐ saves are never evicted.'))
-			]),
-
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Schedule')),
-				E('div', { 'style': 'margin:6px 0' }, [ E('label', {}, [ schEnable, E('span', { 'style': 'margin-left:6px' }, _('Enable schedule')) ]) ]),
-				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:inline-block;width:220px' }, _('Turn ON at (HH:MM)')), schOn ]),
-				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:inline-block;width:220px' }, _('Turn OFF at (HH:MM)')), schOff ]),
-				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:inline-block;width:220px' }, _('Refresh subscription at (HH:MM)')), schRef ]),
-				E('div', { 'style': 'margin-top:6px' }, [
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'click': ui.createHandlerFn(this, 'handleSaveSchedule', schEnable, schOn, schOff, schRef) }, _('Save'))
-				]),
-				E('p', { 'style': 'color:#888' }, _('Router local time. Leave a field empty to skip that action. Uses cron.'))
-			]),
-
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Telegram alerts & control')),
-				E('label', {}, [ tgEnable, E('span', { 'style': 'margin-left:6px' }, _('Enable Telegram notifications')) ]),
-				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:inline-block;width:110px' }, _('Bot token')), tgToken ]),
-				E('div', { 'style': 'margin:6px 0' }, [ E('b', { 'style': 'display:inline-block;width:110px' }, _('Chat ID')), tgChat ]),
-				E('div', { 'style': 'margin:6px 0' }, [ E('label', {}, [ tgControl, E('span', { 'style': 'margin-left:6px' }, _('Two-way control bot (/status, /nodes, /switch, /on, /off, /refresh)')) ]) ]),
-				E('div', { 'style': 'margin:6px 0' }, [ E('label', {}, [ tgViaProxy, E('span', { 'style': 'margin-left:6px' }, _('Reach Telegram through the tunnel (needed where Telegram is blocked)')) ]) ]),
-				E('div', { 'style': 'margin-top:6px' }, [
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'click': ui.createHandlerFn(this, 'handleSaveTg', tgEnable, tgToken, tgChat, tgControl, tgViaProxy) }, _('Save')),
-					E('button', { 'class': 'btn cbi-button cbi-button-action', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleTgTest') }, _('Send test'))
-				]),
-				E('p', { 'style': 'color:#888' }, _('Create a bot via @BotFather, get your chat id (e.g. @userinfobot). Alerts: failover, subscription expiry, start/stop. The control bot only obeys your chat id.'))
-			]),
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Backup / Restore')),
-				E('div', { 'style': 'margin-bottom:6px' }, [
-					E('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, 'handleExport', bkBox) }, _('Export')),
-					E('button', { 'class': 'btn cbi-button cbi-button-save', 'style': 'margin-left:8px', 'click': ui.createHandlerFn(this, 'handleImport', bkBox) }, _('Import'))
-				]),
-				bkBox,
-				E('p', { 'style': 'color:#888' }, _('Export fills the box with your config — copy it somewhere safe. Paste a backup and Import to restore.'))
-			]),
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Technical (read-only)')),
-				row(_('sing-box version'), r.singbox_version),
-				row(_('tproxy port'), r.tproxy_port),
-				row(_('fwmark'), r.fwmark),
-				row(_('route table'), r.route_table),
-				row(_('Clash API'), r.clash_api),
-				E('p', { 'style': 'color:#888;margin-top:8px' }, _('These coexist with podkop (mark 0x100000, table podkop, :1602) and must not collide.'))
-			])
-		]);
+		return Promise.all([ m.render(), ma.render() ]).then(function(nodes) {
+			self.map = m;
+			self.advMap = ma;
+			self.saver = common.formSaver({ fields: FIELDS, maps: [ m, ma ], onSaved: function() { return self.reload(); } });
+			var box = self.box || (self.box = E('div', { 'class': 'vp-page' }));
+			var more = E('details', { 'class': 'vp-more' }, [ E('summary', {}, [ txt(_('Advanced')) ]), nodes[1] ]);
+			if (self.advOpen) more.open = true;
+			more.addEventListener('toggle', function() { self.advOpen = more.open; });
+			dom.content(box, [
+				common.header(_('Settings')),
+				nodes[0],
+				more,
+				self.saver.bar()
+			]);
+			return box;
+		});
 	},
-	handleSaveApply: null, handleSave: null, handleReset: null
+
+	// after a save / restore: the page again from the router's answer
+	reload: function() {
+		var self = this;
+		return this.load().then(function(st) { return self.render(st); });
+	},
+
+	handleSaveApply: null,
+	handleSave: null,
+	handleReset: null
 });
