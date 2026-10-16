@@ -477,3 +477,31 @@ begin "daemon/route-refused-no-table-no-killswitch-direct"   # control: no block
 expect_eq "route.sh reports the failure" "$rf" 1
 expect_true "no table (LAN direct, honest failure)" sh -c '! nft list table inet vpnpool'
 end
+
+# ---- "add working nodes to the favourites automatically" (snapshot.sh, review V1/V2) ----
+reset_state
+uci set vpnpool.main.auto_snapshot=1; uci set vpnpool.main.auto_snapshot_max=5; uci commit vpnpool
+printf 'vless://9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce@203.0.113.81:443?security=tls#Node1\nvless://9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce@203.0.113.82:443?security=tls#Node2\n' > "$DS/snap.links"
+ucode /usr/libexec/vpnpool/parser.uc --with-id "$DS/snap.links" > /tmp/vpnpool/nodes.json
+SN1=$(jq -r '.[0].id' /tmp/vpnpool/nodes.json); SN2=$(jq -r '.[1].id' /tmp/vpnpool/nodes.json)
+echo '{"proxies":{"Node1":{"history":[{"delay":100}]},"Node2":{"history":[{"delay":0}]}}}' > "$DS/snap1.json"
+echo '{"proxies":{"Node1":{"history":[]},"Node2":{"history":[]}}}' > "$DS/snap0.json"
+mock_on; mock_rule 'GET http://127.0.0.1:9091/proxies' 200 "$DS/snap1.json"
+sh /usr/libexec/vpnpool/snapshot.sh >/dev/null 2>&1
+begin "daemon/snapshot-keeps-the-working-nodes"
+expect_true "Node1 (working) an automatic favourite, Node2 (dead) not" jq -e --arg a "$SN1" --arg b "$SN2" '.[$a].auto==true and .[$a].tag=="Node1" and (has($b)|not)' /etc/vpnpool/favorites.map.json
+end
+cp /etc/vpnpool/favorites.map.json "$DS/fav.before"
+mock_on; mock_rule 'GET http://127.0.0.1:9091/proxies' 200 "$DS/snap0.json"
+sh /usr/libexec/vpnpool/snapshot.sh >/dev/null 2>&1
+begin "daemon/snapshot-nothing-answers-keeps-the-set"
+expect_true "the automatic favourites unchanged when no node answers" cmp -s /etc/vpnpool/favorites.map.json "$DS/fav.before"
+end
+# an automatic favourite the user put into the pool (active) survives a snapshot that drops it
+jq --arg a "$SN1" '.[$a].active = true' "$DS/fav.before" > /etc/vpnpool/favorites.map.json
+echo '{"proxies":{"Node1":{"history":[{"delay":0}]},"Node2":{"history":[{"delay":90}]}}}' > "$DS/snap2.json"
+mock_on; mock_rule 'GET http://127.0.0.1:9091/proxies' 200 "$DS/snap2.json"
+sh /usr/libexec/vpnpool/snapshot.sh >/dev/null 2>&1
+begin "daemon/snapshot-keeps-an-active-automatic-favourite"
+expect_true "Node1 kept (active), Node2 added" jq -e --arg a "$SN1" --arg b "$SN2" '.[$a].active==true and .[$b].auto==true' /etc/vpnpool/favorites.map.json
+end

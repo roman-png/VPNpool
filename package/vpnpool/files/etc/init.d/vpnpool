@@ -39,8 +39,17 @@ start_service() {
 	[ -x /usr/libexec/vpnpool/migrate.sh ] && /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1
 	config_load vpnpool
 
-	local enabled
+	local enabled schema
 	config_get_bool enabled main enabled 0
+	config_get schema main schema
+	# The migration failed (status shows migration.state "failed" and the reason): the 2.0 daemon
+	# can't read a 1.x config (no subscriptions -> an empty pool), so it is NOT started — no
+	# routing is installed, the LAN goes direct (with the kill-switch on too: nothing runs that
+	# could block it). The next start tries the migration again; the bot still starts.
+	if [ "$enabled" = "1" ] && [ "$schema" != 2 ]; then
+		logger -t vpnpool "the 1.x configuration could not be moved to 2.0 (see /etc/vpnpool/migrate.log): daemon not started"
+		enabled=0
+	fi
 	if [ "$enabled" = "1" ]; then
 		procd_open_instance vpnpoold
 		procd_set_param command "$PROG"

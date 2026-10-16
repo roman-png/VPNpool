@@ -8,7 +8,7 @@
 //   source + imported.map.json        -> config subscription (mode pick, pick = the ids of the
 //                                        links imported from it); a source nothing was imported
 //                                        from stays, switched off
-//   imported_node without a source    -> manual_node (kept as the user's own links)
+//   imported_node                     -> favourites with their link, in the pool (active)
 //   saved.map / snapshot.map          -> favorites.map.json (snapshot = automatic favourites)
 //   active_saved                      -> favourites that join the pool from the archive
 //   excluded_node                     -> hidden (ids)
@@ -16,6 +16,8 @@
 //   auto_member, keep_auto, unlock.map.json   -> by id
 //   sub.expire / sub.usage            -> subs.meta.json of the first subscription
 //   /etc/vpnpool/awg/<md5>.conf       -> awg/<id>.conf with "# Name = <its 1.x name>"
+//   saved_node (a link in no map)     -> a favourite;  subscription_ua -> first in probe_ua
+//   (migrate.sh copies the 1.x cache sources_cache/NNN.raw to the subscriptions' own s-<key>.raw)
 // Tags are mapped to ids through what this router last knew of them: links.json (tag -> link),
 // the 1.x node list and live config (/tmp/vpnpool/nodes.json, sing-box.json in RAM and flash),
 // the saved maps and the AWG files. A value that can not be mapped is NOT dropped silently: it is
@@ -141,24 +143,16 @@ function add_sub(url, mode, pick, enabled) {
 }
 add_sub(M.subscription_url, 'all', [], true);
 for (let x in as_list(M.extra_sub, true)) add_sub(x, 'all', [], true);
-let imported_mapped = {};
 for (let src in as_list(M.source, true)) {
 	let ids = [], seen = {};
 	for (let l in ((type(imported_map[src]) == 'array') ? imported_map[src] : [])) {
 		let id = id_of_link(l);
 		if (!id) { unmatched('imported_node', l); continue; }
-		imported_mapped[l] = true;
 		if (!seen[id]) { seen[id] = true; push(ids, id); }
 	}
 	add_sub(src, 'pick', ids, length(ids) > 0);
 }
-// imported links of no configured source: the user's own links from now on
-let manual = as_list(M.manual_node, true), manual_set = {};
-for (let l in manual) manual_set[l] = true;
-for (let l in as_list(M.imported_node, true)) {
-	if (imported_mapped[l]) continue;
-	if (!manual_set[l]) { push(manual, l); manual_set[l] = true; moved('imported_to_manual'); }
-}
+let manual = as_list(M.manual_node, true);
 
 // ---- favourites ----
 let fav = read_json(CONF + '/favorites.map.json', {});
@@ -176,6 +170,13 @@ function fav_put(store, tag, link, auto, active) {
 for (let t in sort(keys(snap_map))) fav_put('snapshot', t, snap_map[t], true, false);
 for (let t in sort(keys(saved_map))) fav_put('saved_node', t, saved_map[t], false, false);
 for (let l in as_list(M.active_saved, true)) fav_put('active_saved', null, l, false, true);
+// 1.x imported nodes were STORED LINKS: they lived on when their list died or dropped them. They
+// stay so — favourites with their link, in the pool (active) — whether or not a source is
+// configured; the source's "pick" section takes their ids in addition (review B1)
+for (let l in as_list(M.imported_node, true)) { fav_put('imported_node', null, l, false, true); moved('imported_to_favorites'); }
+// saved_node is the union of the two maps on a router; a link only there (a 1.x export imported,
+// lost maps) is a favourite too — never dropped silently (review V3)
+for (let l in as_list(M.saved_node, true)) if (!fav[id_of_link(l) ?? '']) fav_put('saved_node', null, l, false, false);
 report.moved.favorites = length(fav);
 
 // ---- hidden, preferred, auto-pool members, force-kept, unlock results ----
@@ -210,7 +211,12 @@ mkdir(CONF);
 write_atomic(CONF + '/favorites.map.json', sprintf('%J', fav), 0600);
 if (unlock2 != null) write_atomic(CONF + '/unlock.map.json', sprintf('%J', unlock2));
 for (let a in awg_plan) {
-	if (stat(a.to)) { unlink(a.from); moved('awg_duplicate_removed'); continue; }   // the same key twice
+	if (stat(a.to)) {   // the same key twice: the same node only when the files say the same
+		let body_of = (t) => join('\n', filter(split(t ?? '', /\r?\n/), (l) => length(trim(l)) && !match(l, /^[ \t]*[#;]/)));
+		if (body_of(readfile(a.to)) == body_of(a.body)) { unlink(a.from); moved('awg_duplicate_removed'); }
+		else unmatched('awg_file', substr(a.from, length(AWG) + 1));   // left as it is (review M5)
+		continue;
+	}
 	let t = a.to + '.tmp';
 	writefile(t, '');
 	chmod(t, 0600);
@@ -243,6 +249,13 @@ if (length(M.subscription_url ?? '') && length(sids)) {
 	}
 }
 
+// subscription_ua (1.x: one client name; 1.4.1 kept it in uci but its fetch did not send it):
+// a value of the user's own goes first in the list of client names the fetch tries (probe_ua)
+let ua = trim('' + (M.subscription_ua ?? ''));
+if (length(ua) && ua != 'v2rayNG/1.8.5' && !length(M.probe_ua ?? '')) {
+	if (match(ua, /^[!-~]+$/)) { u.set('vpnpool', 'main', 'probe_ua', ua + ' ' + (getenv('VPNPOOL_DEFAULT_UAS') ?? '')); moved('subscription_ua'); }
+	else unmatched('subscription_ua', ua);   // a name with spaces can't go into the space-separated list
+}
 for (let o in [ 'subscription_url', 'extra_sub', 'source', 'imported_node', 'saved_node', 'active_saved',
                 'excluded_node', 'selected_node', 'subscription_ua', 'singbox_config', 'preferred_node',
                 'auto_member', 'keep_auto', 'hidden', 'manual_node' ])
@@ -263,10 +276,11 @@ if (!u.commit('vpnpool')) {
 	exit(1);
 }
 
-// committed: the 1.x files and the RAM state keyed by tag go
+// committed: the report first (a power loss after this keeps the list of what did not match),
+// then the 1.x files and the RAM state keyed by tag go
+write_atomic(CONF + '/migration.json', sprintf('%J', report), 0600);   // unmatched links: credentials
 for (let f in [ 'saved.map.json', 'snapshot.map.json', 'imported.map.json', 'sub.expire', 'sub.usage' ]) unlink(CONF + '/' + f);
 for (let f in [ '.dead_tags.json', '.deadstrikes', '.nodedelay.json', '.status-cache.json', 'imported.links', 'active_saved.links' ]) unlink(RUN + '/' + f);
 for (let f in (lsdir(TMP) ?? [])) unlink(TMP + '/' + f);
 system('rmdir ' + sq(TMP) + ' 2>/dev/null');
-write_atomic(CONF + '/migration.json', sprintf('%J', report), 0600);   // unmatched links: credentials
 printf('%J\n', report);

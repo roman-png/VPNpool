@@ -986,9 +986,11 @@ function add_node(ob, link) {
 	let id = null;
 	if (is_awg) { if (length(ob.private_key)) id = awg_id(ob.private_key); }
 	else id = key_id(config_key(ob));
-	if (id && ((HIDE && HIDE[id]) || (PICK && !PICK[id]))) {
+	// a node without an id (an AWG endpoint of a JSON source without a key) can't be picked
+	let hidden = !!(id && HIDE && HIDE[id]);
+	if (hidden || (PICK && (!id || !PICK[id]))) {
 		let p0 = (type(ob.peers) == 'array') ? ob.peers[0] : null;
-		return { status: 'skip', reason: (HIDE && HIDE[id]) ? 'hidden' : 'not_picked', type: ob.type,
+		return { status: 'skip', reason: hidden ? 'hidden' : 'not_picked', type: ob.type,
 			id: id, tag: base, server: ob.server ?? p0?.address, port: ob.server_port ?? p0?.port };
 	}
 	// one id = one node: the dedup is by the id (the output never repeats one); an AWG endpoint

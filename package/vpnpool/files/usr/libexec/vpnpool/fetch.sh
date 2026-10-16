@@ -27,7 +27,13 @@ TAB=$(printf '\t')
 
 # Client User-Agents to probe (space separated, no spaces inside a UA).
 UAS=$(uci -q get vpnpool.main.probe_ua)
-[ -n "$UAS" ] || UAS="v2rayNG/1.9.5 v2rayN/6.45 Happ/1.0 sing-box/1.12 clash-meta/1.18 Streisand Hiddify/2.0 Shadowrocket/2.2 Mozilla/5.0"
+[ -n "$UAS" ] || UAS="$DEFAULT_UAS"
+
+# Upper bound of one subscription's answer (uci fetch_max_kb, default 2048 KiB). curl stops a
+# download whose announced size is above it; the size is checked again on what arrived.
+MAXKB=$(uci -q get vpnpool.main.fetch_max_kb); case "$MAXKB" in ''|*[!0-9]*) MAXKB=2048 ;; esac
+[ "$MAXKB" -ge 16 ] || MAXKB=2048
+MAXB=$((MAXKB * 1024))
 
 normalize() {   # $1 = raw body file -> decoded text on stdout
 	c=$(head -c 1 "$1" 2>/dev/null)
@@ -68,8 +74,14 @@ fetch_best() {   # $1=url $2=sub id $3=outfile
 	best=-1; bestua=""
 	rm -f "$SB_DATA/.hdr.$sid"
 	for ua in $UAS; do
-		curl -sfL --connect-timeout 5 -m 12 -A "$ua" -D "$SB_DATA/h.tmp" -o "$SB_DATA/b.tmp" "$url" 2>/dev/null || continue
+		curl -sfL --connect-timeout 5 -m 12 --max-filesize "$MAXB" -A "$ua" -D "$SB_DATA/h.tmp" -o "$SB_DATA/b.tmp" "$url" 2>/dev/null || continue
 		sz=$(wc -c < "$SB_DATA/b.tmp" 2>/dev/null); [ "${sz:-0}" -lt 20 ] && continue
+		# too big to parse safely in RAM (a public list of thousands of nodes on a 16 MB router):
+		# refused like a dead answer — the subscription is served from its own cached copy
+		if [ "${sz:-0}" -gt "$MAXB" ]; then
+			log "fetch: $(mask_url "$url") answered ${sz} bytes, more than the limit ${MAXB} — not used"
+			break
+		fi
 		normalize "$SB_DATA/b.tmp" > "$SB_DATA/n.tmp"
 		cnt=$(ucode /usr/libexec/vpnpool/parser.uc "$SB_DATA/n.tmp" 2>/dev/null | jq 'length' 2>/dev/null)
 		[ -n "$cnt" ] || cnt=0

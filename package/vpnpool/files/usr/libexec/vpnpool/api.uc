@@ -270,6 +270,7 @@ const SCHEMA = {
 	dead_filter_strikes:   { s: 'main', c: I(1, 100), a: 'none' },
 	dead_filter_tries:     { s: 'main', c: I(1, 10), a: 'none' },
 	prefilter_concurrency: { s: 'main', c: I(1, 64), a: 'none' },
+	fetch_max_kb:          { s: 'main', c: I(16, 65536), a: 'none' },   // the size limit of one subscription
 	speedtest_min_mem_kb:  { s: 'main', c: I(0, 1048576), a: 'none' },
 	sched_enabled:         { s: 'main', c: chk_bool, a: 'sched' },
 	sched_on:              { s: 'main', c: chk_time, a: 'sched' },
@@ -689,6 +690,8 @@ function delete_one(u, r) {
 		if (type(fav[r.id]) == 'object' && fav[r.id].active) { fav[r.id].active = false; fav_write(fav); changed = true; }
 	} else if (n) {
 		changed = list_add(u, 'hidden', r.id);
+		// the same as "hide": a hidden node can't be the preferred one
+		if (changed && u.get('vpnpool', 'main', 'preferred_node') == r.id) u.delete('vpnpool', 'main', 'preferred_node');
 	}
 	if (changed) list_del(u, 'keep_auto', [ r.id ]);
 	return changed;
@@ -781,6 +784,7 @@ function node_op(op, inp) {
 		let want = (op == 'activate');
 		if ((fav[id].active === true) == want) return { ok: true, code: 'unchanged', id: id, actions: [] };
 		fav[id].active = want;
+		fav[id].auto = false;   // the user's choice now: the automatic snapshot leaves it alone
 		if (!fav_write(fav)) return { ok: false, code: 'write_failed' };
 		if (want) list_del(u, 'hidden', [ id ]) && u.commit('vpnpool');
 		return { ok: true, code: 'saved', id: id, actions: [ 'USR1' ] };
@@ -802,9 +806,18 @@ function node_op(op, inp) {
 		if (!r.node && r.fav) {
 			let fav = fav_read();
 			fav[r.id].active = true;
+			fav[r.id].auto = false;   // connected by the user: no longer an automatic entry
 			if (!fav_write(fav)) return { ok: false, code: 'write_failed' };
 			list_del(u, 'hidden', [ r.id ]);
 			acts = [ 'USR1' ];
+		} else if (r.node) {
+			// a live node that is an automatic favourite: connected by the user, the snapshot must not
+			// drop it (it would take the preference with it when the node fails a sweep)
+			let fav = fav_read();
+			if (type(fav[r.id]) == 'object' && fav[r.id].auto === true) {
+				fav[r.id].auto = false;
+				if (!fav_write(fav)) return { ok: false, code: 'write_failed' };
+			}
 		}
 		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
 		if (!r.node) return { ok: true, code: 'connect_pending', id: r.id, actions: acts };
@@ -855,8 +868,15 @@ function sub_op(op, inp) {
 		if (!s) return { ok: false, code: 'not_found' };
 		u.delete('vpnpool', s.id);
 		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
-		// favourites from it stay (kept with their links; "connect" brings one back)
-		return { ok: true, code: 'deleted', id: s.id, actions: [ 'USR1' ] };
+		// its favourites STAY IN THE POOL (from the archive, as 1.x promoted its saved nodes when the
+		// subscription went) — the integrator's assumption of 16.10.2026, not the owner's decision
+		let fav = fav_read(), kept = 0;
+		for (let n in live_nodes())
+			if (n._src == 'sub:' + s.id && type(fav[n.id]) == 'object' && fav[n.id].active !== true) {
+				fav[n.id].active = true; fav[n.id].auto = false; kept++;
+			}
+		if (kept && !fav_write(fav)) return { ok: false, code: 'write_failed' };
+		return { ok: true, code: 'deleted', id: s.id, favorites_kept: kept, actions: [ 'USR1' ] };
 	}
 	if (op == 'set_primary') {
 		let url = inp.url;

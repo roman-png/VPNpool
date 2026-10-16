@@ -159,6 +159,7 @@ var CODE_TEXT = {
 	incomplete_config:  _('This is not a complete VPN Pool configuration.'),
 	too_large:          _('Too large: the value or the file exceeds the limit.'),
 	restore_failed:     _('Restoring failed. The previous settings are back in place.'),
+	migration_failed:   _('These settings come from an older version and could not be converted. Nothing was changed: the previous settings are back in place.'),
 	ambiguous:          _('Several subscriptions fit. Choose the subscription from the list.'),
 	masked_values:      _('This text has hidden values (passwords, addresses). Restore from a backup file instead.'),
 	invalid_archive:    _('This file is not a VPN Pool backup or it is damaged.'),

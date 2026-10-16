@@ -211,6 +211,8 @@ tg_notify() {
 # model.uc is the shell scripts' door to it (subscriptions, picks, hidden ids, favourites,
 # id <-> tag of the last build); the stores are described in common.uc.
 MODEL=/usr/libexec/vpnpool/model.uc
+# the client names (User-Agents) fetch.sh tries by default (uci probe_ua replaces the list)
+DEFAULT_UAS="v2rayNG/1.9.5 v2rayN/6.45 Happ/1.0 sing-box/1.12 clash-meta/1.18 Streisand Hiddify/2.0 Shadowrocket/2.2 Mozilla/5.0"
 # the cache / output file key of a subscription URL (fetch.sh writes $SB_DATA/sources/s-<key>.raw)
 src_key() { printf '%s' "$1" | md5sum | cut -c1-12; }
 # node_resolve <id|tag> -> "<id>\t<tag>" of a node of the last build; rc 1 if there is none
