@@ -36,6 +36,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # package shell scripts are run by path: a lost exec bit in git silently skips them on Linux
+      # (the Windows stand mount can't see it)
+      - name: Exec bits of the package scripts
+        run: |
+          set -o pipefail
+          sh stand/tests/exec-bits.sh 2>&1 | tee exec-bits.log
+          grep -E '^EXEC-BITS: checked=[1-9][0-9]* failed=0$' exec-bits.log
+
       - name: Build stand image (OpenWrt 24.10.4 + sing-box 1.12.x)
         run: docker build -f stand/Dockerfile -t vpnpool-stand .
 
