@@ -84,7 +84,7 @@ var METHODS = {
 	set_preferred:    { params: [ 'tag', 'id' ], write: true },
 	set_schedule:     { params: [ 'enabled', 'on', 'off', 'refresh' ], write: true },
 	speedtest:        { params: [ 'tag', 'id' ], write: true },
-	tg_test:          { params: [], write: true },
+	tg_test:          { params: [ 'token', 'chat', 'via_proxy' ], write: true },
 	'import':         { params: [ 'config' ], write: true },
 	// ROADMAP-2.0 §6.3-6.6 (stage 3)
 	set_config:       { params: [ 'settings' ], write: true, future: true },
@@ -400,7 +400,30 @@ var CSS = [
 	'.vp-confirm .button-row,.vp-confirm .right{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:.5em}',
 	'.vp-toast{position:sticky;top:0;z-index:150}',
 	'.vp-field-error-text{color:var(--error-color-medium,var(--danger-color,inherit));margin:.2em 0 0}',
+	// settings pages (formSaver): one save panel, radio cards, hints, the device list
+	'.vp-page,.vp-page .cbi-section,.vp-page .cbi-value{box-sizing:border-box;max-width:100%;min-width:0}',
+	'.vp-page textarea,.vp-page input[type=text],.vp-page input[type=password],.vp-page select{max-width:100%;box-sizing:border-box}',
+	'.vp-savebar{position:sticky;bottom:0;z-index:100;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.5em;box-sizing:border-box;max-width:100%;margin:1em 0 0;padding:.6em .8em;border:1px solid var(--border-color-medium,GrayText);border-radius:6px;background:var(--background-color-high,Canvas);color:var(--text-color-high,CanvasText)}',
+	'.vp-savebar-state{flex:1 1 12em;min-width:0;color:var(--text-color-medium,GrayText)}',
+	'.vp-savebar.vp-dirty .vp-savebar-state{color:var(--warn-color-high,var(--warning-color,inherit));font-weight:bold}',
+	'.vp-cards .cbi-radio{display:flex;align-items:flex-start;gap:.5em;box-sizing:border-box;max-width:100%;margin:0 0 .5em;padding:.6em .8em;border:1px solid var(--border-color-medium,GrayText);border-radius:6px;cursor:pointer}',
+	'.vp-cards br{display:none}',
+	'.vp-card-text{display:block;min-width:0;overflow-wrap:anywhere}',
+	'.vp-card-text b{display:block}',
+	'.vp-card-text small,.vp-hint{color:var(--text-color-medium,GrayText);overflow-wrap:anywhere}',
+	'.vp-hint{margin:.2em 0}',
+	'.vp-devlist{max-height:18em;overflow:auto;box-sizing:border-box;max-width:100%;padding:.3em .5em;border:1px solid var(--border-color-medium,GrayText);border-radius:6px}',
+	'.vp-dev{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .6em;padding:.25em 0;min-width:0}',
+	'.vp-dev-name{font-weight:bold;overflow-wrap:anywhere;min-width:0}',
+	'.vp-dev-meta{color:var(--text-color-medium,GrayText);overflow-wrap:anywhere;min-width:0}',
+	'.vp-inline{display:flex;flex-wrap:wrap;align-items:center;gap:.4em;max-width:100%}',
+	'.vp-inline>input{flex:1 1 12em;min-width:0}',
+	'.vp-page details.vp-more{margin:1em 0 0}',
+	'.vp-page details.vp-more>summary{cursor:pointer;font-weight:bold;padding:.4em 0}',
 	'@media (max-width:600px){',
+	'.vp-savebar>.btn{flex:1 1 auto}',
+	'.vp-page .cbi-value-title{float:none;width:auto;text-align:left;padding-top:0}',
+	'.vp-page .cbi-value-field{margin-left:0;width:auto}',
 	'.vp-card{padding:.55em .6em}',
 	'.vp-card-head{flex-wrap:wrap}',
 	'.vp-card-title{flex:1 1 10em}',
@@ -445,6 +468,273 @@ if (typeof document !== 'undefined') {
 	document.addEventListener('click', function(ev) {
 		if (openMenu && !openMenu.root.contains(ev.target)) closeMenu(false);
 	}, true);
+}
+
+// ---- settings pages: form.JSONMap + ONE set_config, one save panel (ROADMAP-2.0 §10.4/§10.5)
+// A page lists its settings as fields:
+//   { f: '<set_config field>', o: '<section>.<option>' of its JSONMap, t: <kind>,
+//     v: function(status, extra) -> the value now (typed the way set_config takes it),
+//     at: '<section>.<option>' where its errors are shown (default o), label: name in a toast }
+// kinds: bool  -> true/false (a Flag: '1' / '0')
+//        int   -> a number (a non-number stays text: the router says what is wrong with it)
+//        str   -> text
+//        lines -> [the non-empty lines] (a TextValue, one per line)
+//        words -> ONE text, the words joined by a space (a TextValue, one per line)
+//        list  -> the option's own array (a custom widget)
+//        set   -> [the keys whose Flag is on]; o = { key: '<section>.<option>' }
+var FORM_CONFIG = 'json';
+var currentForm = null;    // the page's form (beforeunload asks it)
+var unloadGuard = false;
+
+function formOf(t, v) {
+	switch (t) {
+	case 'bool':  return v ? '1' : '0';
+	case 'lines': return (Array.isArray(v) ? v : []).join('\n');
+	case 'words': return String(v == null ? '' : v).split(/[\s,]+/).filter(Boolean).join('\n');
+	case 'list':  return Array.isArray(v) ? v.slice() : [];
+	default:      return (v == null) ? '' : String(v);
+	}
+}
+function typedOf(t, fv) {
+	var s;
+	switch (t) {
+	case 'bool':  return fv === '1' || fv === 1 || fv === true;
+	case 'int':   s = String(fv == null ? '' : fv).trim(); return /^[0-9]{1,10}$/.test(s) ? Number(s) : s;
+	case 'lines': return (Array.isArray(fv) ? fv : String(fv == null ? '' : fv).split(/\r?\n/))
+		.map(function(x) { return String(x).trim(); }).filter(Boolean);
+	case 'words': return String(fv == null ? '' : fv).split(/[\s,]+/).filter(Boolean).join(' ');
+	case 'list':  return Array.isArray(fv) ? fv.map(String) : ((fv == null || fv === '') ? [] : [ String(fv) ]);
+	default:      return String(fv == null ? '' : fv).trim();
+	}
+}
+function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+function ensureUnloadGuard() {
+	if (unloadGuard || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+	unloadGuard = true;
+	window.addEventListener('beforeunload', function(ev) {
+		if (!currentForm || !currentForm.dirty()) return;
+		ev.preventDefault();
+		ev.returnValue = '';
+		return '';
+	});
+}
+
+// The form of one page (see common.formSaver).
+function FormSaver(C, o) {
+	var self = this;
+	this.C = C;
+	this.fields = o.fields || [];
+	this.maps = o.maps || [];
+	this.method = o.method || 'set_config';
+	this.onSaved = o.onSaved || null;
+	this.onChange = o.onChange || null;
+	this.busy = null;
+	this.sent = null;
+	this.byName = {};
+	this.fields.forEach(function(fd) { self.byName[fd.f] = fd; });
+	this.base = this.collect();
+	this.node = null;
+	var upd = function() { self.update(); };
+	this.maps.forEach(function(m) {
+		if (m.root && m.root.addEventListener)
+			[ 'input', 'change', 'widget-change', 'click' ].forEach(function(t) { m.root.addEventListener(t, upd); });
+	});
+	currentForm = this;
+	ensureUnloadGuard();
+}
+FormSaver.prototype = {
+	// [option instance, section id] of '<section>.<option>' in one of the maps, or null
+	lookup: function(path) {
+		var p = String(path).split('.');
+		for (var i = 0; i < this.maps.length; i++) {
+			var r = null;
+			// LuCI walks up from the option's element; a page drawn again has left the old
+			// elements without their form (it throws there): such an option is "not found"
+			try { r = this.maps[i].lookupOption(p[1], p[0], FORM_CONFIG); } catch (e) { r = null; }
+			if (r) return r;
+		}
+		return null;
+	},
+	read: function(path) {
+		var r = this.lookup(path);
+		return r ? r[0].formvalue(r[1]) : undefined;
+	},
+	// fields whose option is not on the page (a page bug; the unit tests require none)
+	missing: function() {
+		var self = this, out = [];
+		this.fields.forEach(function(fd) {
+			var paths = (fd.t === 'set') ? Object.keys(fd.o).map(function(k) { return fd.o[k]; }) : [ fd.o ];
+			paths.forEach(function(p) { if (!self.lookup(p)) out.push(fd.f + ' (' + p + ')'); });
+		});
+		return out;
+	},
+	/** {field: value} as the form shows it now, typed for set_config. */
+	collect: function() {
+		var self = this, out = {};
+		this.fields.forEach(function(fd) {
+			var base = self.base ? self.base[fd.f] : undefined;
+			if (fd.t === 'set') {
+				var on = [], lost = false;
+				Object.keys(fd.o).forEach(function(k) {
+					var fv = self.read(fd.o[k]);
+					if (fv === undefined) lost = true;
+					else if (typedOf('bool', fv)) on.push(k);
+				});
+				out[fd.f] = lost ? base : on;
+				return;
+			}
+			var v = self.read(fd.o);
+			out[fd.f] = (v === undefined) ? base : typedOf(fd.t, v);
+		});
+		return out;
+	},
+	/** Only the fields that differ from what the page loaded. */
+	changes: function() {
+		var cur = this.collect(), out = {};
+		for (var f in cur)
+			if (has(cur, f) && cur[f] !== undefined && !same(cur[f], this.base[f])) out[f] = cur[f];
+		return out;
+	},
+	dirty: function() { return Object.keys(this.changes()).length > 0; },
+	fieldNode: function(path) {
+		if (!path) return null;
+		var q = '[data-field="cbid.' + FORM_CONFIG + '.' + String(path).replace(/["\\]/g, '') + '"]';
+		for (var i = 0; i < this.maps.length; i++) {
+			var n = this.maps[i].root ? this.maps[i].root.querySelector(q) : null;
+			if (n) return n;
+		}
+		return null;
+	},
+	labelOf: function(fd) {
+		if (fd.label) return fd.label;
+		var r = (typeof fd.o === 'string') ? this.lookup(fd.o) : null;
+		var t = r && r[0].title;
+		return (typeof t === 'string' && t !== '') ? t : _('another setting');
+	},
+	/** Remove the error marks: of the given fields only (names), or all. */
+	clearErrors: function(names) {
+		var self = this, roots = [];
+		if (Array.isArray(names))
+			names.forEach(function(f) {
+				var fd = self.byName[f], n = fd ? self.fieldNode(fd.at || (typeof fd.o === 'string' ? fd.o : null)) : null;
+				if (n) roots.push(n);
+			});
+		else this.maps.forEach(function(m) { if (m.root) roots.push(m.root); });
+		roots.forEach(function(r) {
+			Array.prototype.forEach.call(r.querySelectorAll('.vp-field-error-text'), removeNode);
+			if (r.classList) r.classList.remove('vp-field-error');
+			Array.prototype.forEach.call(r.querySelectorAll('.vp-field-error'), function(n) { n.classList.remove('vp-field-error'); });
+		});
+	},
+	/**
+	 * Put the field errors of a failed call ({field|field[i]: code}) next to their fields; an
+	 * item of a list is named ("x.y": text). Returns the names of the fields not on this page.
+	 */
+	showErrors: function(e, only) {   // only: [names] = replace the marks of these fields only
+		var self = this, errs = (e && (e.errors || (e.reply && e.reply.errors))) || {}, missing = [];
+		this.clearErrors(only);
+		Object.keys(errs).forEach(function(key) {
+			var m = /^(.+)\[([0-9]+)\]$/.exec(key), f = m ? m[1] : key, fd = self.byName[f];
+			var text = fieldText(errs[key]);
+			var sent = self.sent && self.sent[f];
+			if (m && Array.isArray(sent) && sent[+m[2]] != null) text = _('"%s": %s').format(String(sent[+m[2]]), text);
+			var el = fd ? self.fieldNode(fd.at || (typeof fd.o === 'string' ? fd.o : null)) : null;
+			if (!el) {
+				var l = fd ? self.labelOf(fd) : _('another setting');
+				if (missing.indexOf(l) < 0) missing.push(l);
+				return;
+			}
+			el.classList.add('vp-field-error');
+			el.appendChild(E('div', { 'class': 'vp-field-error-text', 'role': 'alert' }, [ txt(text) ]));
+		});
+		return missing;
+	},
+	/**
+	 * Save: LuCI checks the inputs (it marks a wrong one itself), then ONE set_config with the
+	 * changed fields only. Field errors of the router go next to their fields. Resolves with
+	 * the reply (or the onSaved result), null when nothing was sent or it failed.
+	 */
+	save: function() {
+		var self = this, C = this.C;
+		if (this.busy) return this.busy;
+		this.busy = Promise.all(this.maps.map(function(m) { return m.parse(); })).then(function() {
+			var ch = self.changes();
+			if (!Object.keys(ch).length) { C.toast(CODE_TEXT.unchanged); return null; }
+			self.clearErrors();
+			self.sent = ch;
+			return C.call(self.method, { settings: ch }, { handle: [ 'invalid' ], success: CODE_TEXT.saved }).then(function(r) {
+				for (var f in ch) if (has(ch, f)) self.base[f] = ch[f];
+				// the page loads itself again; if that fails (its own toast), the save still stands
+				return Promise.resolve(self.onSaved ? self.onSaved(r) : r).then(null, function() { return r; });
+			}, function(e) {
+				if (e && e.code === 'invalid') {
+					var miss = self.showErrors(e);
+					C.toast(CODE_TEXT.invalid + (miss.length ? ' ' + _('Also: %s.').format(miss.join(', ')) : ''), 'error', self.method);
+				}
+				return null;
+			});
+		}, function() {
+			C.toast(CODE_TEXT.invalid, 'error', self.method);
+			return null;
+		}).then(function(r) {
+			self.busy = null;
+			self.update();
+			return r;
+		});
+		this.update();
+		return this.busy;
+	},
+	/** Back to the values the page loaded. */
+	reset: function() {
+		var self = this;
+		return Promise.all(this.maps.map(function(m) { return m.reset(); })).then(function() {
+			self.clearErrors();
+			self.update();
+		});
+	},
+	update: function() {
+		if (currentForm !== this) return false;   // the page was drawn again: a newer form owns it
+		var d = this.dirty();
+		if (this.node) {
+			this.node.classList.toggle('vp-dirty', d);
+			var st = this.node.querySelector('.vp-savebar-state');
+			var t = this.busy ? _('Saving…') : (d ? _('There are unsaved changes.') : _('All changes are saved.'));
+			if (st && st.textContent !== t) st.textContent = t;
+			var sb = this.node.querySelector('.vp-save'), cb = this.node.querySelector('.vp-revert');
+			if (sb) sb.disabled = !!this.busy;
+			if (cb) cb.disabled = !!this.busy || !d;
+		}
+		if (this.onChange) this.onChange(this.collect());
+		return d;
+	},
+	/** The page's one save panel: state + "Revert" + "Save". */
+	bar: function() {
+		var self = this;
+		if (this.node) return this.node;
+		this.node = E('div', { 'class': 'vp-savebar', 'role': 'region', 'aria-label': _('Save changes') }, [
+			E('span', { 'class': 'vp-savebar-state', 'aria-live': 'polite' }, [ txt('') ]),
+			E('button', { 'class': 'btn cbi-button cbi-button-reset vp-revert', 'type': 'button',
+				'click': function(ev) { ev.preventDefault(); self.reset(); } }, [ txt(_('Revert')) ]),
+			E('button', { 'class': 'btn cbi-button cbi-button-save important vp-save', 'type': 'button',
+				'click': function(ev) { ev.preventDefault(); self.save(); } }, [ txt(_('Save')) ])
+		]);
+		this.update();
+		return this.node;
+	}
+};
+
+// base64 <-> bytes (backup files)
+function b64ToBytes(b64) {
+	var bin = atob(String(b64 || '').replace(/[\s]/g, '')), out = new Uint8Array(bin.length);
+	for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+	return out;
+}
+function bytesToB64(bytes) {
+	var s = '', CH = 0x8000;
+	for (var i = 0; i < bytes.length; i += CH)
+		s += String.fromCharCode.apply(null, Array.prototype.slice.call(bytes.subarray(i, i + CH)));
+	return btoa(s);
 }
 
 return baseclass.extend({
@@ -937,5 +1227,69 @@ return baseclass.extend({
 		if (o.active !== undefined) el.classList.toggle('vp-active', !!o.active);
 		if (o.dimmed !== undefined) el.classList.toggle('vp-dimmed', !!o.dimmed);
 		return el;
-	}
+	},
+
+	/** The form.JSONMap section id config ("json"). */
+	FORM_CONFIG: FORM_CONFIG,
+
+	/**
+	 * JSONMap data of a settings page: { section: { option: form value } } from its fields
+	 * (see the header of FormSaver) and the status reply.
+	 */
+	formData: function(fields, st, extra) {
+		var data = {};
+		function put(path, val) {
+			var p = String(path).split('.');
+			(data[p[0]] = data[p[0]] || {})[p[1]] = val;
+		}
+		(fields || []).forEach(function(fd) {
+			var v = fd.v ? fd.v(st || {}, extra) : undefined;
+			if (fd.t === 'set') {
+				var on = {};
+				(Array.isArray(v) ? v : []).forEach(function(k) { on[k] = true; });
+				Object.keys(fd.o).forEach(function(k) { put(fd.o[k], on[k] ? '1' : '0'); });
+			}
+			else put(fd.o, formOf(fd.t, v));
+		});
+		return data;
+	},
+
+	/**
+	 * The one save panel of a settings page. o: { fields, maps: [rendered form.JSONMap…],
+	 * onSaved(reply), onChange(values), method (default set_config) }. Returns the form:
+	 * .bar() (the panel: state, "Revert", "Save"), .save(), .reset(), .collect(), .changes(),
+	 * .dirty(), .update() (call after changing a widget from code). While it has unsaved
+	 * changes, leaving the page asks first (beforeunload). The newest form of the page wins.
+	 */
+	formSaver: function(o) {
+		return new FormSaver(this, o || {});
+	},
+
+	/** The form the page shows now (beforeunload asks it), or null. */
+	currentForm: function() { return currentForm; },
+
+	/** Save base64 data as a file download (Blob; nothing is kept anywhere else). */
+	download: function(name, b64, mime) {
+		var blob = new Blob([ b64ToBytes(b64) ], { type: mime || 'application/octet-stream' });
+		var url = URL.createObjectURL(blob);
+		var a = E('a', { 'href': url, 'download': String(name || 'download'), 'style': 'display:none' });
+		document.body.appendChild(a);
+		a.click();
+		removeNode(a);
+		window.setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+		return blob;
+	},
+
+	/** A File (input type=file) -> Promise of its content as base64. */
+	readFileBase64: function(file) {
+		return new Promise(function(resolve, reject) {
+			var r = new FileReader();
+			r.onload = function() { resolve(bytesToB64(new Uint8Array(r.result))); };
+			r.onerror = function() { reject(r.error || new Error('read failed')); };
+			r.readAsArrayBuffer(file);
+		});
+	},
+
+	b64ToBytes: b64ToBytes,
+	bytesToB64: bytesToB64
 });

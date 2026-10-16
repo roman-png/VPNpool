@@ -670,7 +670,7 @@ const MUTATIONS = [
 	{ name: 'waitIdle: grace = done (В5)', from: "return Date.now() - idleSince >= grace;", to: "if (Date.now() - idleSince >= grace) { done = true; return true; } return false;", expect: [ 'waitIdle: a job never seen running is NOT reported as done' ] },
 	{ name: 'waitIdle: a seen-busy job is enough (В5)', from: "if (sawBusy) return false;                 // a mark exists but did not move yet", to: "if (sawBusy) { done = true; return true; }", expect: [ 'waitIdle(build): done only when build.at moved; an already running build does not count' ] },
 	{ name: 'session expiry toasted', from: "if (code === 'session') throw e;", to: "", expect: [ 'transport errors -> human codes; a session expiry is passed through without a toast' ] },
-	{ name: 'method dropped from METHODS', from: "\ttg_test:          { params: [], write: true },\n", to: "", expect: [ 'every rpcd method and every ACL method is declared in METHODS with the same arguments' ] },
+	{ name: 'method dropped from METHODS', from: "\trefresh:          { params: [], write: true },\n", to: "", expect: [ 'every rpcd method and every ACL method is declared in METHODS with the same arguments' ] },
 	{ name: 'code text dropped', from: "\tnot_found:          _('Not found: it may have been removed already.'),\n", to: "", expect: [ 'every code the backend answers with has a human text', 'ok:false -> Error with its code and the human text, one error toast' ] },
 	{ name: 'stale error never cleared', from: "\t\t\tdropSticky(method);\n\t\t\tif (c.reply", to: "\t\t\tif (c.reply", expect: [ 'a later success of the same method removes its stale error toast' ] },
 	// components (R4-R6 of the review + the XSS blocker)
