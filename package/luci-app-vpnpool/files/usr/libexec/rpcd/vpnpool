@@ -183,7 +183,7 @@ RESTORE_MAX_FILES=500
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x", "id": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x", "id": "x", "file": "x" }, "delete_nodes": { "tags": [], "ids": [] }, "restore_node": { "tag": "x", "id": "x" }, "refilter_node": { "tag": "x", "id": "x" }, "save_node": { "tag": "x", "id": "x" }, "unsave_node": { "tag": "x", "id": "x" }, "activate_saved": { "tag": "x", "id": "x" }, "deactivate_saved": { "tag": "x", "id": "x" }, "node_link": { "tag": "x", "id": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x", "id": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x", "id": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x", "id": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [], "ids": [], "name": "x" }, "tg_test": { "token": "x", "chat": "x", "via_proxy": true }, "set_config": { "settings": {} }, "analyze": { "text": "x" }, "add": { "text": "x", "items": [], "lines": [], "options": {} }, "backup": {}, "restore": { "data": "x", "path": "x", "replace_all": false }, "fav": { "id": "x" }, "unfav": { "id": "x" }, "hide": { "id": "x" }, "unhide": { "id": "x" }, "connect": { "id": "x" }, "auto_select": {}, "sub_set": { "id": "x", "name": "x", "url": "x", "enabled": true, "mode": "x", "pick": [] }, "sub_del": { "id": "x" } }
+{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x", "id": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x", "id": "x", "file": "x" }, "delete_nodes": { "tags": [], "ids": [] }, "restore_node": { "tag": "x", "id": "x" }, "refilter_node": { "tag": "x", "id": "x" }, "save_node": { "tag": "x", "id": "x" }, "unsave_node": { "tag": "x", "id": "x" }, "activate_saved": { "tag": "x", "id": "x" }, "deactivate_saved": { "tag": "x", "id": "x" }, "node_link": { "tag": "x", "id": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x", "id": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x", "id": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x", "id": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [], "ids": [], "name": "x" }, "tg_test": { "token": "x", "chat": "x", "via_proxy": true }, "set_config": { "settings": {} }, "analyze": { "text": "x" }, "add": { "text": "x", "items": [], "lines": [], "options": {} }, "backup": {}, "restore": { "data": "x", "path": "x", "replace_all": false }, "fav": { "id": "x" }, "unfav": { "id": "x" }, "hide": { "id": "x" }, "unhide": { "id": "x" }, "connect": { "id": "x" }, "auto_select": {}, "sub_set": { "id": "x", "name": "x", "url": "x", "enabled": true, "mode": "x", "pick": [] }, "sub_del": { "id": "x" }, "auto_exclude": { "id": "x" }, "auto_include": { "id": "x" } }
 L
 	;;
 call)
@@ -338,9 +338,12 @@ call)
 		if [ -f /tmp/vpnpool/.probe-running ]; then rep true already_running n/a '{"running":true,"already":true}'; exit 0; fi
 		: > /tmp/vpnpool/.probe-running
 		rm -f /tmp/vpnpool/.probe-result.json
-		setsid sh -c '/usr/libexec/vpnpool/probe.sh "$1" > /tmp/vpnpool/.probe-result.json 2>/dev/null; rm -f /tmp/vpnpool/.probe-running' _ "$u" >/dev/null 2>&1 &
+		# job: a token of THIS probe, carried by its result — the UI shows a result only when the
+		# token is the one its own start got (another window may have started another address)
+		JOB="$(date +%s)-$$"
+		setsid sh -c '/usr/libexec/vpnpool/probe.sh "$1" | jq -c --arg j "$2" ". + {job:\$j}" > /tmp/vpnpool/.probe-result.json 2>/dev/null; rm -f /tmp/vpnpool/.probe-running' _ "$u" "$JOB" >/dev/null 2>&1 &
 		echo $! > /tmp/vpnpool/.probe-running   # record worker PID -> clear_stale_lock frees it the instant it dies
-		rep true started n/a '{"running":true,"started":true}'
+		rep true started n/a "$(jq -nc --arg j "$JOB" '{running:true, started:true, job:$j}')"
 		;;
 	probe_result)
 		job_result /tmp/vpnpool/.probe-running /tmp/vpnpool/.probe-result.json
@@ -859,6 +862,16 @@ call)
 		;;
 	sub_del)
 		apply_api "sub del" "$input"
+		;;
+	auto_exclude)
+		# "Exclude from the automatic choice" {id}: on the list of excluded nodes (every other node
+		# takes part, new ones too)
+		apply_api "node exclude" "$input"
+		;;
+	auto_include)
+		# "Return to the automatic choice" {id}: off that list (and a member of a 1.x member list
+		# when one is in effect)
+		apply_api "node include" "$input"
 		;;
 	*)
 		rep false unknown_method

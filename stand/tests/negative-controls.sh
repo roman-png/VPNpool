@@ -383,6 +383,21 @@ ctl install-no-translation-apk engine fail 'engine/install-sh-awg1-flash ;engine
 ;; esac
 ctl ui-smoke-status-broken ui-smoke fail 'ubus vpnpool.status via /ubus' \
 	"$RPCD" '		/usr/libexec/vpnpool/status.sh' '		echo not-json'
+# ui1 review: the excluded-ids list (auto_exclude), the probe job token
+ctl ui1-gen-exclude-ignored build fail 'build/model-excluded-ids-leave-the-automatic-choice ' \
+	"$LIBX/generator.uc" 'if (length(excl_set)) {' 'if (false) {'
+ctl ui1-gen-exclude-empties build fail 'build/model-excluding-every-node-is-ignored ' \
+	"$LIBX/generator.uc" '	if (length(kept)) auto_tags = kept;' '	auto_tags = kept;'
+ctl ui1-api-include-no-member rpcd fail 'rpcd/auto_include/ok ' \
+	"$LIBX/api.uc" 'if (r && r.node && length(filter(mem, (x) => live[x]))' 'if (false && length(filter(mem, (x) => live[x]))'
+ctl ui1-api-include-stale-member rpcd fail 'rpcd/auto_include/stale-member-list-left-alone ' \
+	"$LIBX/api.uc" 'if (r && r.node && length(filter(mem, (x) => live[x]))' 'if (r && r.node && length(mem)'
+ctl ui1-api-exclude-keeps-kept rpcd fail 'rpcd/auto_exclude/ok ' \
+	"$LIBX/api.uc" "		ch = list_del(u, 'keep_auto', [ r.id ]) || ch;" ''
+ctl ui1-probe-no-job rpcd fail 'rpcd/probe_source/ok ' \
+	"$RPCD" '". + {job:\$j}"' '"."'
+ctl ui1-status-no-excluded rpcd fail 'rpcd/status/ok ' \
+	"$LIBX/status.uc" '	auto_exclude_ids: excl_ids,' ''
 # ui1: the Nodes tab — 2.0 methods only, reasons of a pasted line, the tabs of 2.0
 ctl ui1-nodes-connect-legacy ui-nodes fail 'FAIL - "Connect" is the soft choice;FAIL - only the 2.0 methods' \
 	"$VIEW/nodes.js" "common.call('connect', { id: id }" "common.call('select', { id: id }"

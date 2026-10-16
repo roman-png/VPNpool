@@ -351,6 +351,20 @@ expect_jq "urltest = the members (by id) minus the dead id" "$MBC" '(.outbounds[
 expect_jq "the dead node still selectable by hand" "$MBC" '(.outbounds[] | select(.tag=="proxy") | .outbounds | index("Mine")) != null'
 end
 rm -f /tmp/vpnpool/.dead_ids.json; uci -q delete vpnpool.main.auto_member
+# ui1 review: excluded ids (list auto_exclude) leave the automatic choice, every other node takes
+# part; excluding every node is ignored (urltest is never empty)
+uci add_list vpnpool.main.auto_exclude="$GID"; uci commit vpnpool
+mb_run
+begin "build/model-excluded-ids-leave-the-automatic-choice"
+expect_jq "urltest = every node but the excluded one" "$MBC" '(.outbounds[] | select(.tag=="auto") | .outbounds | sort) == ["Mine","PickMe"]'
+expect_jq "the excluded node is still selectable by hand" "$MBC" '(.outbounds[] | select(.tag=="proxy") | .outbounds | index("Good1")) != null'
+end
+for i in $(jq -r '.[].id' /tmp/vpnpool/nodes.json); do uci add_list vpnpool.main.auto_exclude="$i"; done; uci commit vpnpool
+mb_run
+begin "build/model-excluding-every-node-is-ignored"
+expect_jq "every node excluded: all of them in the automatic choice" "$MBC" '(.outbounds[] | select(.tag=="auto") | .outbounds | length) == 3'
+end
+uci -q delete vpnpool.main.auto_exclude; uci commit vpnpool
 echo "{\"$PID\":{\"tag\":\"PickMe\",\"link\":null,\"active\":false,\"auto\":false}}" > /etc/vpnpool/favorites.map.json
 uci set vpnpool.main.favorites_only=1; uci set vpnpool.main.auto_switch=0; uci set vpnpool.main.preferred_node="$PID"; uci commit vpnpool
 mb_run

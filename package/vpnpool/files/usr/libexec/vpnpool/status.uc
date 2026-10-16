@@ -8,7 +8,7 @@
 // Output: ok/code/daemon (the rpcd reply shape); nodes with their id, source, favourite /
 // preferred / dead / kept marks; subscriptions (each with its expiry, quota, update interval,
 // "updated", mode and picks), favorites, hidden, preferred, dead_ids / kept_ids /
-// auto_member_ids (ROADMAP 9: node ids everywhere); build, busy, paused, ping_progress, engine,
+// auto_member_ids / auto_exclude_ids (ROADMAP 9: node ids everywhere); build, busy, paused, ping_progress, engine,
 // migration (what the 1.x -> 2.0 migration could not match). The older screens' fields
 // (subscription, extra_subs, sources, saved_inactive, dead_nodes / kept_nodes / auto_members as
 // tags, settings.preferred_node as a tag, settings.selected_node "") are still there until
@@ -103,6 +103,7 @@ let fav = fav_read();
 let pref_id = o('preferred_node', '');
 let hidden_ids = filter(as_list(M.hidden, true), is_id);
 let auto_ids = filter(as_list(M.auto_member, true), is_id);
+let excl_ids = filter(as_list(M.auto_exclude, true), is_id);
 let keep_ids = filter(as_list(M.keep_auto, true), is_id);
 let dead_ids = read_json(SB + '/.dead_ids.json', []);
 if (type(dead_ids) != 'array') dead_ids = [];
@@ -344,6 +345,7 @@ printf('%J\n', {
 	dead_ids: dead_ids,
 	kept_ids: keep_ids,
 	auto_member_ids: auto_ids,
+	auto_exclude_ids: excl_ids,
 	migration: migration,
 	traffic: { up_total: conns.uploadTotal ?? 0, down_total: conns.downloadTotal ?? 0, connections: length(conn_arr) },
 	client_traffic: clist,
