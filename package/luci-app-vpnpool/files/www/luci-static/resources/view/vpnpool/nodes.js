@@ -1052,6 +1052,8 @@ return view.extend({
 		D.ta = E('textarea', { 'class': 'cbi-input-textarea vp-add-text', 'rows': '6', 'spellcheck': 'false',
 			'aria-label': _('Links, subscription addresses or settings'),
 			'placeholder': _('Paste node links (one per line), a subscription address or AmneziaWG settings') });
+		// the field's error ("invalid" + errors.text of analyze / add) is said under it (common.markFieldErrors)
+		D.box = E('div', {}, [ E('div', { 'class': 'vp-add-field', 'data-field': 'text' }, [ D.ta ]) ]);
 		var fileIn = E('input', { 'type': 'file', 'class': 'vp-hidden-file', 'tabindex': '-1', 'aria-hidden': 'true', 'accept': '.txt,.conf,.json,text/plain,application/json' });
 		var imgIn = E('input', { 'type': 'file', 'class': 'vp-hidden-file', 'tabindex': '-1', 'aria-hidden': 'true', 'accept': 'image/*' });
 		D.summary = E('div', { 'class': 'vp-add-summary', 'aria-live': 'polite' });
@@ -1081,7 +1083,7 @@ return view.extend({
 		});
 		ui.showModal(common.txt(_('Add nodes')), [
 			E('p', {}, _('One field for everything: node links, a subscription address, an AmneziaVPN link or AmneziaWG settings. Check first: every line shows whether it will be added.')),
-			D.ta,
+			D.box,
 			E('div', { 'class': 'vp-add-tools' }, [
 				button(_('From a file…'), 'vp-add-file', function() { fileIn.click(); }),
 				button(_('QR code from a picture…'), 'vp-add-qr', function() { imgIn.click(); }),
@@ -1133,10 +1135,11 @@ return view.extend({
 		if (!text.trim()) { common.toast(_('Paste links or load a file first.'), 'warning', 'add'); return Promise.resolve(); }
 		if (requestBytes(text) > MAX_TEXT) { common.toast(_('The text is too large to check at once: add it in parts.'), 'error', 'add'); return Promise.resolve(); }
 		return common.call('analyze', { text: text }).then(function(r) {
+			common.markFieldErrors(D.box, { errors: {} });
 			D.reply = r; D.text = text; D.lock = false;
 			D.lines = lineTexts(text);
 			self.renderPreview(D);
-		}, noop);
+		}, function(e) { common.markFieldErrors(D.box, e); });
 	},
 
 	chipOf: function(it) {

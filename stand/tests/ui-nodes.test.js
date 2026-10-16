@@ -237,6 +237,13 @@ test('"+ Add": everything fine closes the dialog with the result; "nothing added
 	click(t, D.addBtn); await settle(t);
 	eq(D.result.textContent, 'Added: 0, already there: 1, errors: 1 (lines 2)', 'nothing added: counted from the reply');
 	eq(toasts(t, 'danger'), [], 'no error toast for "nothing added"');
+	// a field error of analyze is said under the field (common.js), and goes with the next good check
+	t.env.handlers.analyze = () => ({ ok: false, code: 'invalid', error: 'invalid', daemon: 'n/a', errors: { text: 'bad_type' } });
+	click(t, D.checkBtn); await settle(t);
+	eq(D.box.querySelectorAll('.vp-field-error-text').map(n => n.textContent), [ t.common.FIELD_TEXT.bad_type ], 'field error under the field');
+	t.env.handlers.analyze = () => ({ ok: true, code: 'ok', items: [ { line: 1, kind: 'link', status: 'add', name: 'X' } ] });
+	click(t, D.checkBtn); await settle(t);
+	eq(D.box.querySelectorAll('.vp-field-error-text').length, 0, 'gone after a good check');
 });
 
 test('"+ Add" a subscription address: pick nodes -> add with mode pick and the picked ids', async (t) => {
@@ -472,6 +479,7 @@ const MUTATIONS = [
 	{ name: 'delete without asking', from: "\t\t\tif (!yes) return;\n\t\t\tvar ids = nodes.map(idOf)", to: "\t\t\tvar ids = nodes.map(idOf)", expect: [ 'bulk panel only with a selection; bulk delete asks first and is one call' ] },
 	{ name: 'lines numbered without dropping the blank lines on top', from: "return t.replace(/^", to: "return t.replace(/^$^", expect: [ '"+ Add": a chip and a reason per line, add sends the checked lines, the result names the error lines', '"+ Add" a subscription address: pick nodes -> add with mode pick and the picked ids' ] },
 	{ name: 'request limit counted in characters', from: "if (requestBytes(text) > MAX_TEXT) {", to: "if (text.length > MAX_TEXT) {", expect: [ '"+ Add" from a file: links are added to the field, AmneziaWG settings replace it, a huge file is refused' ] },
+	{ name: 'field error of analyze not shown', from: "}, function(e) { common.markFieldErrors(D.box, e); });", to: "}, noop);", expect: [ '"+ Add": everything fine closes the dialog with the result; "nothing added" is a result, not an error' ] },
 	{ name: 'speed result not shown', from: "self.speed[n.id] = res.mbps;", to: "", expect: [ 'speed test: the card says it is testing, the result is a badge; a failure is said' ] },
 	{ name: 'service off not said', from: "var b = !st.enabled ?", to: "var b = false ?", expect: [ 'service off: a banner; nothing at all: the empty state with "+ Add"' ] }
 ];
