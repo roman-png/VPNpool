@@ -15,7 +15,12 @@
 var E = common.E;
 var txt = common.txt;
 
-var RESTORE_MAX_BYTES = 4194304;   // the router refuses a bigger archive (rpcd restore)
+// The file goes as base64 inside ONE JSON-RPC request; uhttpd refuses a request body over 64 KiB
+// (measured on the stand, 24.10 and 25.12: 65536 bytes pass, 65537 -> -32700 Parse error).
+// 60000 base64 characters leave room for the envelope and a call LuCI batches along: a file up
+// to 45000 bytes. Bigger archives need an upload to the router (cgi-upload + restore {path}).
+var RESTORE_MAX_B64 = 60000;
+var RESTORE_MAX_BYTES = RESTORE_MAX_B64 / 4 * 3;
 
 function settings(st) { return (st && st.settings) || {}; }
 function sv(name, def) { return function(st) { var v = settings(st)[name]; return (v == null) ? def : v; }; }
@@ -115,8 +120,13 @@ return view.extend({
 	restoreFile: function(file) {
 		var self = this;
 		if (!file) return Promise.resolve(null);
-		if (file.size > RESTORE_MAX_BYTES) { common.toast(common.codeText('too_large'), 'error', 'restore'); return Promise.resolve(null); }
+		var tooBig = function() {
+			common.toast(_('This file is too large to upload through the page: at most %d KB.').format(Math.floor(RESTORE_MAX_BYTES / 1024)), 'error', 'restore');
+			return null;
+		};
+		if (Math.ceil(file.size / 3) * 4 > RESTORE_MAX_B64) return Promise.resolve(tooBig());
 		return common.readFileBase64(file).then(function(b64) {
+			if (b64.length > RESTORE_MAX_B64) return tooBig();
 			return common.call('restore', { data: b64 }, { handle: [ 'confirm_required' ] }).then(function() {
 				return null;   // the router never replaces without replace_all: nothing happened
 			}, function(e) {
@@ -186,7 +196,7 @@ return view.extend({
 		// ---- protection
 		s = m.section(form.NamedSection, 'protect', 'protect', _('Protection'));
 		s.option(form.Flag, 'killswitch', _('Block the internet while the VPN is down'),
-			_('Nothing goes past the VPN while no node works. Off: the network goes directly until a node works again.'));
+			_('While no node works, what should go through the VPN does not go directly: with "everything except the chosen sites" that is the whole internet, with "only the chosen sites" only those sites. Off: it goes directly until a node works again.'));
 		s.option(form.Flag, 'dns_protect', _('Send site name lookups through the VPN'),
 			_('The internet provider does not see which sites the devices look up.'));
 
@@ -250,10 +260,10 @@ return view.extend({
 
 		// ---- advanced (folded)
 		s = ma.section(form.NamedSection, 'adv', 'adv', null);
-		o = s.option(form.Value, 'failover_interval', _('Check the nodes every, seconds'));
+		o = s.option(form.Value, 'failover_interval', _('Node check interval, s'));
 		o.datatype = 'and(uinteger,range(10,86400))';
 		o.placeholder = '60';
-		o = s.option(form.Value, 'failover_tolerance', _('Switch only if faster by, ms'),
+		o = s.option(form.Value, 'failover_tolerance', _('Switching threshold, ms'),
 			_('Keeps the router from jumping between nodes of almost the same speed.'));
 		o.datatype = 'and(uinteger,range(0,5000))';
 		o.placeholder = '50';

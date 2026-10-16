@@ -509,6 +509,39 @@ function typedOf(t, fv) {
 }
 function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 
+// The sections of a JSONMap's data (CBIJSONConfig keeps them in .data; the same in 23.05,
+// 24.10 and 25.12). LuCI's Map.parse() WRITES the active options into them and DELETES the
+// hidden ones, so after a Save they no longer hold what the page loaded.
+function mapSections(m) {
+	var d = m && m.data;
+	return (d && d.data && typeof d.data === 'object') ? d.data : null;
+}
+// {section: {option: value}} — a deep copy of the values (keys without a leading dot)
+function snapOf(m) {
+	var secs = mapSections(m), out = {};
+	if (!secs) return out;
+	Object.keys(secs).forEach(function(s) {
+		var o = {};
+		Object.keys(secs[s] || {}).forEach(function(k) {
+			if (k.charAt(0) === '.') return;
+			var v = secs[s][k];
+			o[k] = Array.isArray(v) ? v.slice() : v;
+		});
+		out[s] = o;
+	});
+	return out;
+}
+function restoreSnap(m, snap) {
+	var secs = mapSections(m);
+	if (!secs || !snap) return;
+	Object.keys(snap).forEach(function(s) {
+		var t = secs[s];
+		if (!t) return;
+		Object.keys(t).forEach(function(k) { if (k.charAt(0) !== '.') delete t[k]; });
+		Object.keys(snap[s]).forEach(function(k) { var v = snap[s][k]; t[k] = Array.isArray(v) ? v.slice() : v; });
+	});
+}
+
 function ensureUnloadGuard() {
 	if (unloadGuard || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
 	unloadGuard = true;
@@ -534,6 +567,8 @@ function FormSaver(C, o) {
 	this.byName = {};
 	this.fields.forEach(function(fd) { self.byName[fd.f] = fd; });
 	this.base = this.collect();
+	// what each map loaded: "Revert" puts it back before drawing the form again
+	this.snaps = this.maps.map(snapOf);
 	this.node = null;
 	var upd = function() { self.update(); };
 	this.maps.forEach(function(m) {
@@ -647,6 +682,9 @@ FormSaver.prototype = {
 			}
 			el.classList.add('vp-field-error');
 			el.appendChild(E('div', { 'class': 'vp-field-error-text', 'role': 'alert' }, [ txt(text) ]));
+			// a mark inside a folded part ("Advanced") must be seen: unfold it
+			for (var p = el.parentNode; p; p = p.parentNode)
+				if (p.tagName === 'DETAILS' && !p.open) p.open = true;
 		});
 		return missing;
 	},
@@ -664,7 +702,7 @@ FormSaver.prototype = {
 			self.clearErrors();
 			self.sent = ch;
 			return C.call(self.method, { settings: ch }, { handle: [ 'invalid' ], success: CODE_TEXT.saved }).then(function(r) {
-				for (var f in ch) if (has(ch, f)) self.base[f] = ch[f];
+				for (var f in ch) if (has(ch, f)) { self.base[f] = ch[f]; self.snapPut(self.byName[f], ch[f]); }
 				// the page loads itself again; if that fails (its own toast), the save still stands
 				return Promise.resolve(self.onSaved ? self.onSaved(r) : r).then(null, function() { return r; });
 			}, function(e) {
@@ -685,10 +723,31 @@ FormSaver.prototype = {
 		this.update();
 		return this.busy;
 	},
-	/** Back to the values the page loaded. */
+	// a saved value becomes what "Revert" goes back to (the form's own value kind)
+	snapPut: function(fd, v) {
+		if (!fd) return;
+		var self = this;
+		var put = function(path, val) {
+			var p = String(path).split('.');
+			self.snaps.forEach(function(sn) { if (sn[p[0]]) sn[p[0]][p[1]] = val; });
+		};
+		if (fd.t === 'set') {
+			var on = {};
+			(Array.isArray(v) ? v : []).forEach(function(k) { on[k] = true; });
+			Object.keys(fd.o).forEach(function(k) { put(fd.o[k], on[k] ? '1' : '0'); });
+		}
+		else put(fd.o, formOf(fd.t, v));
+	},
+	/**
+	 * Back to the values the page loaded (or saved since): the maps' data first get their
+	 * copy back (a Save before has rewritten them), then LuCI loads and draws the form again.
+	 */
 	reset: function() {
 		var self = this;
-		return Promise.all(this.maps.map(function(m) { return m.reset(); })).then(function() {
+		return Promise.all(this.maps.map(function(m, i) {
+			restoreSnap(m, self.snaps[i]);
+			return Promise.resolve(typeof m.load === 'function' ? m.load() : null).then(function() { return m.reset(); });
+		})).then(function() {
 			self.clearErrors();
 			dropSticky(self.method);   // the error of a refused save is about values that are gone now
 			self.update();
