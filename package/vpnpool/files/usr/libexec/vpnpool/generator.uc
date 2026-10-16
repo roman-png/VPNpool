@@ -360,6 +360,11 @@ if (dns_strategy != 'off')
 		strategy: dns_strategy
 	};
 
+// AmneziaWG / WireGuard endpoints log their whole device config, private and preshared keys
+// included, at debug level ("AWG IPC config: ..." in the engine): never below info with them
+if (length(endpoints) && (log_level == 'trace' || log_level == 'debug'))
+	log_level = 'info';
+
 // ---- assemble ----
 let config = {
 	log: { level: log_level, timestamp: true },

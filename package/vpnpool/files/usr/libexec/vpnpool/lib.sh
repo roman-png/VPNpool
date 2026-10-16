@@ -25,6 +25,13 @@ sb_bin() {
 	local b
 	b=$(cat "$SB_BIN_FILE" 2>/dev/null)
 	if [ -n "$b" ] && [ -x "$b" ]; then echo "$b"; return 0; fi
+	# no record (after a reboot /tmp is empty, the flash copy is what runs; or a rollback to a
+	# config of another build): choose by what the config holds — AmneziaWG endpoints need the
+	# engine (enginecap.uc select 1), anything else the configured / stock binary
+	if [ -s "$SB_CONF" ] && jq -e '[(.endpoints // [])[] | select(.type == "awg")] | length > 0' "$SB_CONF" >/dev/null 2>&1; then
+		b=$(ucode "$ENGINECAP" select 1 2>/dev/null | jq -r '.bin // empty' 2>/dev/null)
+		if [ -n "$b" ] && [ -x "$b" ]; then echo "$b"; return 0; fi
+	fi
 	b=$(uci -q get vpnpool.main.singbox_bin)
 	if [ -n "$b" ] && [ -x "$b" ]; then echo "$b"; return 0; fi
 	echo "$SB_BIN_DEFAULT"

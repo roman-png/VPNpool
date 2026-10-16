@@ -178,4 +178,16 @@ expect_eq "no shared temp file left in /tmp/vpnpool" "$(ls -a /tmp/vpnpool | gre
 expect_jq "the archive was parsed (positive control)" "$(cat "$FXS/p1.json")" '(.nodes[] | select(.tag=="Node001") | .saved)==true'
 end
 rm -f /etc/vpnpool/saved.map.json
+# temp-file names of processes that start together must differ (common.uc uniq): ucode's rand()
+# gave two of eight parallel processes the same number, and the overlapping polls above then
+# shared one archive temp file (one poll deleted it under the other -> "saved" lost, ~1 in 6)
+printf "import { uniq } from '/usr/libexec/vpnpool/common.uc';\nprint(uniq(), '\\\\n');\n" > "$FXS/uniq.uc"
+: > "$FXS/uniq.out"
+_up=""
+for i in $(seq 1 40); do ucode "$FXS/uniq.uc" >> "$FXS/uniq.out" 2>/dev/null & _up="$_up $!"; done
+for p in $_up; do wait "$p"; done   # these PIDs only (a bare wait would wait for the fake daemon)
+begin "status/temp-names-unique-across-processes"
+expect_eq "40 names written" "$(grep -c . "$FXS/uniq.out")" 40
+expect_eq "40 different" "$(sort -u "$FXS/uniq.out" | grep -c .)" 40
+end
 daemon_stop

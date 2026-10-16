@@ -14,7 +14,7 @@
 import { readfile, stat, lsdir, popen, access, writefile, unlink, open } from 'fs';
 import { cursor } from 'uci';
 import { rand } from 'math';
-import { read_json, write_atomic, file_sig, mask_url, mask_token, str_key, as_list, nid, SB_AWG, engine_cap } from './common.uc';
+import { uniq, read_json, write_atomic, file_sig, mask_url, mask_token, str_key, as_list, nid, SB_AWG, engine_cap } from './common.uc';
 
 const SB = '/tmp/vpnpool';
 const CONF = '/etc/vpnpool';
@@ -129,7 +129,7 @@ let archive_nodes = parsed('archive', file_sig(SAVED_MAP) + '|' + file_sig(SNAP_
 	let links = [];
 	for (let k in sort(keys(by))) if (type(by[k]) == 'string' && length(by[k])) push(links, by[k]);
 	if (!length(links)) return null;
-	let p = sprintf('%s/.archive.links.%d.%d', SB, time(), rand());   // own name: polls may overlap
+	let p = sprintf('%s/.archive.links.%s', SB, uniq());   // own name: polls may overlap
 	writefile(p, join('\n', links) + '\n');
 	return p;
 });
@@ -285,6 +285,8 @@ printf('%J\n', {
 	awg: awgcap,
 	engine: engine,
 	guard: read_json(SB + '/guard_status.json', null),
+	// AWG files the parser refuses (build.sh): [{file, reason, field?}] — removable by file name
+	unreadable: read_json(SB + '/awg_unreadable.json', []),
 	mode: o('mode', 'selective'),
 	active: px.proxy?.now ?? '',
 	auto_now: px.auto?.now ?? '',

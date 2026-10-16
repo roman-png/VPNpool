@@ -24,9 +24,18 @@ function read_json(path, def) {
 	return (v == null) ? def : v;
 }
 
+// A name part no other process gets: the kernel's random uuid. NOT time()+rand(): ucode seeds
+// rand() so coarsely that two processes started together draw the same number (measured: 2 of 8
+// parallel runs) — two overlapping status polls then shared one temp file and one deleted it under
+// the other.
+function uniq() {
+	let u = trim(readfile('/proc/sys/kernel/random/uuid') ?? '');
+	return length(u) ? u : sprintf('%d.%d', time(), rand());
+}
+
 // Atomic write (temp file in the same directory + rename) — readers never see half a file.
 function write_atomic(path, data) {
-	let t = sprintf('%s.tmp.%d.%d', path, time(), rand());   // own name: writers may overlap
+	let t = sprintf('%s.tmp.%s', path, uniq());   // own name: writers may overlap
 	let f = open(t, 'w');
 	if (!f) return false;
 	f.write(data);
@@ -100,7 +109,10 @@ function nid(n) {
 // with podkop) stays /usr/bin/sing-box; our AWG build is a separate file /usr/bin/sing-box-awg
 // (engine.sh). uci singbox_bin pins another binary (empty / the stock path = automatic).
 // The capability is MEASURED, never guessed from a version string: `version -n` + `check` of a
-// tiny config with an awg endpoint (the same probe engine.sh uses before it installs a build).
+// tiny config with an awg endpoint (AWG_PROBE: the probe engine.sh uses before it installs a build)
+// and of one with the AWG 3.1 fields (AWG_PROBE31: header key, I1, range timers, random trailers,
+// keepalive range — the old hoaxisr awg2.1 fork that vpnpool 1.4 put in place of the stock binary
+// passes the first and fails this one).
 // Cached per binary by mtime:size in /tmp/vpnpool/engine-cap.json — the only place here that
 // spawns processes, and only when a binary changed (status polls cost nothing).
 // Env overrides (stand tests): VPNPOOL_SB_STOCK, VPNPOOL_SB_AWG, VPNPOOL_ENGINE_CAP.
@@ -112,6 +124,13 @@ const AWG_PROBE = '{"log":{"level":"error"},"endpoints":[{"type":"awg","tag":"en
 	'"jc":4,"jmin":10,"jmax":50,"s1":89,"s2":112,"h1":"1","h2":"2","h3":"3","h4":"4","peers":[' +
 	'{"address":"198.51.100.61","port":443,"public_key":"SrvPUBFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0=",' +
 	'"allowed_ips":["0.0.0.0/0"]}]}],"outbounds":[{"type":"direct","tag":"direct"}]}\n';
+const AWG_PROBE31 = '{"log":{"level":"error"},"endpoints":[{"type":"awg","tag":"engine-check31",' +
+	'"private_key":"YBk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk=","address":["10.8.1.9/32"],' +
+	'"jc":4,"jmin":10,"jmax":50,"s1":16,"s2":16,"s3":16,"s4":16,"h1":"1","h2":"2","h3":"3","h4":"4",' +
+	'"i1":"<r 2>","header_protection_key":"c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0MTI=",' +
+	'"rekey_after_time":"100-120","random_trailers":true,"disable_cookies":true,"peers":[' +
+	'{"address":"198.51.100.61","port":443,"public_key":"SrvPUBFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0=",' +
+	'"persistent_keepalive_interval":"25-35","allowed_ips":["0.0.0.0/0"]}]}],"outbounds":[{"type":"direct","tag":"direct"}]}\n';
 
 function shq(s) { return "'" + replace('' + s, "'", "'\\''") + "'"; }
 
@@ -121,29 +140,31 @@ function sb_version_mm(v) {
 	return m ? [ int(m[1]), int(m[2]) ] : null;
 }
 
-// engine_cap(bin, force) -> {bin, present, sig, version, major, minor, awg}
+// engine_cap(bin, force) -> {bin, present, sig, version, major, minor, awg, awg31}
 function engine_cap(bin, force) {
 	let st = stat(bin);
 	if (!st || st.type != 'file' || !access(bin, 'x'))
-		return { bin: bin, present: false, sig: null, version: null, major: null, minor: null, awg: false };
+		return { bin: bin, present: false, sig: null, version: null, major: null, minor: null, awg: false, awg31: false };
 	let sig = st.mtime + ':' + st.size;
 	let cache = read_json(ENGINE_CAP, {});
 	if (type(cache) != 'object') cache = {};
 	let c = cache[bin];
-	if (!force && type(c) == 'object' && c.sig == sig) return c;
+	if (!force && type(c) == 'object' && c.sig == sig && c.awg31 != null) return c;
 	mkdir(substr(ENGINE_CAP, 0, rindex(ENGINE_CAP, '/')));
 	let f = popen(shq(bin) + ' version -n 2>/dev/null', 'r');
 	let v = f ? trim(split(f.read('all') ?? '', '\n')[0] ?? '') : '';
 	if (f) f.close();
-	let probe = sprintf('%s.probe.%d.%d.json', ENGINE_CAP, time(), rand());
-	let awg = false;
+	let probe = sprintf('%s.probe.%s.json', ENGINE_CAP, uniq());
+	let awg = false, awg31 = false;
 	if (writefile(probe, AWG_PROBE) != null) {
 		awg = system(shq(bin) + ' check -c ' + shq(probe) + ' >/dev/null 2>&1') == 0;
+		if (awg && writefile(probe, AWG_PROBE31) != null)
+			awg31 = system(shq(bin) + ' check -c ' + shq(probe) + ' >/dev/null 2>&1') == 0;
 		unlink(probe);
 	}
 	let mm = sb_version_mm(v);
 	c = { bin: bin, present: true, sig: sig, version: length(v) ? v : null,
-	      major: mm ? mm[0] : null, minor: mm ? mm[1] : null, awg: awg };
+	      major: mm ? mm[0] : null, minor: mm ? mm[1] : null, awg: awg, awg31: awg31 };
 	cache[bin] = c;
 	write_atomic(ENGINE_CAP, sprintf('%J', cache));
 	return c;
@@ -153,8 +174,10 @@ function engine_cap(bin, force) {
 //   reason null | "engine_missing" (AWG nodes, no AWG-capable build installed) |
 //   "engine_no_awg" (the configured / installed build cannot run AWG)
 // Rules: uci singbox_bin set to another binary -> that one (if it exists); otherwise the stock
-// one, except when there are AWG nodes and the stock binary cannot run them: then
-// /usr/bin/sing-box-awg when it can. Pure WireGuard runs on the stock binary.
+// one — except when there are AWG nodes: then /usr/bin/sing-box-awg whenever it can run AWG
+// (our engine wins over a stock binary that happens to be an AWG fork); the stock binary only
+// when there is no engine. Pure WireGuard runs on the stock binary. Nodes with AWG 3.1 fields on
+// a build without them (awg31:false) are deferred by build.sh (engine_no_awg31).
 function engine_select(cfg_bin, has_awg) {
 	let explicit = (type(cfg_bin) == 'string' && length(cfg_bin) && cfg_bin != SB_STOCK) ? cfg_bin : null;
 	let cap = explicit ? engine_cap(explicit) : null;
@@ -164,14 +187,12 @@ function engine_select(cfg_bin, has_awg) {
 		let ac = engine_cap(SB_AWG);
 		if (ac.present) cap = ac;
 	}
-	if (has_awg && !cap.awg) {
-		if (explicit && cap.bin == explicit) reason = 'engine_no_awg';
-		else {
-			let ac = engine_cap(SB_AWG);
-			if (ac.present && ac.awg) cap = ac;
-			else reason = ac.present ? 'engine_no_awg' : 'engine_missing';
-		}
-	}
+	let pinned = explicit && cap.bin == explicit;
+	if (has_awg && !pinned) {
+		let ac = engine_cap(SB_AWG);
+		if (ac.present && ac.awg) cap = ac;
+		else if (!cap.awg) reason = ac.present ? 'engine_no_awg' : 'engine_missing';
+	} else if (has_awg && !cap.awg) reason = 'engine_no_awg';
 	let r = {};
 	for (let k, v in cap) r[k] = v;
 	r.reason = reason;
@@ -179,5 +200,5 @@ function engine_select(cfg_bin, has_awg) {
 	return r;
 }
 
-export { VALID_COMMUNITY, read_json, write_atomic, file_sig, mask_url, mask_token, str_key, as_list, jstr, nid,
+export { VALID_COMMUNITY, uniq, read_json, write_atomic, file_sig, mask_url, mask_token, str_key, as_list, jstr, nid,
 	SB_STOCK, SB_AWG, ENGINE_CAP, sb_version_mm, engine_cap, engine_select };
