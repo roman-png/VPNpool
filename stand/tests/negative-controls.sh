@@ -549,31 +549,31 @@ ctl awgb-looks-base64-bs-s parser fail 'parser/base64-blob-with-line-breaks ' \
 ctl awgb-uuid-bs-s parser fail 'parser/vless-id-with-letter-s ' \
 	"$LIBX/parser.uc" 'if (!length(uuid) || match(uuid, /[[:space:]:]/)) return' 'if (!length(uuid) || match(uuid, /[\s:]/)) return'
 # engine choice + cache
-ctl awgb-engine-never-chosen awg fail 'awg/select-engine-awg-nodes ;awg/select-stock-path-configured-is-automatic ;awg/build-engine-awg-in-config ;awg/status-engine-block ;awg/chain-amnezia5-every-field ;awg/chain-amnezia5-runs ;awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-mark-ends-when-the-node-changes ;awg/guard-limit-two-repairs ;awg/add-with-engine-no-warning ' \
+ctl awgb-engine-never-chosen awg fail 'awg/select-engine-awg-nodes ;awg/select-stock-path-configured-is-automatic ;awg/build-engine-awg-in-config ;awg/status-engine-block ;awg/fork-stock-our-engine-wins ;awg/no-private-key-in-the-engine-log ;awg/chain-amnezia5-every-field ;awg/chain-amnezia5-runs ;awg/guard-no-default-route-is-not-the-node ;awg/guard-node-works-once-the-route-is-back ;awg/guard-port-in-use-keeps-the-change ;awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-mark-expires ;awg/guard-mark-ends-when-the-node-changes ;awg/guard-rolls-back-with-the-binary-of-the-config ;awg/guard-rollback-without-a-binary-record ;awg/guard-limit-two-repairs ;awg/add-with-engine-no-warning ' \
 	"$LIBX/common.uc" '		if (ac.present && ac.awg) cap = ac;' '		if (false) cap = ac;'
 ctl awgb-cap-not-cached awg fail 'awg/engine-cap-cached-by-mtime-size ' \
 	"$LIBX/common.uc" "	if (!force && type(c) == 'object' && c.sig == sig && c.awg31 != null) return c;" '	;'
 # build: deferred nodes, the binary of the check
-ctl awgb-no-deferral awg fail 'awg/build-no-engine-awg-deferred ;awg/status-lists-deferred-node ;awg/build-only-deferred-clear-state ;awg/delete-deferred-by-tag ' \
+ctl awgb-no-deferral awg fail 'awg/build-no-engine-awg-deferred ;awg/status-lists-deferred-node ' \
 	"$LIBX/build.sh" '(if ($eng.reason // null) != null and $n.type == "awg" then {reason: $eng.reason}' '(if false then {reason: $eng.reason}'
-ctl awgb-check-with-stock awg fail 'awg/build-engine-awg-in-config ;awg/status-engine-block ;awg/chain-amnezia5-every-field ;awg/chain-amnezia5-runs ;awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-mark-ends-when-the-node-changes ;awg/guard-limit-two-repairs ' \
+ctl awgb-check-with-stock awg fail 'awg/build-engine-awg-in-config ;awg/status-engine-block ;awg/fork-stock-31-nodes-deferred-not-cut ;awg/fork-stock-our-engine-wins ;awg/no-private-key-in-the-engine-log ;awg/chain-amnezia5-every-field ;awg/chain-amnezia5-runs ;awg/guard-no-default-route-is-not-the-node ;awg/guard-node-works-once-the-route-is-back ;awg/guard-port-in-use-keeps-the-change ;awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-mark-expires ;awg/guard-mark-ends-when-the-node-changes ;awg/guard-rolls-back-with-the-binary-of-the-config ;awg/guard-rollback-without-a-binary-record ;awg/guard-limit-two-repairs ' \
 	"$LIBX/build.sh" 'while ! "$SB_BIN" check -c "$SB_CONF.new"' 'while ! sing-box check -c "$SB_CONF.new"'
-ctl awgb-status-no-deferred awg fail 'awg/status-lists-deferred-node ;awg/guard-node-dies-at-start-set-aside ' \
+ctl awgb-status-no-deferred awg fail 'awg/status-lists-deferred-node ;awg/fork-stock-31-nodes-deferred-not-cut ;awg/guard-node-dies-at-start-set-aside ' \
 	"$LIBX/status.uc" 'for (let d in deferred) {' 'for (let d in []) {'
 # generator by version (checked by RUNNING both engines)
 ctl awgb-generator-no-version-gate awg fail 'awg/generator-1.14-form ;awg/generator-1.14-runs-on-engine ;awg/generator-1.14-form-refused-by-1.12 ' \
 	"$LIBX/generator.uc" 'let SB_GE_114 = sbv ? (int(sbv[1]) > 1 || (int(sbv[1]) == 1 && int(sbv[2]) >= 14)) : false;' 'let SB_GE_114 = false;'
 # (every config with rule-sets then dies at start: the chain and the guard cases go red too)
-ctl awgb-http-client-detour-direct awg fail 'awg/generator-1.14-form ;awg/generator-1.14-runs-on-engine ;awg/chain-amnezia5-runs ;awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ' \
+ctl awgb-http-client-detour-direct awg fail 'awg/generator-1.14-form ;awg/generator-1.14-runs-on-engine ;awg/chain-amnezia5-runs ;awg/guard-node-works-once-the-route-is-back ;awg/guard-port-in-use-keeps-the-change ;awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-rolls-back-with-the-binary-of-the-config ;awg/guard-rollback-without-a-binary-record ' \
 	"$LIBX/generator.uc" '	config.http_clients = [ { tag: HTTP_CLIENT_TAG } ];' "	config.http_clients = [ { tag: HTTP_CLIENT_TAG, detour: 'direct' } ];"
 # the daemon: the binary it runs, the process it finds, the start guard
-ctl awgb-daemon-runs-stock awg fail 'awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-limit-two-repairs ' \
+ctl awgb-daemon-runs-stock awg fail 'awg/guard-no-default-route-is-not-the-node ;awg/guard-node-works-once-the-route-is-back ;awg/guard-port-in-use-keeps-the-change ;awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-mark-expires ;awg/guard-rolls-back-with-the-binary-of-the-config ;awg/guard-rollback-without-a-binary-record ;awg/guard-limit-two-repairs ' \
 	"$LIBX/vpnpoold" '	"$(sb_bin)" run -c "$SB_CONF"' '	sing-box run -c "$SB_CONF"'
-ctl awgb-pids-stock-name-only awg fail 'awg/daemon-finds-the-engine-process ' \
+ctl awgb-pids-stock-name-only awg fail 'awg/daemon-finds-the-engine-process ;awg/guard-rolls-back-with-the-binary-of-the-config ' \
 	"$LIBX/lib.sh" '{ pgrep -f "sing-box[^ ]* run -c $SB_CONF" 2>/dev/null;' '{ pgrep -f "sing-box run -c $SB_CONF" 2>/dev/null;'
-ctl awgb-guard-no-node-exclusion awg fail 'awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-limit-two-repairs ' \
+ctl awgb-guard-no-node-exclusion awg fail 'awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-mark-expires ;awg/guard-limit-two-repairs ' \
 	"$LIBX/vpnpoold" '		if [ -n "$node" ] && mark_bad "$node" "$fatal"; then' '		if false; then'
-ctl awgb-guard-no-rollback awg fail 'awg/guard-rolls-back-to-previous-config ' \
+ctl awgb-guard-no-rollback awg fail 'awg/guard-rolls-back-with-the-binary-of-the-config ;awg/guard-rollback-without-a-binary-record ' \
 	"$LIBX/vpnpoold" '		if [ -s "$SB_CONF.prev" ] && ! cmp -s "$SB_CONF" "$SB_CONF.prev"; then' '		if false; then'
 ctl awgb-guard-no-limit awg fail 'awg/guard-limit-two-repairs ' \
 	"$LIBX/vpnpoold" '		if [ "$n" -gt "$GUARD_MAX" ]; then' '		if [ "$n" -gt 99 ]; then'
@@ -604,7 +604,7 @@ ctl awgb2-rollback-without-binary awg fail 'awg/guard-rolls-back-with-the-binary
 	"$LIBX/vpnpoold" 'PREV_FILES="$SB_BIN_FILE $SB_DATA/nodes.json $SB_CONF"' 'PREV_FILES="$SB_DATA/nodes.json $SB_CONF"'
 ctl awgb2-sb-bin-ignores-config awg fail 'awg/guard-rollback-without-a-binary-record ' \
 	"$LIBX/lib.sh" '	if [ -s "$SB_CONF" ] && jq -e' '	if false && jq -e'
-ctl awgb2-tag-cut-at-bracket awg fail 'awg/guard-node-dies-at-start-set-aside ;awg/guard-mark-expires ;awg/guard-mark-ends-when-the-node-changes ' \
+ctl awgb2-tag-cut-at-bracket awg fail 'awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-mark-expires ' \
 	"$LIBX/vpnpoold" '| . as $n | select($f | contains("[" + $n.tag + "]:"))]' '| . as $n | select($f | contains("[" + ($n.tag | split(" ")[0]) + "]:"))]'
 ctl awgb2-fork-wins-over-engine awg fail 'awg/fork-stock-our-engine-wins ' \
 	"$LIBX/common.uc" '		if (ac.present && ac.awg) cap = ac;' '		if (ac.present && ac.awg && !cap.awg) cap = ac;'
