@@ -414,6 +414,10 @@ test('node card: cell updates keep the elements; dimming does not touch the menu
 	const css = env.doc.head.querySelector('style').textContent;
 	ok(!/\.vp-card\.vp-dimmed\{opacity/.test(css), 'no opacity on the whole dimmed card (would dim its menu)');
 	ok(/\.vp-card\.vp-dimmed \.vp-card-head[^{]*\{opacity/.test(css), 'dims the content');
+	// ui1 review: the state words stay readable (measured >= 4.5:1 in both bootstrap themes)
+	ok(!/\.vp-dimmed \.vp-card-state/.test(css), 'the state words of a dimmed card are not dimmed');
+	for (const k of [ 'warn', 'error', 'ok' ])
+		ok(new RegExp('\\.vp-card-state\\[data-kind=' + k + '\\]\\{[^}]*color:color-mix\\(in srgb,[^}]*var\\(--text-color-high').test(css), 'state ' + k + ': the theme colour mixed with the text colour');
 });
 
 // --- packaging: the translation reaches the router, stand-only pages do not
@@ -544,10 +548,12 @@ const MUTATIONS = [
 	{ name: 'no focus trap in the dialog', from: "else if (i < 0 || i === f.length - 1) { ev.preventDefault(); f[0].focus(); }", to: "", expect: [ 'confirm: focus on Cancel, Escape = Cancel, Tab stays inside, focus comes back' ] },
 	{ name: 'focus not returned after the dialog', from: "if (prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus();", to: "", expect: [ 'confirm: focus on Cancel, Escape = Cancel, Tab stays inside, focus comes back' ] },
 	{ name: 'Escape closes a foreign dialog', from: "if (!ours()) { cleanup(); resolve(false); return; }", to: "", expect: [ 'confirm replaced by another dialog: resolves false, never closes the other one' ] },
-	{ name: 'whole dimmed card transparent (М1)', from: "'.vp-card.vp-dimmed .vp-card-head,.vp-card.vp-dimmed .vp-card-state,.vp-card.vp-dimmed .vp-card-badges{opacity:.6}',", to: "'.vp-card.vp-dimmed{opacity:.6}',", expect: [ 'node card: cell updates keep the elements; dimming does not touch the menu' ] },
+	{ name: 'whole dimmed card transparent (М1)', from: "'.vp-card.vp-dimmed .vp-card-head,.vp-card.vp-dimmed .vp-card-badges{opacity:.6}',", to: "'.vp-card.vp-dimmed{opacity:.6}',", expect: [ 'node card: cell updates keep the elements; dimming does not touch the menu' ] },
 	{ name: 'set_config argument renamed (В6)', from: "set_config:       { params: [ 'settings' ]", to: "set_config:       { params: [ 'config' ]", expect: [ 'every rpcd method and every ACL method is declared in METHODS with the same arguments' ], needsListed: 'set_config' },
 	{ name: 'reason text dropped', from: "\tbad_uuid:               _('The user key in the link is not valid.'),\n", to: "", expect: [ 'every reason the backend gives for a pasted line has a human text' ] },
 	{ name: 'reasonText falls back to the code itself', from: "\treturn REASON_TEXT.parse_error;\n}", to: "\treturn code;\n}", expect: [ 'every reason the backend gives for a pasted line has a human text' ] },
+	{ name: 'the bare theme yellow for a warning (1.8:1 on white)', from: "'.vp-card-state[data-kind=warn]{color:var(--warn-color-high,var(--warning-color,inherit));color:color-mix(", to: "'.vp-card-state[data-kind=warn]{color:var(--warn-color-high,var(--warning-color,inherit));x:color-mix(", expect: [ 'node card: cell updates keep the elements; dimming does not touch the menu' ] },
+	{ name: 'the state words dimmed again', from: "'.vp-card.vp-dimmed .vp-card-head,.vp-card.vp-dimmed .vp-card-badges{opacity:.6}',", to: "'.vp-card.vp-dimmed .vp-card-head,.vp-card.vp-dimmed .vp-card-state,.vp-card.vp-dimmed .vp-card-badges{opacity:.6}',", expect: [ 'node card: cell updates keep the elements; dimming does not touch the menu' ] },
 	{ name: 'field text dropped', from: "\tbad_ipv4:      _('Enter an address like 192.168.1.10.'),\n", to: "", expect: [ 'field errors: texts per field and marks next to the form fields' ] }
 ];
 

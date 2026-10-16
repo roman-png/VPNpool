@@ -32,7 +32,8 @@ config vpnpool 'main'
 	# The automatic choice uses only the favourite nodes (when at least one is in the pool).
 	option favorites_only '0'
 	# Managed by the UI, by node ID: list hidden (subscription nodes you removed; "Return" brings
-	# them back), list auto_member (which nodes take part in the automatic choice; empty = all),
+	# them back), list auto_exclude (nodes left out of the automatic choice; the others take part,
+	# new ones too), list auto_member (1.x: only these take part; empty = all),
 	# list keep_auto (kept in the automatic choice although the service check fails them).
 	# Favourites live in /etc/vpnpool/favorites.map.json (with their links, so they outlive
 	# their subscription).

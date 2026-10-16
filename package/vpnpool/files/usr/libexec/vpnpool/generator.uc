@@ -154,6 +154,17 @@ if (length(member_set)) {
 if (!length(auto_tags))
 	auto_tags = node_tags;                               // default / fallback: all nodes
 
+// nodes the user excluded from the automatic choice (uci list auto_exclude, node IDS; the UI's
+// "Exclude from the automatic choice"): every other node takes part, new nodes too. Excluding
+// every node would empty urltest: then the exclusions are ignored.
+let excl_set = {};
+for (let t in tags_of(as_array(uci.get('vpnpool', 'main', 'auto_exclude'))))
+	excl_set[t] = 1;
+if (length(excl_set)) {
+	let kept = filter(auto_tags, (t) => !excl_set[t]);
+	if (length(kept)) auto_tags = kept;
+}
+
 // "Favourites only" (uci favorites_only=1): the automatic choice uses only the user's
 // favourite nodes (/etc/vpnpool/favorites.map.json, keyed by id). Never empties the pool: with
 // no favourite in this build the option has no effect.

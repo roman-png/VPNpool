@@ -100,7 +100,10 @@ var METHODS = {
 	connect:          { params: [ 'id' ], write: true, future: true },
 	auto_select:      { params: [], write: true, future: true },
 	sub_set:          { params: [ 'id', 'name', 'url', 'enabled', 'mode', 'pick' ], write: true, future: true },
-	sub_del:          { params: [ 'id' ], write: true, future: true }
+	sub_del:          { params: [ 'id' ], write: true, future: true },
+	// "Exclude from the automatic choice" / "Return to the automatic choice" (a list of excluded ids)
+	auto_exclude:     { params: [ 'id' ], write: true, future: true },
+	auto_include:     { params: [ 'id' ], write: true, future: true }
 };
 
 // Reply code -> human text (msgid). The ONE place where codes become words. The codes are the
@@ -408,7 +411,8 @@ var CSS = [
 	'.vp-card{box-sizing:border-box;border:1px solid var(--border-color-medium,GrayText);border-radius:6px;padding:.6em .8em;margin:0 0 .6em;background:var(--background-color-high,transparent);color:var(--text-color-high,inherit);min-width:0;max-width:100%}',
 	// dim the content, not the whole card: an opacity on the card would also dim its "⋯" list
 	// and trap the list's z-index inside the card
-	'.vp-card.vp-dimmed .vp-card-head,.vp-card.vp-dimmed .vp-card-state,.vp-card.vp-dimmed .vp-card-badges{opacity:.6}',
+	// (the state words are not dimmed: they say WHY the card is dimmed, and must stay readable)
+	'.vp-card.vp-dimmed .vp-card-head,.vp-card.vp-dimmed .vp-card-badges{opacity:.6}',
 	'.vp-card.vp-active{border-color:var(--primary-color-high,var(--main-bright-color,Highlight));border-width:2px}',
 	'.vp-card-head{display:flex;align-items:center;gap:.5em;min-width:0}',
 	'.vp-card-sel{flex:0 0 auto;margin:0}',
@@ -416,14 +420,17 @@ var CSS = [
 	'.vp-card-sub{flex:0 1 auto;color:var(--text-color-medium,GrayText);white-space:nowrap}',
 	'.vp-card-body{display:flex;flex-wrap:wrap;align-items:center;gap:.25em .6em;margin:.35em 0 0;min-width:0}',
 	'.vp-card-state{color:var(--text-color-medium,GrayText);overflow-wrap:anywhere;min-width:0}',
-	'.vp-card-state[data-kind=error]{color:var(--error-color-medium,var(--danger-color,inherit))}',
-	'.vp-card-state[data-kind=warn]{color:var(--warn-color-high,var(--warning-color,inherit))}',
-	'.vp-card-state[data-kind=ok]{color:var(--success-color-medium,var(--success-color,inherit))}',
+	// coloured words: the theme colour mixed with the theme's text colour — the theme's own yellow /
+	// green / red alone are below 4.5:1 on its background (bootstrap light yellow 1.8:1, dark red 3.3:1;
+	// measured on the stand). A browser without color-mix() keeps the first declaration.
+	'.vp-card-state[data-kind=error]{color:var(--error-color-medium,var(--danger-color,inherit));color:color-mix(in srgb,var(--error-color-medium,var(--danger-color,#c62828)) 55%,var(--text-color-high,CanvasText))}',
+	'.vp-card-state[data-kind=warn]{color:var(--warn-color-high,var(--warning-color,inherit));color:color-mix(in srgb,var(--warn-color-high,var(--warning-color,#b58900)) 35%,var(--text-color-high,CanvasText))}',
+	'.vp-card-state[data-kind=ok]{color:var(--success-color-medium,var(--success-color,inherit));color:color-mix(in srgb,var(--success-color-medium,var(--success-color,#2e7d32)) 55%,var(--text-color-high,CanvasText))}',
 	'.vp-card-actions{display:flex;align-items:center;gap:.4em;margin-left:auto}',
 	'.vp-badge{display:inline-block;box-sizing:border-box;border:1px solid currentColor;border-radius:1em;padding:0 .55em;font-size:.85em;line-height:1.5;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}',
-	'.vp-badge-ok{color:var(--success-color-medium,var(--success-color,currentColor))}',
-	'.vp-badge-warn{color:var(--warn-color-high,var(--warning-color,currentColor))}',
-	'.vp-badge-error{color:var(--error-color-medium,var(--danger-color,currentColor))}',
+	'.vp-badge-ok{color:var(--success-color-medium,var(--success-color,currentColor));color:color-mix(in srgb,var(--success-color-medium,var(--success-color,#2e7d32)) 55%,var(--text-color-high,CanvasText))}',
+	'.vp-badge-warn{color:var(--warn-color-high,var(--warning-color,currentColor));color:color-mix(in srgb,var(--warn-color-high,var(--warning-color,#b58900)) 35%,var(--text-color-high,CanvasText))}',
+	'.vp-badge-error{color:var(--error-color-medium,var(--danger-color,currentColor));color:color-mix(in srgb,var(--error-color-medium,var(--danger-color,#c62828)) 55%,var(--text-color-high,CanvasText))}',
 	'.vp-badge-info{color:var(--primary-color-high,var(--main-bright-color,currentColor))}',
 	'.vp-badge-muted{color:var(--text-color-medium,GrayText)}',
 	'.vp-menu{position:relative;display:inline-block}',

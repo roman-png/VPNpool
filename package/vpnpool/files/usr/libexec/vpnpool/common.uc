@@ -89,7 +89,7 @@ function as_list(v, split_ws) {
 // A node is known by its ID (parser.uc: 12 hex of the canonical config without the name; AWG:
 // sha256 of the private key) in EVERY store; the tag is only its display name in one build.
 //   uci  config subscription 'sub_<key>'  name, url, enabled, mode all|pick, list pick <id>
-//   uci  main: preferred_node <id>, list auto_member / keep_auto / hidden <id>, favorites_only,
+//   uci  main: preferred_node <id>, list auto_member / auto_exclude / keep_auto / hidden <id>, favorites_only,
 //        list manual_node <link> ("my nodes"; AmneziaWG ones are /etc/vpnpool/awg/<id>.conf)
 //   /etc/vpnpool/favorites.map.json  { <id>: {tag, link|ob|null, active, auto, at} }
 //        link: the node's link (ob: its outbound, for a node of a sing-box JSON source; null: an

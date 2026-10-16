@@ -92,7 +92,10 @@ M() {
 }
 
 # ---------------- read methods ----------------
-c_status() { expect_jq "status shape" "$R" '(.enabled|type=="boolean") and (.nodes|type=="array") and (.settings|type=="object")'; }
+c_status() {
+	expect_jq "status shape" "$R" '(.enabled|type=="boolean") and (.nodes|type=="array") and (.settings|type=="object")'
+	expect_jq "the excluded ids for the Nodes tab (ui1 review)" "$R" '(.auto_exclude_ids|type=="array") and (.auto_member_ids|type=="array")'
+}
 M status '{}' - - c_status - -
 
 c_diag() { expect_jq "diag shape" "$R" '(.service|type=="object") and (.resources.singbox_version|length>0)'; }
@@ -176,8 +179,11 @@ M del_source '{"url":"https://src.example.com/l"}' USR1 - c_del_source '{"url":"
 s_probe_source() { mock_on; printf '%s\n%s\n' "$L1" "$L2" > "$FXR/src.txt"; mock_rule 'GET https://src.example.com/l' 200 "$FXR/src.txt"; }
 c_probe_source() {
 	expect_jq "started" "$R" '.started==true'
+	_job=$(printf '%s' "$R" | jq -r '.job // ""')
+	expect_true "the start names its job (ui1 review)" [ -n "$_job" ]
 	_i=0; while [ $_i -lt 300 ]; do rcall probe_result; printf '%s' "$R" | jq -e '.running==false' >/dev/null 2>&1 && break; msleep 100; _i=$((_i+1)); done
 	expect_jq "probe_result lists both nodes" "$R" '.running==false and .total==2 and (.nodes|length)==2'
+	expect_jq "the result carries the same job" "$R" ".job==\"$_job\""
 }
 M probe_source '{"url":"https://src.example.com/l"}' - - c_probe_source '{"url":""}' -
 
@@ -998,6 +1004,42 @@ c_auto_select() {
 	expect_jq "applied: the selector on the automatic choice" "$R" '.code=="applied"'
 }
 M auto_select '{}' - - c_auto_select - -
+
+# ui1 review: "Exclude from the automatic choice" = a list of EXCLUDED ids (new nodes take part)
+s_auto_exclude() { fx_nodes; uci add_list vpnpool.main.keep_auto="$ID2"; uci commit vpnpool; }
+c_auto_exclude() {
+	expect_eq "auto_exclude = Node2's id" "$(ulist vpnpool.main.auto_exclude | tr '\n' ,)" "$ID2,"
+	expect_eq "no longer kept against the check" "$(ulist vpnpool.main.keep_auto)" ''
+	expect_eq "no member list written (new nodes keep joining)" "$(ulist vpnpool.main.auto_member)" ''
+	expect_jq "saved" "$R" '.code=="saved"'
+}
+M auto_exclude "$FA" USR1 - c_auto_exclude '{"id":"aaaaaaaaaaaa"}' -
+s_auto_include() { fx_nodes; uci add_list vpnpool.main.auto_exclude="$ID2"; uci add_list vpnpool.main.auto_member="$ID1"; uci commit vpnpool; }
+c_auto_include() {
+	expect_eq "not excluded any more" "$(ulist vpnpool.main.auto_exclude)" ''
+	expect_eq "a member of the member list in effect" "$(ulist vpnpool.main.auto_member | tr '\n' ,)" "$ID1,$ID2,"
+}
+M auto_include "$FA" USR1 - c_auto_include '{"id":"aaaaaaaaaaaa"}' -
+# a member list that names no node of this build is not in effect: it is left alone
+reset_state; fx_nodes; uci add_list vpnpool.main.auto_exclude="$ID2"; uci add_list vpnpool.main.auto_member=bbbbbbbbbbbb; uci commit vpnpool; daemon_start
+rcall auto_include "$FA"
+begin "rpcd/auto_include/stale-member-list-left-alone"
+expect_eq "not excluded any more" "$(ulist vpnpool.main.auto_exclude)" ''
+expect_eq "the stale member list unchanged" "$(ulist vpnpool.main.auto_member | tr '\n' ,)" "bbbbbbbbbbbb,"
+end
+rcall auto_exclude "$FA"; rcall auto_exclude "$FA"
+begin "rpcd/auto_exclude/twice-is-unchanged"
+expect_jq "unchanged" "$R" '.ok==true and .code=="unchanged"'
+expect_eq "listed once" "$(ulist vpnpool.main.auto_exclude | tr '\n' ,)" "$ID2,"
+end
+# the "Which nodes take part" dialog: one save = exclusions, the 1.x member list cleared
+reset_state; fx_nodes; uci add_list vpnpool.main.auto_member="$ID1"; uci commit vpnpool; daemon_start
+rcall set_config "$(jq -nc --arg i "$ID2" '{settings:{auto_members:[], auto_excludes:[$i]}}')"
+begin "rpcd/set_config/auto-excludes-replace-the-member-list"
+expect_jq "saved" "$R" '.ok==true'
+expect_eq "excluded" "$(ulist vpnpool.main.auto_exclude | tr '\n' ,)" "$ID2,"
+expect_eq "member list cleared" "$(ulist vpnpool.main.auto_member)" ''
+end
 
 s_sub_set() { fx_nodes; sub_section sp 'https://sub.example.com/s'; }
 c_sub_set() {

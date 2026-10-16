@@ -281,7 +281,9 @@ const SCHEMA = {
 	communities:           { s: 'routing', o: 'community', list: L_COMM, a: 'USR1' },
 	clients:               { s: 'main', o: 'client', list: L_IPV4, a: 'USR1' },
 	client_devices:        { s: 'main', o: 'client_dev', list: L_MAC, a: 'USR1' },
-	auto_members:          { s: 'main', o: 'auto_member', list: L_NODE, a: 'USR1' }
+	auto_members:          { s: 'main', o: 'auto_member', list: L_NODE, a: 'USR1' },
+	// the nodes excluded from the automatic choice (the UI's "Exclude"; every other node takes part, new ones too)
+	auto_excludes:         { s: 'main', o: 'auto_exclude', list: L_NODE, a: 'USR1' }
 };
 
 function cur_value(u, f) {
@@ -789,6 +791,29 @@ function node_op(op, inp) {
 		if (want) list_del(u, 'hidden', [ id ]) && u.commit('vpnpool');
 		return { ok: true, code: 'saved', id: id, actions: [ 'USR1' ] };
 	}
+	if (op == 'exclude') {
+		// out of the automatic choice; a node kept there against the check is not kept any more
+		if (!r || !r.node) return { ok: false, code: 'not_found' };
+		let ch = list_add(u, 'auto_exclude', r.id);
+		ch = list_del(u, 'keep_auto', [ r.id ]) || ch;
+		if (!ch) return { ok: true, code: 'unchanged', id: r.id, actions: [] };
+		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
+		return { ok: true, code: 'saved', id: r.id, actions: [ 'USR1' ] };
+	}
+	if (op == 'include') {
+		// back into the automatic choice: not excluded, and — when a list of members (1.x "auto
+		// pool") is in effect, i.e. names a node of this build — a member too
+		let id = r?.id ?? key;
+		if (!is_id(id)) return { ok: false, code: 'not_found' };
+		let ch = list_del(u, 'auto_exclude', [ id ]);
+		let mem = as_list(u.get('vpnpool', 'main', 'auto_member'), true);
+		let live = {};
+		for (let n in live_nodes()) if (n.id) live[n.id] = true;
+		if (r && r.node && length(filter(mem, (x) => live[x])) && !(id in mem)) ch = list_add(u, 'auto_member', id) || ch;
+		if (!ch) return (r && r.node) ? { ok: true, code: 'unchanged', id: id, actions: [] } : { ok: false, code: 'not_found' };
+		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
+		return { ok: true, code: 'saved', id: id, actions: [ 'USR1' ] };
+	}
 	if (op == 'keep' || op == 'unkeep') {
 		if (!r || !r.node) return { ok: false, code: 'not_found' };
 		let ch = (op == 'keep') ? list_add(u, 'keep_auto', r.id) : list_del(u, 'keep_auto', [ r.id ]);
@@ -1089,10 +1114,10 @@ function check_config(dir, savedir) {
 		// the node stores of a 1.x config hold tags (the migration maps them to ids); a 2.0 config
 		// may name a node that is not in this router's pool: an id is checked by its form only
 		let item = d.list, chk = d.c;
-		if (f == 'auto_members') item = v2 ? ((x) => is_id(x) ? [ x, null ] : [ null, 'bad_tag' ]) : L_TAG;
+		if (f == 'auto_members' || f == 'auto_excludes') item = v2 ? ((x) => is_id(x) ? [ x, null ] : [ null, 'bad_tag' ]) : L_TAG;
 		if (f == 'preferred_node') chk = v2 ? ((x) => is_id(x) ? [ x, null ] : [ null, 'bad_tag' ]) : chk_tag;
 		if (d.list) {
-			let r = chk_list(d.o ?? f, as_list(v, f != 'auto_members' || v2), item);
+			let r = chk_list(d.o ?? f, as_list(v, (f != 'auto_members' && f != 'auto_excludes') || v2), item);
 			if (r[1]) for (let k, c in r[1]) errors[k] = c;
 			continue;
 		}
