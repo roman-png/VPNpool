@@ -132,21 +132,32 @@ singbox_alive() {
 
 # ---- start guard (ROADMAP 4.8) ----
 # `sing-box check` passes configs that die at START (an AmneziaWG endpoint with values the
-# device refuses, a node whose runtime setup fails): one such node took the whole tunnel down.
-# After every NEW config is started: watch sing-box for GUARD_SECS; if it dies with a FATAL that
-# names one of OUR nodes ("start endpoint/awg[TAG]: ...", outbound/<type>[TAG] alike) -> mark that
-# node bad (build.sh defers it as start_failed while its config and the engine stay the same)
-# and rebuild without it; a FATAL without a node -> back to the previous config
-# (sing-box.json.prev, saved by save_prev before the build) — the one that ran.
+# device refuses): one such node took the whole tunnel down. After every NEW config is started,
+# sing-box is watched for GUARD_SECS; when it dies, its FATAL is CLASSIFIED (guard_class):
+#   env    — the ROUTER, not the config: no default route / network unreachable (an AWG endpoint
+#            can't bind UDP while PPPoE is down — e.g. at boot), a port in use, permissions,
+#            memory, DNS / rule-set download. Retrying fixes it, so: NO mark, NO rollback (a
+#            user's change is kept); GUARD_PENDING=1 and the supervisor tick restarts sing-box
+#            (every 15 s, no backoff while pending) and re-runs the guard. The routing policy is
+#            unchanged meanwhile: kill-switch on -> routes stay (fail-closed); off -> LAN direct.
+#            "No default route at all" (ip route) counts as env whatever the message says.
+#   config — the node's own values the engine refuses (IPC: failed to parse / set, headers must
+#            not overlap, header protection key, invalid UAPI ...), with a node of OURS named in
+#            the message (matched against the live node tags, so a tag may hold "]"): the node is
+#            marked BY ID (build.sh defers it as start_failed while its config and the engine stay
+#            the same, for BAD_TTL s at most) and the pool rebuilt without it.
+#   other  — back to the previous config (sing-box.json.prev + its node list + its binary).
 # GUARD_MAX is MY safety limit (not a sing-box limit): at most that many repairs per new
-# config, then the supervisor's crash-loop backoff takes over (the failure stays visible in
-# guard_status.json). Bad marks live in RAM and are cleared at daemon start: a restart gives
-# a marked node one new try.
+# config, then the supervisor's crash-loop backoff takes over (guard_status.json says so).
+# Bad marks live in RAM: cleared at daemon start, on expiry (build.sh BAD_TTL) and when the
+# node is added again.
 GUARD_SECS=${VPNPOOLD_GUARD_SECS:-5}
 GUARD_MAX=2
+GUARD_PENDING=0
 BAD_NODES="$SB_DATA/.bad_nodes.json"
 GUARD_STATUS="$SB_DATA/guard_status.json"
-PREV_FILES="$SB_CONF $SB_DATA/nodes.json $SB_BIN_FILE"
+# the binary first: a config is never back in place without the binary it was checked with
+PREV_FILES="$SB_BIN_FILE $SB_DATA/nodes.json $SB_CONF"
 save_prev() {   # the config that runs now (+ its node list and binary) -> *.prev
 	local f
 	[ -s "$SB_CONF" ] || return 0
@@ -181,31 +192,61 @@ guard_note() {   # <action> <tag> <id> <detail>
 		'{at:$at, action:$a, tag:(if $t == "" then null else $t end), id:(if $i == "" then null else $i end),
 		  detail:(if $d == "" then null else $d end)}' 2>/dev/null | write_atomic "$GUARD_STATUS"
 }
-mark_bad() {   # <tag> <detail> -> 0 when the tag is a node of the live list (marked)
-	local n sig
-	n=$(jq -c --arg t "$1" '[.[] | select(.tag == $t)][0] // empty' "$SB_DATA/nodes.json" 2>/dev/null)
-	[ -n "$n" ] || return 1
-	printf '%s' "$n" | jq -e '.id | type == "string" and length > 0' >/dev/null 2>&1 || return 1
+has_default_route() { [ -n "$(ip route show default 2>/dev/null)" ] || [ -n "$(ip -6 route show default 2>/dev/null)" ]; }
+# guard_class <fatal line> -> env | config | other
+guard_class() {
+	has_default_route || { echo env; return 0; }
+	case "$1" in
+		*'no route to'*|*'network is unreachable'*|*'missing default interface'*|*'address already in use'*|\
+		*'permission denied'*|*'operation not permitted'*|*'too many open files'*|*'cannot allocate memory'*|\
+		*'no buffer space'*|*'resource temporarily unavailable'*|*'initialize rule-set'*|*'lookup '*|\
+		*'i/o timeout'*|*'connection refused'*|*'context deadline exceeded'*|*'no such device'*)
+			echo env ;;
+		*'set ipc config'*|*'IPC error'*|*'failed to parse'*|*'headers must not overlap'*|\
+		*'header_protection_key'*|*'invalid UAPI'*|*'must be at least'*|*'illegal base64'*)
+			echo config ;;
+		*) echo other ;;
+	esac
+}
+# the node of OURS this FATAL names: the longest live tag that appears as "[<tag>]:" in it
+fatal_node() {   # <fatal> -> the node JSON (with id) or nothing
+	jq -c --arg f "$1" '[.[] | select(type == "object" and (.id | type) == "string" and (.tag | type) == "string")
+		| . as $n | select($f | contains("[" + $n.tag + "]:"))] | sort_by(.tag | length) | last // empty' \
+		"$SB_DATA/nodes.json" 2>/dev/null
+}
+mark_bad() {   # <node JSON> <detail> -> marked by id
+	local sig
 	sig=$(ucode "$ENGINECAP" cap "$(sb_bin)" 2>/dev/null | jq -r '.sig // ""')
 	[ -s "$BAD_NODES" ] || echo '{}' > "$BAD_NODES"
-	jq -c --argjson n "$n" --arg d "$2" --arg s "$sig" --argjson at "$(date +%s)" \
+	jq -c --argjson n "$1" --arg d "$2" --arg s "$sig" --argjson at "$(date +%s)" \
 		'.[$n.id] = {tag:$n.tag, detail:$d, engine:$s, cfg:($n | del(.tag, .id) | tojson), at:$at}' \
 		"$BAD_NODES" 2>/dev/null | write_atomic "$BAD_NODES"
 }
+# start_guard -> 0 runs | 1 failed / gave up | 2 waiting for the environment (GUARD_PENDING=1)
 start_guard() {
-	local n=0 fatal tag id
+	local n=0 fatal node tag id cls
 	while :; do
-		sb_survives && return 0
+		if sb_survives; then GUARD_PENDING=0; return 0; fi
 		fatal=$(sb_fatal)
+		cls=$(guard_class "$fatal")
+		if [ "$cls" = env ]; then
+			[ "$GUARD_PENDING" = 1 ] || {
+				log "start guard: sing-box can't start because of the router, not the config — retrying: ${fatal:-no FATAL in the log}"
+				guard_note env_wait "" "" "$fatal"; }
+			GUARD_PENDING=1
+			return 2
+		fi
+		GUARD_PENDING=0
 		n=$((n + 1))
 		if [ "$n" -gt "$GUARD_MAX" ]; then
 			log "start guard: sing-box still stops at start after $GUARD_MAX repairs — leaving it to the supervisor (vpnpool's own limit): ${fatal:-no FATAL in the log}"
 			guard_note gave_up "" "" "$fatal"
 			return 1
 		fi
-		tag=$(printf '%s' "$fatal" | sed -n -E 's/.*(endpoint|outbound)\/[a-z0-9_-]*\[([^]]*)\].*/\2/p' | head -1)
-		if [ -n "$tag" ] && mark_bad "$tag" "$fatal"; then
-			id=$(jq -r --arg t "$tag" '[.[] | select(.tag == $t)][0].id // ""' "$SB_DATA/nodes.json" 2>/dev/null)
+		node=""
+		[ "$cls" = config ] && node=$(fatal_node "$fatal")
+		if [ -n "$node" ] && mark_bad "$node" "$fatal"; then
+			tag=$(printf '%s' "$node" | jq -r '.tag'); id=$(printf '%s' "$node" | jq -r '.id')
 			log "start guard: node \"$tag\" stops sing-box at start — rebuilding without it: $fatal"
 			tg_notify "⚠️ vpnpool: node \"$tag\" can't start — it is set aside"
 			guard_note node_excluded "$tag" "$id" "$fatal"
@@ -215,12 +256,12 @@ start_guard() {
 		if [ -s "$SB_CONF.prev" ] && ! cmp -s "$SB_CONF" "$SB_CONF.prev"; then
 			log "start guard: the new config stops sing-box at start — back to the previous one: ${fatal:-no FATAL in the log}"
 			restore_prev
-			guard_note rolled_back "${tag:-}" "" "$fatal"
+			guard_note rolled_back "" "" "$fatal"
 			start_singbox
 			continue
 		fi
 		log "start guard: sing-box stops at start and there is nothing to go back to: ${fatal:-no FATAL in the log}"
-		guard_note failed "${tag:-}" "" "$fatal"
+		guard_note failed "" "" "$fatal"
 		return 1
 	done
 }
@@ -664,7 +705,12 @@ while : ; do
 		# Crash-loop backoff: if sing-box keeps dying right after start (e.g. a config that
 		# passes `check` but faults at runtime), don't hot-loop every 15 s — back off so the
 		# router stays responsive and logs aren't flooded. Resets once it stays alive.
-		if [ "$SB_FAILS" -ge 3 ]; then
+		# While the start guard waits for the ROUTER (no route at boot, PPPoE reconnect): the
+		# guard judges this start too, and there is no backoff — the tunnel is back on the first
+		# tick after the WAN is.
+		if [ "$GUARD_PENDING" = 1 ]; then
+			start_guard; RE_ROUNDS=3 routing_eval
+		elif [ "$SB_FAILS" -ge 3 ]; then
 			bo=$(( SB_FAILS * 10 )); [ "$bo" -gt 120 ] && bo=120
 			log "sing-box crash-looping — backing off ${bo}s"
 			sleep "$bo" & wait $!

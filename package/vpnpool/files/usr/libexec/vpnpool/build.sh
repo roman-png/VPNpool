@@ -10,6 +10,8 @@
 # reader never sees a half-written list and the list always matches the running config.
 . /usr/libexec/vpnpool/lib.sh
 
+# the config, the node list and the AWG files carry private keys: files written here are 0600
+umask 077
 mkdir -p "$SB_DATA"
 SRCDIR="$SB_DATA/sources"
 NODES="$SB_DATA/nodes.json"
@@ -106,6 +108,20 @@ ucode /usr/libexec/vpnpool/parser.uc --report $FILES 2>/dev/null \
 	| jq -c --arg f "$FILES" '($f | split(" ") | map(select(length > 0) | split("/") | last)) as $names
 		| map(. + {source: ($names[.src] // "")})' > "$SB_DATA/.build_report.json" 2>/dev/null
 jq -e 'type=="array"' "$SB_DATA/.build_report.json" >/dev/null 2>&1 || echo '[]' > "$SB_DATA/.build_report.json"
+# AWG files the parser refuses (e.g. a 1.x file with values that are now checked): not a node,
+# but the user must see them and be able to remove them -> awg_unreadable.json [{file, reason, field?}]
+# (status "unreadable"; rpcd delete_node {file}). One parser run over the AWG files only.
+set --   # the file names as arguments: a name may hold a space (build.sh takes no arguments)
+for f in /etc/vpnpool/awg/*.conf; do [ -f "$f" ] && set -- "$@" "$f"; done
+if [ $# -gt 0 ]; then
+	ucode /usr/libexec/vpnpool/parser.uc --report "$@" 2>/dev/null \
+		| jq -c '($ARGS.positional | map(split("/") | last)) as $names
+			| map(select(.status == "skip" and .reason != "duplicate") | {file: $names[.src], reason}
+			      + (if .field != null then {field} else {} end))' --args "$@" 2>/dev/null | write_atomic "$SB_DATA/awg_unreadable.json"
+	jq -e 'type == "array"' "$SB_DATA/awg_unreadable.json" >/dev/null 2>&1 || echo '[]' | write_atomic "$SB_DATA/awg_unreadable.json"
+else
+	echo '[]' | write_atomic "$SB_DATA/awg_unreadable.json"
+fi
 CNT=$(jq 'length' "$NB" 2>/dev/null || echo 0)
 if [ "${CNT:-0}" -lt 1 ]; then
 	log "build: 0 nodes parsed (see $SB_DATA/build.err)"
@@ -155,11 +171,16 @@ fi
 # Nodes it can't run are DEFERRED (owner's decision 14.10.2026: an AWG node without the engine is
 # kept, shown greyed out, does not go into the config and does not break the build):
 #   engine_missing / engine_no_awg — an AmneziaWG node, no AWG-capable engine;
-#   start_failed — the start guard (vpnpoold) saw THIS node stop sing-box at start, with this
-#                  very config and engine (a changed node or another engine gets a new try).
+#   engine_no_awg31 — a node with AWG 3.1 fields, the engine has only AWG 2.0 (the old fork);
+#   start_failed — the start guard (vpnpoold) saw THIS node's CONFIG stop sing-box at start, with
+#                  this very node config and engine, less than BAD_TTL ago (a changed node, another
+#                  engine or an expired mark gets a new try).
 # Plain WireGuard runs on the stock binary: never deferred for the engine.
 DEFERRED="$SB_DATA/deferred.json"
 BAD_NODES="$SB_DATA/.bad_nodes.json"
+# a start_failed mark ends after BAD_TTL s (my safety limit: the node gets a new try), or when
+# the node's config or the engine changed
+BAD_TTL=${VPNPOOL_BAD_TTL:-1800}
 HAS_AWG=0; jq -e 'any(.[]; .type == "awg")' "$NB" >/dev/null 2>&1 && HAS_AWG=1
 ENG_JSON=$(ucode "$ENGINECAP" select "$HAS_AWG" 2>/dev/null)
 printf '%s' "$ENG_JSON" | jq -e 'type == "object" and (.bin | type == "string")' >/dev/null 2>&1 \
@@ -167,12 +188,18 @@ printf '%s' "$ENG_JSON" | jq -e 'type == "object" and (.bin | type == "string")'
 SB_BIN=$(printf '%s' "$ENG_JSON" | jq -r '.bin')
 SB_VER=$(printf '%s' "$ENG_JSON" | jq -r '.version // ""')
 [ -s "$BAD_NODES" ] || echo '{}' > "$BAD_NODES"
-jq -c --argjson eng "$ENG_JSON" --slurpfile bad "$BAD_NODES" '
+jq -c --argjson eng "$ENG_JSON" --slurpfile bad "$BAD_NODES" --argjson now "$(date +%s)" --argjson ttl "$BAD_TTL" '
 	(($bad[0] // {}) | if type == "object" then . else {} end) as $b
+	| ["header_protection_key", "content_padding_addition", "rekey_after_time", "rekey_timeout",
+	   "reject_after_time", "keepalive_timeout", "max_handshake_attempts", "random_trailers", "disable_cookies"] as $f31
 	| map(. as $n
 		| ($b[$n.id // ""] // null) as $m
+		| ($n.type == "awg" and ((any($f31[]; . as $k | $n[$k] != null))
+			or (($n.peers // [])[0].persistent_keepalive_interval | type) == "string")) as $n31
 		| (if ($eng.reason // null) != null and $n.type == "awg" then {reason: $eng.reason}
+		   elif $n31 and ($eng.awg31 // false) != true then {reason: "engine_no_awg31"}
 		   elif $m != null and $m.engine == $eng.sig and $m.cfg == ($n | del(.tag, .id) | tojson)
+		        and (($m.at // 0) + $ttl) > $now
 		   then {reason: "start_failed", detail: $m.detail}
 		   else null end) as $d
 		| {n: $n, d: $d})

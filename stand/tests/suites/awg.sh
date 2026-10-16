@@ -23,13 +23,18 @@ jarg() { jq -nc "$@"; }
 
 engine_on()  { cp "$ASSET" "$AWGBIN" && chmod 0755 "$AWGBIN"; }
 engine_off() { rm -f "$AWGBIN"; }
-net_on() {   # a dummy default route: sing-box finds a "default interface", AWG can bind UDP
+# route_on / route_off — a FAKE default route via a dummy link (the stand has --network none):
+# sing-box finds a "default interface" and an AWG endpoint can bind UDP. Never implicit: every
+# case that needs it calls route_on itself (and says why); the guard cases test the router
+# WITHOUT it too. The state is printed so the run log shows which cases had the fake route.
+route_on() {
+	echo "      (fake default route ON)"
 	ip link show vpawg0 >/dev/null 2>&1 || ip link add vpawg0 type dummy 2>/dev/null
 	ip addr add 10.99.0.2/24 dev vpawg0 2>/dev/null; ip link set vpawg0 up 2>/dev/null
 	ip route add default via 10.99.0.1 dev vpawg0 2>/dev/null
 	return 0
 }
-net_off() { ip link del vpawg0 2>/dev/null; return 0; }
+route_off() { ip link del vpawg0 2>/dev/null; echo "      (fake default route OFF)"; return 0; }
 SRS_PORT=18080
 srs_on() {   # local rule-set server: SRS compiled by the STOCK binary (readable by 1.12 and 1.14)
 	mkdir -p "$AW/srs"
@@ -43,7 +48,10 @@ build() {   # the REAL build.sh, bounded -> BRC
 	mock_on
 	run_with_timeout 120 sh $LX/build.sh > "$AW/build.out" 2>&1; BRC=$?
 }
-sb_kill_all() { for p in $(pgrep -f "sing-box[^ ]* run -c"); do kill -9 "$p" 2>/dev/null; done; rm -f /var/run/vpnpool-singbox.pid; }
+sb_kill_all() {   # and WAIT until they are gone (a dying one still holds its ports)
+	for p in $(pgrep -f "sing-box[^ ]* run -c"); do kill -9 "$p" 2>/dev/null; done; rm -f /var/run/vpnpool-singbox.pid
+	_k=0; while pgrep -f "sing-box[^ ]* run -c" >/dev/null 2>&1 && [ $_k -lt 50 ]; do msleep 100; _k=$((_k + 1)); done
+}
 # run_for <bin> <config> <secs> -> RUN_ALIVE (1/0), RUN_CLASH (http code of /proxies), RUN_LOG
 run_for() {
 	rm -f /tmp/vpnpool/cache.db; RUN_LOG="$AW/run.log"
@@ -60,7 +68,7 @@ begin "awg/real-engine-asset-mounted"
 expect_true "real asset at $ASSET (set ENGINE_ASSET_DIR for run-in-docker.sh)" [ -f "$ASSET" ]
 expect_true "stock sing-box present" [ -x "$STOCK" ]
 end
-engine_off; net_off
+engine_off; route_off
 
 # ======================= engine choice (enginecap.uc) =======================
 sel() { ucode $LX/enginecap.uc select "$1" 2>/dev/null; }
@@ -151,14 +159,14 @@ expect_jq "a wireguard endpoint in the config" "$(cat /tmp/vpnpool/sing-box.json
 expect_jq "nothing deferred" "$(cat /tmp/vpnpool/deferred.json)" 'length==0'
 expect_true "stock check accepts it" "$STOCK" check -c /tmp/vpnpool/sing-box.json
 end
-net_on
+route_on
 run_for "$STOCK" /tmp/vpnpool/sing-box.json 4
 begin "awg/wireguard-runs-on-stock"
 expect_eq "stock sing-box alive after 4 s" "$RUN_ALIVE" 1
 expect_eq "clash API answers" "$RUN_CLASH" 200
 expect_eq "no FATAL" "$(gcount FATAL "$RUN_LOG")" 0
 end
-net_off
+route_off
 # with the engine: AWG goes into the config, checked and run by sing-box-awg
 reset_state; engine_on
 mkdir -p /tmp/vpnpool/sources /etc/vpnpool/awg
@@ -181,13 +189,94 @@ expect_jq "the AWG node is live with its id" "$_st" '[.nodes[] | select(.proto==
 end
 engine_off
 
+
+# ======================= a stock binary that IS an old AWG fork (hoaxisr awg2.1, vpnpool 1.4) =========
+# A fake stock: version 1.13.13-awg2.1, `check` accepts AWG 2.0 but refuses every 3.1 field
+# (header key, timers, trailers, ...) — like the fork. Our engine must win when it is there;
+# without it, 3.1 nodes are DEFERRED (engine_no_awg31), not cut out by the fork's check.
+FAKE="$AW/fork-sing-box"
+cat > "$FAKE" <<'EOF'
+#!/bin/sh
+[ "$1 $2" = "version -n" ] && { echo 1.13.13-awg2.1; exit 0; }
+if [ "$1" = check ]; then
+	grep -qE 'header_protection_key|rekey_after_time|keepalive_timeout|random_trailers|disable_cookies|content_padding_addition|"persistent_keepalive_interval": *"' "$3" && exit 1
+	exit 0
+fi
+exit 1
+EOF
+chmod +x "$FAKE"
+VPNPOOL_SB_STOCK=$FAKE; export VPNPOOL_SB_STOCK
+reset_state; engine_off
+mkdir -p /tmp/vpnpool/sources /etc/vpnpool/awg
+printf '%s\n' "$VLESS" > /tmp/vpnpool/sources/000.raw
+cp "$AFX/awg3.conf" /etc/vpnpool/awg/a31.conf                                   # AWG 3.1
+sed 's/^PrivateKey = .*/PrivateKey = ZZk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk=/' "$AFX/awg2.conf" > /etc/vpnpool/awg/a20.conf   # AWG 2.0
+begin "awg/fork-stock-probe"
+expect_jq "the fork: AWG yes, AWG 3.1 no" "$(ucode $LX/enginecap.uc cap "$FAKE" 2>/dev/null)" '.awg==true and .awg31==false and .version=="1.13.13-awg2.1"'
+expect_jq "our engine absent: the fork is chosen" "$(sel 1)" ".bin==\"$FAKE\" and .reason==null and .awg31==false"
+end
+build
+begin "awg/fork-stock-31-nodes-deferred-not-cut"
+expect_eq "build ok" "$BRC" 0
+expect_jq "the 3.1 node deferred: engine_no_awg31" "$(cat /tmp/vpnpool/deferred.json)" 'length==1 and .[0].reason=="engine_no_awg31" and .[0].type=="awg"'
+expect_jq "the 2.0 node runs on the fork" "$(cat /tmp/vpnpool/sing-box.json)" '[.endpoints[]? | select(.type=="awg")] | length==1'
+expect_eq "nothing cut by the fork's check" "$(jq '[.dropped[] | select(.reason=="rejected_by_engine")] | length' /tmp/vpnpool/build_status.json)" 0
+expect_jq "status says why" "$(sh $LX/status.sh 2>/dev/null)" '[.nodes[] | select(.deferred==true and .reason=="engine_no_awg31")] | length==1'
+end
+sed "s/^PrivateKey = .*/PrivateKey = XBk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk=/" "$AFX/awg3.conf" > "$AW/a31b.conf"   # another key: not a dup of a31.conf
+_an=$(jq -nc --rawfile t "$AW/a31b.conf" '{text:$t}' | ucode $LX/api.uc analyze 2>/dev/null)
+begin "awg/fork-stock-analyze-says-31"
+expect_jq "analyze: the 3.1 node will wait, engine_no_awg31" "$_an" '.items[0].status=="add" and .items[0].deferred=="engine_no_awg31"'
+end
+engine_on; rm -f /tmp/vpnpool/engine-cap.json
+build
+begin "awg/fork-stock-our-engine-wins"
+expect_eq "build ok" "$BRC" 0
+expect_eq "AWG nodes run on OUR engine" "$(cat /tmp/vpnpool/.sb_bin)" "$AWGBIN"
+expect_jq "both AWG nodes in the config" "$(cat /tmp/vpnpool/sing-box.json)" '[.endpoints[]? | select(.type=="awg")] | length==2'
+expect_jq "nothing deferred" "$(cat /tmp/vpnpool/deferred.json)" 'length==0'
+end
+unset VPNPOOL_SB_STOCK; engine_off; rm -f /etc/vpnpool/awg/*.conf
+
+# ======================= keys: never in the log, files 0600 =======================
+# The engine logs its whole device config (private key included) at debug level: with AWG / WireGuard
+# endpoints the generated level is never below info.
+reset_state; engine_on; route_on   # fake route: the AWG endpoint must start to log anything
+mkdir -p /tmp/vpnpool/sources /etc/vpnpool/awg
+printf '%s\n' "$VLESS" > /tmp/vpnpool/sources/000.raw
+cp "$AFX/awg2.conf" /etc/vpnpool/awg/a2.conf
+uci set vpnpool.main.log_level=debug; uci commit vpnpool
+build
+_lv=$(jq -r '.log.level' /tmp/vpnpool/sing-box.json)
+jq '.log.level="debug"' /tmp/vpnpool/sing-box.json > "$AW/dbg.json"
+run_for "$AWGBIN" "$AW/dbg.json" 3; _leak=$(gcount 'private_key=' "$RUN_LOG")
+run_for "$AWGBIN" /tmp/vpnpool/sing-box.json 3; _clean=$(gcount 'private_key=' "$RUN_LOG")
+begin "awg/no-private-key-in-the-engine-log"
+expect_eq "debug asked, info generated" "$_lv" info
+expect_true "control: at debug the engine DOES log the key ($_leak lines)" [ "$_leak" -ge 1 ]
+expect_eq "the generated config: no key in the log" "$_clean" 0
+end
+printf '%s\n' "$VLESS" > /tmp/vpnpool/sources/000.raw; rm -f /etc/vpnpool/awg/a2.conf
+build
+begin "awg/debug-level-kept-without-endpoints"
+expect_eq "no endpoint: the user's level stays" "$(jq -r '.log.level' /tmp/vpnpool/sing-box.json)" debug
+end
+uci set vpnpool.main.log_level=warn; uci commit vpnpool
+cp "$AFX/awg2.conf" /etc/vpnpool/awg/a2.conf
+build
+begin "awg/files-with-keys-are-0600"
+expect_eq "live config" "$(ls -l /tmp/vpnpool/sing-box.json | cut -c1-10)" "-rw-------"
+expect_eq "flash copy" "$(ls -l /etc/vpnpool/sing-box.json | cut -c1-10)" "-rw-------"
+expect_eq "node list" "$(ls -l /tmp/vpnpool/nodes.json | cut -c1-10)" "-rw-------"
+end
+route_off; engine_off; rm -f /etc/vpnpool/awg/*.conf
 # ======================= generator per engine version: check + RUN =======================
 reset_state
 uci add_list vpnpool.routing.community=youtube; uci commit vpnpool
 printf '%s\n' "$VLESS" > "$AW/l.txt"
 ucode $PARSER --with-id "$AW/l.txt" "$AFX/awg3.conf" > "$AW/n_awg.json" 2>/dev/null
 ucode $PARSER --with-id "$AW/l.txt" > "$AW/n_plain.json" 2>/dev/null
-net_on; engine_on
+route_on; engine_on
 VPNPOOL_SB_VERSION=1.12.25 ucode $LX/generator.uc "$AW/n_plain.json" > "$AW/g112.json"
 VPNPOOL_SB_VERSION=1.14.3-awg.1 ucode $LX/generator.uc "$AW/n_awg.json" > "$AW/g114.json"
 begin "awg/generator-1.12-form"
@@ -285,16 +374,18 @@ expect_jq "no key of the conf without a field" "$_cmp" '.unknown == []'
 expect_jq "every field equal to the conf" "$_cmp" '.bad == []'
 expect_true "sing-box-awg check" "$AWGBIN" check -c /tmp/vpnpool/sing-box.json
 end
-net_on
+route_on
 run_for "$AWGBIN" /tmp/vpnpool/sing-box.json 4
 begin "awg/chain-amnezia5-runs"
 expect_eq "engine alive after 4 s" "$RUN_ALIVE" 1
 expect_eq "no FATAL" "$(gcount FATAL "$RUN_LOG")" 0
 end
-net_off
+route_off
 
 # ======================= start guard (vpnpoold, real sing-box) =======================
-# in_vpnpoold <fn>: the real daemon functions (VPNPOOLD_NO_MAIN), log + notifications to a file
+# in_vpnpoold <fn>: the real daemon functions (VPNPOOLD_NO_MAIN), log + notifications to a file.
+# The stand has NO default route unless a case adds the fake one EXPLICITLY (route_on): without
+# it the guard must see "the router, not the node" (Б1 of the review).
 GL="$AW/guard.log"
 in_vpnpoold() {
 	(
@@ -306,30 +397,80 @@ in_vpnpoold() {
 		echo "rc=$?" >> "$GL"
 	) >/dev/null 2>&1
 }
-awg_json() {   # <tag> <h2> — an AWG endpoint as a JSON-source outbound (taken verbatim by the parser)
+awg_json() {   # <tag> <h2> <key> <ip> — an AWG endpoint as a JSON-source outbound (taken verbatim)
 	printf '{"type":"awg","tag":"%s","private_key":"%s","address":["10.8.1.%s/32"],"jc":3,"jmin":10,"jmax":30,"s1":15,"s2":18,"h1":"5-10","h2":"%s","h3":"30","h4":"40","peers":[{"address":"198.51.100.61","port":443,"public_key":"SrvPUBFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0=","allowed_ips":["0.0.0.0/0"]}]}' \
 		"$1" "$3" "$4" "$2"
 }
 G_VL="{\"type\":\"vless\",\"tag\":\"GoodV\",\"server\":\"203.0.113.41\",\"server_port\":443,\"uuid\":\"$U\",\"tls\":{\"enabled\":true,\"server_name\":\"a.example\"}}"
 sc_start() { start_singbox; start_guard; }
-# 1) one AWG node dies at start (overlapping headers: check passes) -> set aside, rebuilt, runs
-reset_state; engine_on; sb_kill_all; : > "$GL"
+alive() { kill -0 "$(cat /var/run/vpnpool-singbox.pid 2>/dev/null)" 2>/dev/null; }
+
+# 0) a GOOD AWG node (owner-like: S=12 + header key, H 1..4, keepalive 25-35) + VLESS, started while
+#    the router has NO default route (boot, PPPoE reconnect): sing-box dies on the AWG bind
+#    ("no route to internet"). The router, not the node: no mark, no rollback, retried — and
+#    once the route is there the next start (the supervisor tick) runs with the node.
+reset_state; engine_on; sb_kill_all; route_off; : > "$GL"
+mkdir -p /tmp/vpnpool/sources /etc/vpnpool/awg
+printf '%s\n' "$VLESS" > /tmp/vpnpool/sources/000.raw
+sed 's/^S1 = .*/S1 = 12/; s/^S2 = .*/S2 = 12/; s/^S3 = .*/S3 = 12/; s/^S4 = .*/S4 = 12/; s/^H1 = .*/H1 = 1/; s/^H2 = .*/H2 = 2/; s/^H3 = .*/H3 = 3/; s/^H4 = .*/H4 = 4/' \
+	"$AFX/awg3.conf" > /etc/vpnpool/awg/owner.conf
+build
+cp /tmp/vpnpool/sing-box.json "$AW/env-cfg.json"
+sc_env() { start_singbox; start_guard; _g=$?; echo "pending=$GUARD_PENDING" >> "$GL"; return $_g; }
+in_vpnpoold sc_env
+begin "awg/guard-no-default-route-is-not-the-node"
+expect_eq "build ok" "$BRC" 0
+expect_true "control: no default route" sh -c '[ -z "$(ip route show default)" ]'
+expect_true "control: the FATAL names the node (bind without a route)" grep -q 'no route to internet' /tmp/vpnpool/sing-box.log
+expect_eq "guard: waits for the router (rc 2, pending)" "$(grep -c '^rc=2' "$GL"):$(grep -c '^pending=1' "$GL")" "1:1"
+expect_eq "node NOT marked" "$(jq 'length' /tmp/vpnpool/.bad_nodes.json 2>/dev/null || echo 0)" 0
+expect_true "config NOT rolled back / rebuilt (the AWG node stays)" cmp -s /tmp/vpnpool/sing-box.json "$AW/env-cfg.json"
+expect_jq "guard_status: env_wait" "$(cat /tmp/vpnpool/guard_status.json)" '.action=="env_wait"'
+end
+route_on    # the WAN is back: EXPLICIT fake default route
+sc_tick() { GUARD_PENDING=1; start_singbox; start_guard; }   # what the supervisor tick does while pending
+: > "$GL"; in_vpnpoold sc_tick
+begin "awg/guard-node-works-once-the-route-is-back"
+expect_eq "guard returned 0" "$(grep -c '^rc=0' "$GL")" 1
+expect_true "sing-box alive" alive
+expect_jq "the AWG node is in the running config" "$(cat /tmp/vpnpool/sing-box.json)" '[.endpoints[]? | select(.type=="awg")] | length==1'
+end
+sb_kill_all
+# a port in use is the router too: the user's change is NOT rolled back (it starts later)
+: > "$GL"; uhttpd -p 127.0.0.1:1605 -h "$AW"
+_i=0; while ! grep -qi ":0645 00000000:0000 0A" /proc/net/tcp && [ $_i -lt 30 ]; do msleep 100; _i=$((_i + 1)); done   # listening (0A) on 1605
+cp /tmp/vpnpool/sing-box.json /tmp/vpnpool/sing-box.json.prev; echo '{"older":1}' > /tmp/vpnpool/sing-box.json.prev
+in_vpnpoold sc_start
+begin "awg/guard-port-in-use-keeps-the-change"
+expect_true "control: the FATAL is a taken port" grep -q "address already in use" /tmp/vpnpool/sing-box.log
+expect_eq "guard: rc 2" "$(grep -c '^rc=2' "$GL")" 1
+expect_true "the new config stays" cmp -s /tmp/vpnpool/sing-box.json "$AW/env-cfg.json"
+expect_eq "nothing marked" "$(jq 'length' /tmp/vpnpool/.bad_nodes.json 2>/dev/null || echo 0)" 0
+end
+for p in $(pgrep -f "uhttpd -p 127.0.0.1:1605"); do kill "$p"; done
+sb_kill_all; rm -f /etc/vpnpool/awg/owner.conf
+
+# 1) an AWG node whose CONFIG dies at start (overlapping headers: check passes) -> set aside BY
+#    ID (its tag holds "]" — matched against the live tags, not cut by a regex), rebuilt, runs
+reset_state; engine_on; sb_kill_all; route_on; : > "$GL"
 mkdir -p /tmp/vpnpool/sources
-printf '{"outbounds":[%s,%s]}\n' "$G_VL" "$(awg_json BadAWG 8-20 YBk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk= 9)" > /tmp/vpnpool/sources/000.raw
+BADT='Bad [AWG] x'
+printf '{"outbounds":[%s,%s]}\n' "$G_VL" "$(awg_json "$BADT" 8-20 YBk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk= 9)" > /tmp/vpnpool/sources/000.raw
 build
 _b1=$BRC; _c1=$(jq -c '[.endpoints[]?.tag]' /tmp/vpnpool/sing-box.json 2>/dev/null)
 in_vpnpoold sc_start
 begin "awg/guard-node-dies-at-start-set-aside"
 expect_eq "first build ok" "$_b1" 0
-expect_eq "the bad node was in the first config (check let it through)" "$_c1" '["BadAWG"]'
+expect_eq "the bad node was in the first config (check let it through)" "$_c1" '["Bad [AWG] x"]'
 expect_eq "guard returned 0" "$(grep -c '^rc=0' "$GL")" 1
-expect_true "sing-box alive" sh -c 'kill -0 "$(cat /var/run/vpnpool-singbox.pid)"'
-expect_jq "config without the node" "$(cat /tmp/vpnpool/sing-box.json)" '([.endpoints[]?.tag] | index("BadAWG") == null) and ([.outbounds[].tag] | index("GoodV") != null)'
+expect_true "sing-box alive" alive
+expect_jq "config without the node" "$(cat /tmp/vpnpool/sing-box.json)" '([.endpoints[]?.tag] | index("Bad [AWG] x") == null) and ([.outbounds[].tag] | index("GoodV") != null)'
 expect_jq "deferred: start_failed with the engine's message" "$(cat /tmp/vpnpool/deferred.json)" \
-	'length==1 and .[0].tag=="BadAWG" and .[0].reason=="start_failed" and (.[0].detail|contains("headers must not overlap"))'
-expect_jq "guard_status: node_excluded" "$(cat /tmp/vpnpool/guard_status.json)" '.action=="node_excluded" and .tag=="BadAWG" and (.id|length)==12'
-expect_jq "status lists it as deferred" "$(sh $LX/status.sh 2>/dev/null)" '[.nodes[] | select(.tag=="BadAWG" and .deferred==true and .reason=="start_failed")] | length==1'
-expect_eq "the user is told" "$(gcount '^notify .*BadAWG' "$GL")" 1
+	'length==1 and .[0].tag=="Bad [AWG] x" and .[0].reason=="start_failed" and (.[0].detail|contains("headers must not overlap"))'
+expect_jq "marked by id" "$(cat /tmp/vpnpool/.bad_nodes.json)" '(keys|length)==1 and ((keys[0])|length)==12 and .[keys[0]].tag=="Bad [AWG] x"'
+expect_jq "guard_status: node_excluded" "$(cat /tmp/vpnpool/guard_status.json)" '.action=="node_excluded" and .tag=="Bad [AWG] x" and (.id|length)==12'
+expect_jq "status lists it as deferred" "$(sh $LX/status.sh 2>/dev/null)" '[.nodes[] | select(.tag=="Bad [AWG] x" and .deferred==true and .reason=="start_failed")] | length==1'
+expect_eq "the user is told" "$(gcount '^notify .*Bad \[AWG\] x' "$GL")" 1
 end
 # the daemon finds and stops OUR sing-box whichever binary runs it (sing-box-awg here)
 sc_pids() { our_singbox_pids > "$AW/pids"; kill_singbox; our_singbox_pids > "$AW/pids.after"; }
@@ -342,45 +483,73 @@ expect_eq "kill_singbox stopped it" "$(wc -l < "$AW/pids.after")" 0
 expect_eq "nothing left running" "$(pgrep -f 'sing-box-awg run -c' | wc -l)" 0
 end
 sb_kill_all
-# the mark holds only for the SAME node config + engine: a fixed node is tried again
+# the mark is MY safety limit with an end: after BAD_TTL the node is tried again
+cp /tmp/vpnpool/.bad_nodes.json "$AW/bad.json"
+jq '.[] .at -= 1801' "$AW/bad.json" > /tmp/vpnpool/.bad_nodes.json
+build
+begin "awg/guard-mark-expires"
+expect_eq "build ok" "$BRC" 0
+expect_jq "control: the mark is still there, only old" "$(cat /tmp/vpnpool/.bad_nodes.json)" '(keys|length)==1'
+expect_jq "the node is back in the config" "$(cat /tmp/vpnpool/sing-box.json)" '[.endpoints[]?.tag] | index("Bad [AWG] x") != null'
+end
+cp "$AW/bad.json" /tmp/vpnpool/.bad_nodes.json
+# ... and when the node changes (a fixed node is tried again at once)
 sed -i 's/"h2":"8-20"/"h2":"20"/' /tmp/vpnpool/sources/000.raw
 build
 begin "awg/guard-mark-ends-when-the-node-changes"
 expect_eq "build ok" "$BRC" 0
-expect_jq "the fixed node is back in the config" "$(cat /tmp/vpnpool/sing-box.json)" '[.endpoints[]?.tag] | index("BadAWG") != null'
+expect_jq "the fixed node is back in the config" "$(cat /tmp/vpnpool/sing-box.json)" '[.endpoints[]?.tag] | index("Bad [AWG] x") != null'
 expect_jq "nothing deferred" "$(cat /tmp/vpnpool/deferred.json)" 'length==0'
 end
-# 2) a FATAL that names no node (a port taken) -> back to the previous config
-reset_state; sb_kill_all; : > "$GL"
-mkdir -p /tmp/vpnpool/sources
-printf '{"outbounds":[%s]}\n' "$G_VL" > /tmp/vpnpool/sources/000.raw
-build; _b1=$BRC
+
+# 2) a FATAL that is neither the router nor a node (a bad clash API address) -> back to the
+#    previous config — with the BINARY it was built for: the previous pool has AWG (engine), the
+#    new one only VLESS (stock). A rollback that keeps the stock binary can't run it.
+reset_state; engine_on; sb_kill_all; route_on; : > "$GL"
+mkdir -p /tmp/vpnpool/sources /etc/vpnpool/awg
+printf '%s\n' "$VLESS" > /tmp/vpnpool/sources/000.raw
+cp "$AFX/awg3.conf" /etc/vpnpool/awg/a3.conf
+build; _b1=$BRC; _bin1=$(cat /tmp/vpnpool/.sb_bin)
 sc_prev() { start_singbox; start_guard && save_prev; kill_singbox; }
 in_vpnpoold sc_prev
-uci set vpnpool.main.test_port=17777; uci commit vpnpool
-uhttpd -p 127.0.0.1:17777 -h "$AW"     # holds the port the new config wants
-build; _b2=$BRC
+rm -f /etc/vpnpool/awg/a3.conf
+uci set vpnpool.main.clash_api=127.0.0.1:70000; uci commit vpnpool
+build; _b2=$BRC; _bin2=$(cat /tmp/vpnpool/.sb_bin)
+uci set vpnpool.main.clash_api=127.0.0.1:9091; uci commit vpnpool
 in_vpnpoold sc_start
-begin "awg/guard-rolls-back-to-previous-config"
-expect_eq "both builds ok" "$_b1:$_b2" "0:0"
-expect_eq "guard returned 0" "$(grep -c '^rc=0' "$GL")" 2
-expect_true "sing-box alive" sh -c 'kill -0 "$(cat /var/run/vpnpool-singbox.pid)"'
+begin "awg/guard-rolls-back-with-the-binary-of-the-config"
+expect_eq "both builds ok, engine then stock" "$_b1:$_b2:$_bin1:$_bin2" "0:0:$AWGBIN:$STOCK"
+expect_eq "guard returned 0 (twice)" "$(grep -c '^rc=0' "$GL")" 2
+expect_true "sing-box alive" alive
 expect_true "the previous config runs" cmp -s /tmp/vpnpool/sing-box.json /tmp/vpnpool/sing-box.json.prev
-expect_jq "guard_status: rolled_back, the reason kept" "$(cat /tmp/vpnpool/guard_status.json)" '.action=="rolled_back" and (.detail|contains("17777"))'
+expect_eq "with the engine it was built for" "$(cat /tmp/vpnpool/.sb_bin)" "$AWGBIN"
+expect_true "the engine runs it" sh -c 'pgrep -f "sing-box-awg run -c /tmp/vpnpool/sing-box.json" >/dev/null'
+expect_jq "guard_status: rolled_back, the reason kept" "$(cat /tmp/vpnpool/guard_status.json)" '.action=="rolled_back" and (.detail|contains("70000"))'
+end
+sb_kill_all
+# after a reboot there is no .sb_bin(.prev): the binary comes from what the config holds
+uci set vpnpool.main.clash_api=127.0.0.1:70000; uci commit vpnpool
+build; uci set vpnpool.main.clash_api=127.0.0.1:9091; uci commit vpnpool
+rm -f /tmp/vpnpool/.sb_bin.prev; : > "$GL"
+in_vpnpoold sc_start
+begin "awg/guard-rollback-without-a-binary-record"
+expect_eq "guard returned 0" "$(grep -c '^rc=0' "$GL")" 1
+expect_true "alive on the previous (AWG) config" sh -c 'kill -0 "$(cat /var/run/vpnpool-singbox.pid)" && cmp -s /tmp/vpnpool/sing-box.json /tmp/vpnpool/sing-box.json.prev'
+expect_true "run by the engine (chosen by the config's AWG endpoint)" sh -c 'pgrep -f "sing-box-awg run -c /tmp/vpnpool/sing-box.json" >/dev/null'
 end
 sb_kill_all
 # 3) nothing to go back to -> stops, says why
+uci set vpnpool.main.clash_api=127.0.0.1:70000; uci commit vpnpool
+build; uci set vpnpool.main.clash_api=127.0.0.1:9091; uci commit vpnpool
 rm -f /tmp/vpnpool/sing-box.json.prev; : > "$GL"
-build   # the config that wants the taken port again
 in_vpnpoold sc_start
 begin "awg/guard-no-previous-config-stops"
 expect_eq "guard returned 1" "$(grep -c '^rc=1' "$GL")" 1
 expect_jq "guard_status: failed" "$(cat /tmp/vpnpool/guard_status.json)" '.action=="failed"'
 end
-for p in $(pgrep -f "uhttpd -p 127.0.0.1:17777"); do kill "$p"; done
-sb_kill_all
+sb_kill_all; rm -f /etc/vpnpool/awg/*.conf
 # 4) my limit: three nodes that each die at start -> two repairs, then the supervisor's turn
-reset_state; sb_kill_all; : > "$GL"
+reset_state; sb_kill_all; route_on; : > "$GL"
 mkdir -p /tmp/vpnpool/sources
 printf '{"outbounds":[%s,%s,%s,%s]}\n' "$G_VL" \
 	"$(awg_json Bad1 8-20 YBk1FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk= 11)" \
@@ -397,7 +566,7 @@ expect_jq "guard_status: gave_up" "$(cat /tmp/vpnpool/guard_status.json)" '.acti
 expect_eq "sing-box started 3 times (1 + 2 repairs)" "$(gcount '^log sing-box started' "$GL")" 3
 expect_le "finished in bounded time (s)" "$((_t1 - _t0))" 60
 end
-sb_kill_all; engine_off
+sb_kill_all; engine_off; route_off
 
 # ======================= rpcd / api: analyze, add, import_nodes, delete by id =======================
 reset_state; daemon_start
@@ -500,5 +669,43 @@ begin "awg/add-vpn-xray-becomes-link"
 expect_jq "added as a link" "$R" '.ok==true and .added==1'
 expect_true "a vless link stored" sh -c 'uci -q get vpnpool.main.manual_node | grep -q "^vless://"'
 end
-engine_off; daemon_stop; net_off
+# the stored .conf holds a private key: 0600
+_lastid=$(printf '%s' "$R" | jq -r '.awg_ids[0] // ""')
+rm -f /etc/vpnpool/awg/*.conf
+rcall add "$(jarg --rawfile t "$AFX/awg3.conf" '{text:$t}')"
+_pid=$(printf '%s' "$R" | jq -r '.awg_ids[0] // ""')
+begin "awg/add-file-is-0600"
+expect_true "control: stored ($_pid)" [ -f "/etc/vpnpool/awg/$_pid.conf" ]
+expect_eq "mode 600" "$(ls -l "/etc/vpnpool/awg/$_pid.conf" | cut -c1-10)" "-rw-------"
+end
+# keys amneziawg-tools know but the engine doesn't use: the node is added, analyze names them
+sed 's/^PersistentKeepalive = .*/PersistentKeepalive = 25-35\nAdvancedSecurity = on/' "$AFX/awg3.conf" \
+	| sed 's/^PrivateKey = .*/PrivateKey = QBk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk=/' > "$AW/adv.conf"
+rcall analyze "$(jarg --rawfile t "$AW/adv.conf" '{text:$t}')"
+begin "awg/analyze-names-ignored-keys"
+expect_jq "to add, ignored: advancedsecurity" "$R" '.items[0].status=="add" and .items[0].ignored==["advancedsecurity"]'
+end
+# a 1.x file the parser refuses: listed as unreadable (with the reason), removable by file name
+rm -f /etc/vpnpool/awg/*.conf
+cp "$AFX/awg-multipeer.conf" /etc/vpnpool/awg/0123456789abcdef.conf
+sh $LX/build.sh >/dev/null 2>&1
+_st=$(sh $LX/status.sh 2>/dev/null)
+begin "awg/unreadable-file-listed"
+expect_jq "status: unreadable with the reason" "$_st" '.unreadable==[{file:"0123456789abcdef.conf", reason:"awg_multi_peer"}]'
+end
+rcall delete_node '{"file":"../config/vpnpool"}'
+_r1=$R
+rcall delete_node '{"file":"nope.conf"}'
+_r2=$R
+: > "$FAKED_LOG"
+rcall delete_node '{"file":"0123456789abcdef.conf"}'
+begin "awg/unreadable-file-deleted-by-name"
+expect_jq "a path is refused" "$_r1" '.ok==false and .code=="invalid"'
+expect_jq "an unknown file: not_found" "$_r2" '.ok==false and .code=="not_found"'
+expect_jq "deleted" "$R" '.ok==true and .code=="deleted"'
+expect_true "file gone" [ ! -f /etc/vpnpool/awg/0123456789abcdef.conf ]
+expect_jq "no longer listed" "$(sh $LX/status.sh 2>/dev/null)" '.unreadable==[]'
+expect_eq "one USR1" "$(signals_seen USR1)" 1
+end
+engine_off; daemon_stop; route_off
 srs_off
