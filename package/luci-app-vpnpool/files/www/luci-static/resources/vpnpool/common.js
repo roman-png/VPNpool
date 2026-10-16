@@ -154,6 +154,7 @@ var CODE_TEXT = {
 	send_failed:        _('Telegram did not accept the message. Check the bot token and the chat.'),
 	no_nodes:           _('There are no nodes yet.'),
 	low_memory:         _('Not enough free memory on the router for this test.'),
+	busy:               _('Another test of a node is running. Try again when it ends.'),
 	nothing_added:      _('Nothing was added: everything is already there or could not be recognized.'),
 	decode_failed:      _('The AmneziaVPN link could not be read.'),
 	incomplete_config:  _('This is not a complete VPN Pool configuration.'),
@@ -210,6 +211,41 @@ var FIELD_TEXT = {
 	unknown_field: _('This setting is not supported by the installed version of the service.')
 };
 
+// Why a line of a paste was not added (analyze/add items[].reason, add failed[].reason; the
+// parser's and api.uc's reason codes — ui-common.test.js extracts them from the backend and
+// fails on a reason without a text). reasonText() looks here first, then CODE_TEXT/FIELD_TEXT.
+var REASON_TEXT = {
+	exists:                 _('Already added.'),
+	repeated:               _('The same node is already in an earlier line.'),
+	duplicate:              _('The same node is already in this list.'),
+	hidden:                 _('Hidden by you.'),
+	not_picked:             _('Not among the picked nodes.'),
+	bad_url:                _('The address is not valid.'),
+	json_config:            _('This is a whole configuration of the VPN engine, not a node link. Add the address of the subscription it comes from instead.'),
+	too_many_lines:         _('Too many lines at once: the rest was not read. Add them in parts.'),
+	parse_error:            _('The link could not be read: it is damaged or incomplete.'),
+	not_a_link:             _('This is not a node link.'),
+	unknown_scheme:         _('This kind of link is not supported.'),
+	not_a_node:             _('This entry is not a node.'),
+	no_nodes:               _('No nodes were found in it.'),
+	unsupported:            _('This kind of entry cannot be added.'),
+	bad_port:               _('The port in the link is not valid.'),
+	bad_uuid:               _('The user key in the link is not valid.'),
+	bad_server:             _('The server address in the link is not valid.'),
+	bad_key:                _('A key in the link is not valid.'),
+	bad_reality_key:        _('The server key in the link is not valid.'),
+	bad_short_id:           _('Part of the server key in the link is not valid.'),
+	tls_required:           _('This kind of link needs encryption, but the link has none.'),
+	unsupported_transport:  _('The link uses a way of connecting the router does not support.'),
+	unsupported_security:   _('The link uses a kind of protection the router does not support.'),
+	unsupported_plugin:     _('The link needs an add-on the router does not have.'),
+	unsupported_obfs:       _('The link uses a kind of disguise the router does not support.'),
+	unsupported_method:     _('The link uses a cipher the router does not support.'),
+	unsupported_flow:       _('The link uses a data flow mode the router does not support.'),
+	unsupported_encryption: _('The link uses an encryption the router does not support.'),
+	bad_value:              _('A value in the settings is not valid.')
+};
+
 // Codes of the backend before stage 3 -> today's codes (until every router runs the new one).
 var CODE_ALIAS = {
 	no_tag: 'bad_tag',
@@ -246,6 +282,13 @@ function codeText(code) {
 	if (has(CODE_TEXT, code)) return CODE_TEXT[code];
 	if (has(FIELD_TEXT, code)) return FIELD_TEXT[code];
 	return null;
+}
+function reasonText(code) {
+	code = canon(code);
+	if (has(REASON_TEXT, code)) return REASON_TEXT[code];
+	if (has(CODE_TEXT, code)) return CODE_TEXT[code];
+	if (has(FIELD_TEXT, code)) return FIELD_TEXT[code];
+	return REASON_TEXT.parse_error;
 }
 function fieldText(code) {
 	code = canon(code);
@@ -295,6 +338,8 @@ function transportCode(e) {
 	if (/error -32002\b/.test(msg)) return 'access_denied';
 	if (/error -32000\b/.test(msg)) return 'method_missing';   // object not found
 	if (/error -3260[01]\b/.test(msg)) return 'invalid_argument';
+	// the router's web server cuts a request over ~64 KB and answers "parse error" (seen on the stand)
+	if (/error -32700\b/.test(msg)) return 'too_large';
 	if (/HTTP error (401|403)\b/.test(msg)) return 'access_denied';
 	if (/HTTP error (408|504)\b/.test(msg)) return 'timeout';
 	if (/HTTP error \d+/.test(msg)) return 'connection';
@@ -801,6 +846,7 @@ return baseclass.extend({
 	METHODS: METHODS,
 	CODE_TEXT: CODE_TEXT,
 	FIELD_TEXT: FIELD_TEXT,
+	REASON_TEXT: REASON_TEXT,
 	CODE_ALIAS: CODE_ALIAS,
 	LEGACY_ERROR: LEGACY_ERROR,
 	Error: VpnpoolError,
@@ -819,6 +865,9 @@ return baseclass.extend({
 
 	/** Human text of a reply code (or null if the code is unknown). */
 	codeText: codeText,
+
+	/** Human text of why a pasted line was not added (analyze / add reasons); unknown -> "could not be read". */
+	reasonText: reasonText,
 
 	/** Human text of a field code (errors{field: code}); unknown -> "The value is not valid." */
 	fieldText: fieldText,
