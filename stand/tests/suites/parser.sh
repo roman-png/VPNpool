@@ -479,8 +479,32 @@ AV private-key-bad  's/^PrivateKey = .*/PrivateKey = c2hvcnQ=/'  bad_key private
 AV unknown-param    's/^Jc = 3$/Jc = 3\nItime = 5/'              awg_unsupported_param itime
 AV endpoint-port    's/^Endpoint = .*/Endpoint = 198.51.100.61:70000/' bad_port
 AV no-peer          '/^\[Peer\]/,$d'                             awg_no_peer
+# Jc/Jmin/Jmax are a Go int in the engine: 32 bits on mipsel/arm routers
+AV jc-over-int32    's/^Jc = .*/Jc = 2147483648/'                awg_bad_value jc
+AV unknown-peer-key 's/^AllowedIPs = /Foo = 1\nAllowedIPs = /'   awg_unsupported_param foo
 begin "parser/awg-checks-counted"
-expect_true "AWG value checks run: $AWG3_N (want 16)" [ "$AWG3_N" -eq 16 ]
+expect_true "AWG value checks run: $AWG3_N (want 18)" [ "$AWG3_N" -eq 18 ]
+end
+begin "parser/awg-jc-int32-max-accepted"
+sed 's/^Jc = .*/Jc = 2147483647/; s/^Jmax = .*/Jmax = 2147483647/' "$FX/awg/awg3.conf" > "$T_STATE/parser/jc.conf"
+expect_jq "the int32 maximum is fine" "$(ucode "$PARSER" "$T_STATE/parser/jc.conf" 2>/dev/null)" '.[0].jc==2147483647'
+end
+# known wg-quick / amneziawg-tools keys that do nothing for the engine: kept out, NAMED in the
+# report, the node is accepted; a comment at the end of a line is cut (as amneziawg-tools do)
+begin "parser/awg-ignored-keys-and-line-comments"
+sed 's/^Jc = 3$/Jc = 3 # three junk packets\nTable = off\nPostUp = iptables -A FORWARD -i %i -j ACCEPT; echo up\nFwMark = 0x1/; s/^PersistentKeepalive = .*/PersistentKeepalive = 25-35 ; range\nAdvancedSecurity = on/' \
+	"$FX/awg/awg3.conf" > "$T_STATE/parser/ign.conf"
+expect_true "control: the fixture has the extra keys" grep -q '^AdvancedSecurity = on' "$T_STATE/parser/ign.conf"
+_ig=$(ucode "$PARSER" --report "$T_STATE/parser/ign.conf" 2>/dev/null)
+expect_jq "accepted" "$_ig" '.[0].status=="ok" and .[0].type=="awg"'
+expect_jq "ignored keys listed" "$_ig" '(.[0].ignored|sort)==["advancedsecurity","fwmark","postup","table"]'
+_ign=$(ucode "$PARSER" "$T_STATE/parser/ign.conf" 2>/dev/null)
+expect_jq "the commented values read right" "$_ign" '.[0].jc==3 and .[0].peers[0].persistent_keepalive_interval=="25-35"'
+expect_jq "the I1 tag chain intact" "$_ign" '(.[0].i1|startswith("<r 2><b 0x8580")) and (.[0].i1|endswith("4d583737>"))'
+expect_jq "AWG 3.1 node flagged" "$_ig" '.[0].awg31==true'
+end
+begin "parser/awg20-node-not-flagged-31"
+expect_jq "awg2.conf: no 3.1 fields" "$(ucode "$PARSER" --report "$FX/awg/awg2.conf" 2>/dev/null)" '.[0].status=="ok" and (.[0]|has("awg31")|not)'
 end
 # accepted after normalising: "100 - 120" (the engine does not trim), a key without padding /
 # url-safe (one node = one id), a placeholder value, an empty I2

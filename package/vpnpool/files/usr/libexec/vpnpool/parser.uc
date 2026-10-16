@@ -25,7 +25,9 @@
 //                unsupported_obfs bad_key tls_required duplicate not_a_node no_nodes
 //                AWG .conf (field = the .conf key): awg_no_peer awg_multi_peer awg_bad_value
 //                awg_unsupported_param bad_key; hints: awg_random_trailers (the server must
-//                run AmneziaWG 3.1 too). server/port: of an accepted AWG/WireGuard node.
+//                run AmneziaWG 3.1 too). server/port: of an accepted AWG/WireGuard node;
+//                ignored: wg-quick / amneziawg-tools keys skipped (Table, PostUp, AdvancedSecurity…);
+//                awg31: the node uses AWG 3.1 fields (needs an engine that has them).
 'use strict';
 
 import { readfile, stdin } from 'fs';
@@ -579,7 +581,8 @@ function parse_tuic(line) {
 // Placeholders ($PRIMARY_DNS, ...) and empty values count as unset. A key the engine does not
 // know is refused (awg_unsupported_param): dropping it silently gave a node that never
 // handshakes (ROADMAP §1 — the 3.x keys were dropped exactly like that).
-const AWG_INT = { jc: [ 'jc', 4294967295 ], jmin: [ 'jmin', 4294967295 ], jmax: [ 'jmax', 4294967295 ],
+// Jc/Jmin/Jmax: Go `int` in the engine's options — 32 bits on mipsel/arm routers
+const AWG_INT = { jc: [ 'jc', 2147483647 ], jmin: [ 'jmin', 2147483647 ], jmax: [ 'jmax', 2147483647 ],
 	s1: [ 's1', 65535 ], s2: [ 's2', 65535 ], s3: [ 's3', 65535 ], s4: [ 's4', 65535 ] };
 const AWG_RANGE = { h1: 'h1', h2: 'h2', h3: 'h3', h4: 'h4',
 	contentpaddingaddition: 'content_padding_addition', rekeyaftertime: 'rekey_after_time',
@@ -587,9 +590,17 @@ const AWG_RANGE = { h1: 'h1', h2: 'h2', h3: 'h3', h4: 'h4',
 	keepalivetimeout: 'keepalive_timeout', maxhandshakeattempts: 'max_handshake_attempts' };
 const AWG_CHAIN = { i1: 'i1', i2: 'i2', i3: 'i3', i4: 'i4', i5: 'i5' };
 const AWG_BOOL = { randomtrailers: 'random_trailers', disablecookies: 'disable_cookies' };
-const WG_IFACE = { privatekey: 1, address: 1, dns: 1, mtu: 1, listenport: 1, table: 1, fwmark: 1,
-	saveconfig: 1, preup: 1, postup: 1, predown: 1, postdown: 1, headerprotectionkey: 1 };
+const WG_IFACE = { privatekey: 1, address: 1, dns: 1, mtu: 1, listenport: 1, headerprotectionkey: 1 };
 const WG_PEER = { publickey: 1, presharedkey: 1, allowedips: 1, endpoint: 1, persistentkeepalive: 1 };
+// Known keys of wg-quick / awg-quick and amneziawg-tools (src/config.c) that mean nothing for a
+// userspace client in sing-box (interface table, fwmark, hooks) or that the engine has no knob
+// for (AdvancedSecurity: a kernel-module peer flag, absent from the amneziawg-go v3.1 uapi): the
+// node is kept, the keys are named in the report (ignored:[...]). DNS is ignored silently.
+const WG_IGNORED_I = { table: 1, fwmark: 1, saveconfig: 1, preup: 1, postup: 1, predown: 1, postdown: 1 };
+const WG_IGNORED_P = { advancedsecurity: 1 };
+// AWG 3.1-only fields: a build without them (the old awg2.1 fork) can't run such a node
+const AWG31_FIELDS = [ 'header_protection_key', 'content_padding_addition', 'rekey_after_time', 'rekey_timeout',
+	'reject_after_time', 'keepalive_timeout', 'max_handshake_attempts', 'random_trailers', 'disable_cookies' ];
 // I-chain tags of amneziawg-go (device/obf.go obfBuilders) and whether they take a number /
 // hex value / nothing
 const OBF_TAGS = { b: 'hex', t: 'none', r: 'num', rc: 'num', rd: 'num', d: 'none', ds: 'none', dz: 'num' };
@@ -737,7 +748,7 @@ function awg_id(private_key) {
 //   reasons: awg_no_peer awg_multi_peer bad_key bad_server bad_port awg_bad_value
 //            awg_unsupported_param (field = the .conf key, lower case)
 function parse_awg_conf(raw) {
-	let iface = {}, peer = {}, sect = '', npeer = 0, name = null, unknown = null;
+	let iface = {}, peer = {}, sect = '', npeer = 0, name = null, unknown = null, ignored = [];
 	for (let line in split(raw, /\r?\n/)) {
 		line = trim(line);
 		if (!length(line)) continue;
@@ -756,11 +767,18 @@ function parse_awg_conf(raw) {
 		if (eq < 0) continue;
 		let k = lc(trim(substr(line, 0, eq)));
 		let v = trim(substr(line, eq + 1));
+		// a comment at the end of the line ("Jc = 4 # note"), cut as amneziawg-tools does; no
+		// value we read can hold '#' or ';' (keys are base64, I1-I5 tags are hex / numbers)
+		let cm = -1;
+		for (let ch in [ '#', ';' ]) { let ci = index(v, ch); if (ci >= 0 && (cm < 0 || ci < cm)) cm = ci; }
+		if (cm >= 0) v = trim(substr(v, 0, cm));
 		if (!length(v) || substr(v, 0, 1) == '$') continue;          // empty / placeholder
 		if (sect == 'i') {
+			if (WG_IGNORED_I[k]) { if (!(k in ignored)) push(ignored, k); continue; }
 			if (!WG_IFACE[k] && !AWG_INT[k] && !AWG_RANGE[k] && !AWG_CHAIN[k] && !AWG_BOOL[k]) { if (unknown == null) unknown = k; }
 			iface[k] = v;
 		} else if (sect == 'p' && npeer == 1) {
+			if (WG_IGNORED_P[k]) { if (!(k in ignored)) push(ignored, k); continue; }
 			if (!WG_PEER[k]) { if (unknown == null) unknown = k; }
 			peer[k] = v;
 		}
@@ -870,6 +888,12 @@ function parse_awg_conf(raw) {
 	ep.tag = name ?? hp_label(hp.host, port);
 	let res = { ob: ep };
 	if (ep.random_trailers) res.hints = [ AWG_TRAILERS_HINT ];
+	if (length(ignored)) res.ignored = ignored;
+	if (ep.type == 'awg') {
+		let n31 = (type(pr.persistent_keepalive_interval) == 'string');
+		for (let f in AWG31_FIELDS) if (ep[f] != null) n31 = true;
+		if (n31) res.awg31 = true;
+	}
 	return res;
 }
 
@@ -1118,6 +1142,8 @@ function process_text(raw) {
 			let r = add_node(pa.ob, 'awg:' + awg_id(pa.ob.private_key), null);
 			r.line = 1;
 			if (pa.hints) r.hints = pa.hints;
+			if (pa.ignored) r.ignored = pa.ignored;
+			if (pa.awg31) r.awg31 = true;
 			if (r.status == 'ok') { r.server = pa.ob.peers[0].address; r.port = pa.ob.peers[0].port; }
 			rec(r);
 		} else {
