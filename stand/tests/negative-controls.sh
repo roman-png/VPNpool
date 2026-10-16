@@ -63,6 +63,8 @@ ctl() {
 		            line=$(grep '^UI-SMOKE: ' "$d.log" | tail -1) ;;
 		deploy-tar) REPO_DIR="$d" sh "$HERE/deploy-tar-test.sh" > "$d.log" 2>&1
 		            line=$(grep '^DEPLOY-TAR: ' "$d.log" | tail -1) ;;
+		upgrade)    REPO_DIR="$d" sh "$HERE/upgrade-opkg-test.sh" > "$d.log" 2>&1
+		            line=$(grep '^UPGRADE: ' "$d.log" | tail -1) ;;
 		ui-i18n)    REPO_DIR="$d" sh "$HERE/ui-i18n.sh" check > "$d.log" 2>&1
 		            line=$(grep '^I18N: ' "$d.log" | tail -1) ;;
 		ui-unit)    REPO_DIR="$d" node "$HERE/ui-common.test.js" > "$d.log" 2>&1
@@ -627,7 +629,7 @@ ctl awgb2-ui-no-awg31-text ui-unit fail 'every code the backend answers with has
 # ================= stage 6: the data model (pack stage6, ROADMAP 9) =================
 # parser: hidden ids, picks, the source index, one id = one node
 ctl s6-parser-hide-ignored parser fail 'parser/hide-skips-the-id-in-every-input ' \
-	"$LIBX/parser.uc" '	if (id && ((HIDE && HIDE[id]) || (PICK && !PICK[id]))) {' '	if (id && ((PICK && !PICK[id]))) {'
+	"$LIBX/parser.uc" '	let hidden = !!(id && HIDE && HIDE[id]);' '	let hidden = false;'
 ctl s6-parser-pick-ignored parser fail 'parser/pick-only-for-the-next-file-before-dedup ' \
 	"$LIBX/parser.uc" '		PICK = f.pick;' '		PICK = null;'
 ctl s6-parser-src-wrong parser fail 'parser/pick-only-for-the-next-file-before-dedup ' \
@@ -724,8 +726,8 @@ ctl s6-api-repick-appends rpcd fail 'rpcd/import_select/re-pick-replaces ' \
 	"$LIBX/api.uc" '		ids = uniq_list(ids);' '		ids = uniq_list([ ...(sub_find(u, inp.url)?.pick ?? []), ...ids ]);'
 ctl s6-api-1x-tags-refused rpcd fail 'rpcd/restore/1x-backup-migrated ' \
 	"$LIBX/api.uc" "		if (f == 'preferred_node') chk = v2 ? ((x) => is_id(x) ? [ x, null ] : [ null, 'bad_tag' ]) : chk_tag;" "		if (f == 'preferred_node') chk = (x) => is_id(x) ? [ x, null ] : [ null, 'bad_tag' ];"
-ctl s6-rpcd-restore-not-migrated rpcd fail 'rpcd/restore/1x-backup-migrated ' \
-	"$RPCD" '		/usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1   # a 1.x backup' '		:   # a 1.x backup'
+ctl s6-rpcd-restore-not-migrated rpcd fail 'rpcd/restore/1x-backup-migrated ;rpcd/restore/1x-migration-failure-rolled-back ' \
+	"$RPCD" '		if ! /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1   # a 1.x backup' '		if false   # a 1.x backup'
 # migrate: the backup, the mapping, the report, idempotence, who runs it
 ctl s6-migrate-backup-config-only migrate fail 'migrate/backup-before-changes ' \
 	"$LIBX/migrate.sh" 'tar -czf "$BK.tmp" -C / $(backup_members)' 'tar -czf "$BK.tmp" -C / etc/config/vpnpool'
@@ -742,8 +744,7 @@ ctl s6-migrate-awg-not-renamed migrate fail 'migrate/awg-files-renamed-with-thei
 	"$LIBX/migrate.uc" "	push(awg_plan, { from: path, to: AWG + '/' + r.id + '.conf', body: named ? raw : ('# Name = ' + r.tag + '\n' + raw) });" '	;'
 ctl s6-migrate-awg-no-name migrate fail 'migrate/awg-files-renamed-with-their-name ' \
 	"$LIBX/migrate.uc" "body: named ? raw : ('# Name = ' + r.tag + '\n' + raw) });" 'body: raw });'
-ctl s6-migrate-orphan-import-lost migrate fail 'migrate/imported-without-source-becomes-manual ;migrate/the-migrated-config-builds ' \
-	"$LIBX/migrate.uc" "	if (!manual_set[l]) { push(manual, l); manual_set[l] = true; moved('imported_to_manual'); }" '	;'
+# (review) s6-migrate-orphan-import-lost retired: the imports are favourites now (s6-migrate-imports-not-favourites)
 ctl s6-migrate-1x-files-kept migrate fail 'migrate/1x-leftovers-gone ' \
 	"$LIBX/migrate.uc" "for (let f in [ 'saved.map.json', 'snapshot.map.json', 'imported.map.json', 'sub.expire', 'sub.usage' ]) unlink(CONF + '/' + f);" ';'
 ctl s6-initd-no-migration migrate fail 'migrate/init-d-start-migrates ' \
@@ -759,6 +760,59 @@ ctl s6-ui-no-hidden-text ui-unit fail 'every code the backend answers with has a
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "	hidden:             _('Hidden." "	hidden_x:           _('Hidden."
 ctl s6-ui-no-bad-path-text ui-unit fail 'every code the backend answers with has a human text' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "	bad_path:      _('There is no such program" "	bad_path_x:    _('There is no such program"
+# ---- review stage6 (REVIEW_stage6.md B1, B2, V1-V9, M4) ----
+ctl s6-parser-pick-no-id parser fail 'parser/pick-skips-a-node-without-id ' \
+	"$LIBX/parser.uc" '	if (hidden || (PICK && (!id || !PICK[id]))) {' '	if (hidden || (PICK && id && !PICK[id])) {'
+ctl s6-rpcd-restore-ignores-migration-failure rpcd fail 'rpcd/restore/1x-migration-failure-rolled-back ' \
+	"$RPCD" '		if ! /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1   # a 1.x backup' '		if ! ! /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1 && false   # a 1.x backup'
+ctl s6-rpcd-import-ignores-migration-failure rpcd fail 'rpcd/import/1x-migration-failure-rolled-back ' \
+	"$RPCD" '		if ! /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1; then' '		if false; then'
+ctl s6-api-connect-auto-stays rpcd fail 'rpcd/connect/automatic-favourite-becomes-the-users ' \
+	"$LIBX/api.uc" "			if (type(fav[r.id]) == 'object' && fav[r.id].auto === true) {" '			if (false) {'
+ctl s6-api-sub-del-favs-not-kept rpcd fail 'rpcd/sub_del/its-favourites-stay-in-the-pool ' \
+	"$LIBX/api.uc" "			if (n._src == 'sub:' + s.id && type(fav[n.id]) == 'object' && fav[n.id].active !== true) {" '			if (false) {'
+ctl s6-api-delete-keeps-preferred rpcd fail 'rpcd/delete_node/subscription-node-clears-the-preferred-node ' \
+	"$LIBX/api.uc" "		if (changed && u.get('vpnpool', 'main', 'preferred_node') == r.id) u.delete('vpnpool', 'main', 'preferred_node');" '		;'
+ctl s6-lookup-no-favourite-tag rpcd fail 'rpcd/node_link/favourite-outside-the-pool-by-tag ;rpcd/activate_saved/favourite-outside-the-pool-by-tag ;rpcd/unsave_node/favourite-outside-the-pool-by-tag ' \
+	"$LIBX/common.uc" "		if (type(fav[id]) == 'object' && fav[id].tag == key) return { id: id, tag: key, node: null, fav: fav[id] };" '		;'
+ctl s6-fetch-no-size-limit fetch fail 'fetch/oversized-answer-not-used ' \
+	"$LIBX/fetch.sh" '		if [ "${sz:-0}" -gt "$MAXB" ]; then' '		if false; then'
+ctl s6-snapshot-empty-wipes daemon fail 'daemon/snapshot-nothing-answers-keeps-the-set ' \
+	"$LIBX/model.uc" '	if (!length(alive)) {' '	if (false) {'
+ctl s6-snapshot-drops-active daemon fail 'daemon/snapshot-keeps-an-active-automatic-favourite ' \
+	"$LIBX/model.uc" '	for (let id in keys(fav)) if (fav[id]?.auto === true && fav[id]?.active !== true) delete fav[id];' '	for (let id in keys(fav)) if (fav[id]?.auto === true) delete fav[id];'
+ctl s6-migrate-imports-not-favourites migrate fail 'migrate/imported-nodes-become-favourites-in-the-pool ;migrate/saved-nodes-become-favourites ;migrate/the-migrated-config-builds ' \
+	"$LIBX/migrate.uc" "for (let l in as_list(M.imported_node, true)) { fav_put('imported_node', null, l, false, true); moved('imported_to_favorites'); }" ';'
+ctl s6-migrate-saved-node-only-dropped migrate fail 'migrate/saved-nodes-become-favourites ;migrate/the-migrated-config-builds ' \
+	"$LIBX/migrate.uc" "for (let l in as_list(M.saved_node, true)) if (!fav[id_of_link(l) ?? '']) fav_put('saved_node', null, l, false, false);" ';'
+ctl s6-migrate-snapshot-map-ignored migrate fail 'migrate/saved-nodes-become-favourites ' \
+	"$LIBX/migrate.uc" "for (let t in sort(keys(snap_map))) fav_put('snapshot', t, snap_map[t], true, false);" ';'
+ctl s6-migrate-excluded-dropped migrate fail 'migrate/excluded-becomes-hidden ;migrate/the-migrated-config-builds ' \
+	"$LIBX/migrate.uc" '	if (!hseen[id]) { hseen[id] = true; push(hidden, id); }' '	;'
+ctl s6-migrate-extra-sub-lost migrate fail 'migrate/subscriptions-become-sections ;migrate/first-fetch-primary-down-keeps-its-nodes ;migrate/the-migrated-config-builds ' \
+	"$LIBX/migrate.uc" "for (let x in as_list(M.extra_sub, true)) add_sub(x, 'all', [], true);" ';'
+ctl s6-migrate-quota-lost migrate fail 'migrate/subscriptions-become-sections ;migrate/the-migrated-config-builds ' \
+	"$LIBX/migrate.uc" '	if (meta[sids[0]] == null && (match(exp, /^[0-9]+$/) || length(us) == 3)) {' '	if (false) {'
+ctl s6-migrate-cache-not-moved migrate fail 'migrate/1x-cache-moves-to-the-subscriptions ;migrate/first-fetch-primary-down-keeps-its-nodes ' \
+	"$LIBX/migrate.sh" '	[ -s "$t" ] || { cp "$f" "$t.tmp" && mv -f "$t.tmp" "$t" && journal "cache: $(basename "$f") -> $(mask_url "$url")"; }' '	:'
+ctl s6-migrate-ua-not-moved migrate fail 'migrate/subscription-ua-first-in-the-client-list ;migrate/unmatched-kept-and-reported ' \
+	"$LIBX/migrate.uc" '	if (match(ua, /^[!-~]+$/)) {' '	if (false) {'
+ctl s6-migrate-routing-touched migrate fail 'migrate/everything-else-byte-for-byte ' \
+	"$LIBX/migrate.uc" "                'auto_member', 'keep_auto', 'hidden', 'manual_node' ])" "                'auto_member', 'keep_auto', 'hidden', 'manual_node', 'client' ])"
+ctl s6-migrate-lock-not-waited migrate fail 'migrate/waits-for-the-other-run ' \
+	"$LIBX/migrate.sh" '	[ "$i" -ge 60 ] && failed busy "another migration still runs after 60 s"' '	failed busy "no wait"'
+ctl s6-migrate-awg-dup-deleted migrate fail 'migrate/awg-same-key-other-settings-kept ' \
+	"$LIBX/migrate.uc" '		if (body_of(readfile(a.to)) == body_of(a.body)) { unlink(a.from); moved('"'"'awg_duplicate_removed'"'"'); }' '		if (true) { unlink(a.from); moved('"'"'awg_duplicate_removed'"'"'); }'
+ctl s6-migrate-old-backup-reused migrate fail 'migrate/second-1x-config-gets-its-own-backup ' \
+	"$LIBX/migrate.sh" '[ -f "$BKDIR/.in-progress" ] && BK=$(cat "$BKDIR/.in-progress" 2>/dev/null)' 'BK=$(ls "$BKDIR"/vpnpool-1.x-*.tar.gz 2>/dev/null | head -n1)'
+ctl s6-migrate-commit-before-files migrate fail 'migrate/runs-and-journals ' \
+	"$LIBX/migrate.uc" "write_atomic(CONF + '/favorites.map.json', sprintf('%J', fav), 0600);" "u.set('vpnpool', 'main', 'schema', SCHEMA); u.commit('vpnpool'); exit(1);"
+ctl s6-initd-starts-on-1x migrate fail 'migrate/failed-migration-daemon-not-started ' \
+	package/vpnpool/files/etc/init.d/vpnpool '	if [ "$enabled" = "1" ] && [ "$schema" != 2 ]; then' '	if false; then'
+ctl s6-status-migration-failure-hidden migrate fail 'migrate/failure-visible-in-status ' \
+	"$LIBX/status.uc" "let migration = (o('schema', '') != '2' && type(migfail) == 'object')" 'let migration = (false)'
+ctl s6-upgrade-never-migrates upgrade fail 'migrated (schema 2) ;the service is started again after the migration ;the call right before the first one on the migrated config ' \
+	package/vpnpool/files/etc/uci-defaults/90-vpnpool-2.0 '[ -x /usr/libexec/vpnpool/migrate.sh ] || exit 0' 'exit 0'
 wait
 for n in $NC_ORDER; do
 	o="$TMPBASE/$n.out"
