@@ -144,11 +144,12 @@ tg_poll() {
 }
 
 # Low-level Telegram send (ignores the enable toggle). Needs token+chat.
-# Echoes the HTTP status code (200 = delivered).
+# Echoes the HTTP status code (200 = delivered). $2/$3 = token/chat to use instead of the
+# saved ones (the settings page's "Test" sends what is typed, before it is saved).
 tg_send() {
 	local tok chat code
-	tok=$(uci -q get vpnpool.main.telegram_token)
-	chat=$(uci -q get vpnpool.main.telegram_chat)
+	tok=${2:-$(uci -q get vpnpool.main.telegram_token)}
+	chat=${3:-$(uci -q get vpnpool.main.telegram_chat)}
 	[ -n "$tok" ] && [ -n "$chat" ] || { echo "000"; return 1; }
 	code=$(tg_curl -m 12 -o /dev/null -w '%{http_code}' \
 		--data-urlencode "chat_id=$chat" \

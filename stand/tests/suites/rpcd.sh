@@ -306,6 +306,44 @@ s_tg_test() {
 b_tg_test() { uci -q delete vpnpool.main.telegram_token; uci commit vpnpool; }
 M tg_test '{}' - - - '{}' -
 
+# ui3: the settings page's "Test" sends what is TYPED (not saved yet). Typed token + chat are
+# used for this one request (nothing is written); the masked token as status shows it = the
+# saved one; an empty typed token = none; a bad typed value is refused before any request.
+tg_typed() {   # <args JSON> -> R; the saved token is 123:abc, chat 42; both routes answer 200
+	reset_state; s_tg_test; mock_rule 'POST https://api.telegram.org/bot*/sendMessage' 200 "$FXR/tg.json"
+	daemon_start; rcall tg_test "$1"
+}
+tg_typed '{"token":"777:typedTOKEN","chat":"@typed_chat","via_proxy":false}'
+begin "rpcd/tg_test/typed-values-used"
+expect_jq "sent" "$R" '.ok==true and .code=="sent"'
+expect_eq "one direct request with the typed token" "$(mock_calls '^POST https://api.telegram.org/bot777:typedTOKEN/sendMessage')" 1
+expect_eq "no request through the tunnel (typed via_proxy=false)" "$(mock_calls '^P POST')" 0
+expect_eq "the saved token not used" "$(mock_calls 'bot123:abc/')" 0
+expect_eq "typed token not saved" "$(uci -q get vpnpool.main.telegram_token)" "123:abc"
+expect_eq "typed chat not saved" "$(uci -q get vpnpool.main.telegram_chat)" 42
+end
+tg_typed '{"token":"123:***","chat":"42","via_proxy":true}'
+begin "rpcd/tg_test/masked-token-means-the-saved-one"
+expect_jq "sent" "$R" '.ok==true and .code=="sent"'
+expect_eq "request with the saved token through the tunnel" "$(mock_calls '^P POST https://api.telegram.org/bot123:abc/sendMessage')" 1
+expect_eq "the mask is never sent as a token" "$(mock_calls 'bot123:\*\*\*')" 0
+end
+tg_typed '{"token":"","chat":"42"}'
+begin "rpcd/tg_test/empty-typed-token-is-none"
+expect_jq "not_configured (the saved token is not used for an emptied field)" "$R" '.ok==false and .code=="not_configured"'
+expect_eq "no request" "$(gcount . /tmp/curlmock/calls.log)" 0
+end
+tg_typed '{"token":"not a token","chat":"me"}'
+begin "rpcd/tg_test/bad-typed-values-refused"
+expect_jq "invalid with both field codes" "$R" '.ok==false and .code=="invalid" and .errors.telegram_token=="bad_token" and .errors.telegram_chat=="bad_chat"'
+expect_eq "no request" "$(gcount . /tmp/curlmock/calls.log)" 0
+end
+tg_typed '{"token":"777:ok\n1:x","chat":"42"}'
+begin "rpcd/tg_test/token-with-a-line-break-refused"
+expect_jq "invalid bad_token" "$R" '.ok==false and .code=="invalid" and .errors.telegram_token=="bad_token"'
+expect_eq "no request" "$(gcount . /tmp/curlmock/calls.log)" 0
+end
+
 # ---------------- stage 3: set_config / analyze / add / backup / restore ----------------
 s_set_config() { : > "$INITD_LOG"; }
 c_set_config() {
