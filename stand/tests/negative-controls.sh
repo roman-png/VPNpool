@@ -492,7 +492,7 @@ ctl review-m3-running-by-mention status fail 'status/running-not-fooled-by-a-men
 	"let running = false; for (let c in (lsdir('/proc') ?? [])) { let a = argv_of(c); if (a && index(join(' ', a), '/usr/libexec/vpnpool/vpnpoold') >= 0) running = true; }"
 # M4: a fixed temp file name, left behind (overlapping polls share it)
 ctl review-m4-shared-temp status fail 'status/overlapping-polls-no-shared-temp-files ' \
-	"$LIBX/status.uc" "	let p = sprintf('%s/.archive.links.%d.%d', SB, time(), rand());" "	let p = SB + '/.archive.links';"
+	"$LIBX/status.uc" "	let p = sprintf('%s/.archive.links.%s', SB, uniq());" "	let p = SB + '/.archive.links';"
 # M5: cache key without the inode / without the parser's signature
 ctl review-m5-no-inode status fail 'status/cache-sees-same-size-same-second-rewrite ' \
 	"$LIBX/common.uc" "	return s ? (s.inode + ':' + s.mtime + ':' + s.size) : '-';" "	return s ? (s.mtime + ':' + s.size) : '-';"
@@ -550,9 +550,9 @@ ctl awgb-uuid-bs-s parser fail 'parser/vless-id-with-letter-s ' \
 	"$LIBX/parser.uc" 'if (!length(uuid) || match(uuid, /[[:space:]:]/)) return' 'if (!length(uuid) || match(uuid, /[\s:]/)) return'
 # engine choice + cache
 ctl awgb-engine-never-chosen awg fail 'awg/select-engine-awg-nodes ;awg/select-stock-path-configured-is-automatic ;awg/build-engine-awg-in-config ;awg/status-engine-block ;awg/chain-amnezia5-every-field ;awg/chain-amnezia5-runs ;awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-mark-ends-when-the-node-changes ;awg/guard-limit-two-repairs ;awg/add-with-engine-no-warning ' \
-	"$LIBX/common.uc" '			if (ac.present && ac.awg) cap = ac;' '			if (false) cap = ac;'
+	"$LIBX/common.uc" '		if (ac.present && ac.awg) cap = ac;' '		if (false) cap = ac;'
 ctl awgb-cap-not-cached awg fail 'awg/engine-cap-cached-by-mtime-size ' \
-	"$LIBX/common.uc" "	if (!force && type(c) == 'object' && c.sig == sig) return c;" '	;'
+	"$LIBX/common.uc" "	if (!force && type(c) == 'object' && c.sig == sig && c.awg31 != null) return c;" '	;'
 # build: deferred nodes, the binary of the check
 ctl awgb-no-deferral awg fail 'awg/build-no-engine-awg-deferred ;awg/status-lists-deferred-node ;awg/build-only-deferred-clear-state ;awg/delete-deferred-by-tag ' \
 	"$LIBX/build.sh" '(if ($eng.reason // null) != null and $n.type == "awg" then {reason: $eng.reason}' '(if false then {reason: $eng.reason}'
@@ -572,7 +572,7 @@ ctl awgb-daemon-runs-stock awg fail 'awg/guard-node-dies-at-start-set-aside ;awg
 ctl awgb-pids-stock-name-only awg fail 'awg/daemon-finds-the-engine-process ' \
 	"$LIBX/lib.sh" '{ pgrep -f "sing-box[^ ]* run -c $SB_CONF" 2>/dev/null;' '{ pgrep -f "sing-box run -c $SB_CONF" 2>/dev/null;'
 ctl awgb-guard-no-node-exclusion awg fail 'awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-limit-two-repairs ' \
-	"$LIBX/vpnpoold" '		if [ -n "$tag" ] && mark_bad "$tag" "$fatal"; then' '		if false; then'
+	"$LIBX/vpnpoold" '		if [ -n "$node" ] && mark_bad "$node" "$fatal"; then' '		if false; then'
 ctl awgb-guard-no-rollback awg fail 'awg/guard-rolls-back-to-previous-config ' \
 	"$LIBX/vpnpoold" '		if [ -s "$SB_CONF.prev" ] && ! cmp -s "$SB_CONF" "$SB_CONF.prev"; then' '		if false; then'
 ctl awgb-guard-no-limit awg fail 'awg/guard-limit-two-repairs ' \
@@ -594,6 +594,44 @@ ctl awgb-delete-by-id-off awg fail 'awg/delete-by-id ;awg/delete-unknown-id ;awg
 ctl awgb-ui-no-engine-text ui-unit fail 'every code the backend answers with has a human text' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "	engine_missing:     _('Saved." "	engine_missing_x:   _('Saved."
 
+# --- review of awg-b: the guard tells the router from the node, marks expire, rollback keeps the
+#     binary, our engine over a stock AWG fork, 3.1 probe, tools keys, keys out of logs / 0600
+ctl awgb2-env-treated-as-node awg fail 'awg/guard-no-default-route-is-not-the-node ;awg/guard-port-in-use-keeps-the-change ' \
+	"$LIBX/vpnpoold" '		if [ "$cls" = env ]; then' '		if false; then'
+ctl awgb2-mark-never-expires awg fail 'awg/guard-mark-expires ' \
+	"$LIBX/build.sh" '		        and (($m.at // 0) + $ttl) > $now' '		        and true'
+ctl awgb2-rollback-without-binary awg fail 'awg/guard-rolls-back-with-the-binary-of-the-config ;awg/guard-rollback-without-a-binary-record ' \
+	"$LIBX/vpnpoold" 'PREV_FILES="$SB_BIN_FILE $SB_DATA/nodes.json $SB_CONF"' 'PREV_FILES="$SB_DATA/nodes.json $SB_CONF"'
+ctl awgb2-sb-bin-ignores-config awg fail 'awg/guard-rollback-without-a-binary-record ' \
+	"$LIBX/lib.sh" '	if [ -s "$SB_CONF" ] && jq -e' '	if false && jq -e'
+ctl awgb2-tag-cut-at-bracket awg fail 'awg/guard-node-dies-at-start-set-aside ;awg/guard-mark-expires ;awg/guard-mark-ends-when-the-node-changes ' \
+	"$LIBX/vpnpoold" '| . as $n | select($f | contains("[" + $n.tag + "]:"))]' '| . as $n | select($f | contains("[" + ($n.tag | split(" ")[0]) + "]:"))]'
+ctl awgb2-fork-wins-over-engine awg fail 'awg/fork-stock-our-engine-wins ' \
+	"$LIBX/common.uc" '		if (ac.present && ac.awg) cap = ac;' '		if (ac.present && ac.awg && !cap.awg) cap = ac;'
+ctl awgb2-probe31-is-probe20 awg fail 'awg/fork-stock-probe ;awg/fork-stock-31-nodes-deferred-not-cut ;awg/fork-stock-analyze-says-31 ' \
+	"$LIBX/common.uc" '		if (awg && writefile(probe, AWG_PROBE31) != null)' '		if (awg && writefile(probe, AWG_PROBE) != null)'
+ctl awgb2-no-31-deferral awg fail 'awg/fork-stock-31-nodes-deferred-not-cut ' \
+	"$LIBX/build.sh" '		   elif $n31 and ($eng.awg31 // false) != true then {reason: "engine_no_awg31"}' '		   elif false then {reason: "engine_no_awg31"}'
+ctl awgb2-tools-key-refused parser fail 'parser/awg-ignored-keys-and-line-comments ' \
+	"$LIBX/parser.uc" '			if (WG_IGNORED_P[k]) { if (!(k in ignored)) push(ignored, k); continue; }' '			;'
+ctl awgb2-line-comment-kept parser fail 'parser/awg-ignored-keys-and-line-comments ' \
+	"$LIBX/parser.uc" '		if (cm >= 0) v = trim(substr(v, 0, cm));' '		;'
+ctl awgb2-jc-uint32 parser fail 'parser/awg-check-jc-over-int32 ' \
+	"$LIBX/parser.uc" "const AWG_INT = { jc: [ 'jc', 2147483647 ]," "const AWG_INT = { jc: [ 'jc', 4294967295 ],"
+ctl awgb2-debug-log-with-keys awg fail 'awg/no-private-key-in-the-engine-log ' \
+	"$LIBX/generator.uc" "if (length(endpoints) && (log_level == 'trace' || log_level == 'debug'))" 'if (false)'
+ctl awgb2-no-umask awg fail 'awg/files-with-keys-are-0600 ' \
+	"$LIBX/build.sh" 'umask 077' ':'
+ctl awgb2-conf-not-0600 awg fail 'awg/add-file-is-0600 ' \
+	"$LIBX/api.uc" '	chmod(path, 0600);' '	;'
+ctl awgb2-unreadable-not-listed awg fail 'awg/unreadable-file-listed ' \
+	"$LIBX/status.uc" "	unreadable: read_json(SB + '/awg_unreadable.json', [])," '	unreadable: [],'
+ctl awgb2-no-delete-by-file awg fail 'awg/unreadable-file-deleted-by-name ' \
+	"$RPCD" '		if [ -n "$afile" ] && [ -z "$tag" ] && [ -z "$aid" ]; then' '		if false; then'
+ctl awgb2-temp-names-time-rand status fail 'status/temp-names-unique-across-processes ' \
+	"$LIBX/common.uc" "	return length(u) ? u : sprintf('%d.%d', time(), rand());" "	return sprintf('%d.%d', time(), rand());"
+ctl awgb2-ui-no-awg31-text ui-unit fail 'every code the backend answers with has a human text' \
+	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "	engine_no_awg31:    _('Saved." "	engine_no_awg31_x:  _('Saved."
 wait
 for n in $NC_ORDER; do
 	o="$TMPBASE/$n.out"
