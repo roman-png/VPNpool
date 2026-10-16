@@ -69,6 +69,8 @@ ctl() {
 		            line=$(grep '^I18N: ' "$d.log" | tail -1) ;;
 		ui-unit)    REPO_DIR="$d" node "$HERE/ui-common.test.js" > "$d.log" 2>&1
 		            line=$(grep '^UNIT: ' "$d.log" | tail -1) ;;
+		ui-pages)   REPO_DIR="$d" node "$HERE/ui-pages.test.js" > "$d.log" 2>&1
+		            line=$(grep '^PAGES: ' "$d.log" | tail -1) ;;
 		*)          REPO_DIR="$d" sh "$HERE/run-in-docker.sh" "$suite" > "$d.log" 2>&1
 		            line=$(grep '^TESTS: ' "$d.log" | tail -1) ;;
 	esac
@@ -344,6 +346,18 @@ ctl ui-view-modal-title-html ui-unit fail 'FAIL - old views: E is common.E' \
 	"$VIEW/dashboard.js" "ui.showModal(common.txt(_('Share node') + ': ' + tag), [" "ui.showModal(_('Share node') + ': ' + tag, ["
 ctl ui-backend-code-without-text ui-unit fail 'FAIL - every code the backend answers with has a human text' \
 	"$RPCD" '|| { rep false no_nodes; exit 0; }' '|| { rep false brand_new_code; exit 0; }'
+# ui3: the settings pages send only the changed fields (one set_config); the Telegram test uses
+# what is typed (rpcd tg_test {token, chat, via_proxy}), the masked token = the saved one
+ctl ui3-pages-every-field-sent ui-pages fail 'FAIL - routing: every field of the page;FAIL - settings: every field of the page;FAIL - routing: one Save;FAIL - settings: one Save;FAIL - routing: leaving the page;FAIL - settings: leaving the page;FAIL - settings: after a save;FAIL - routing and settings: Revert' \
+	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js 'if (has(cur, f) && cur[f] !== undefined && !same(cur[f], this.base[f])) out[f] = cur[f];' 'if (has(cur, f) && cur[f] !== undefined) out[f] = cur[f];'
+ctl ui3-tg-test-ignores-typed rpcd fail 'rpcd/tg_test/typed-values-used ;rpcd/tg_test/empty-typed-token-is-none ;rpcd/tg_test/bad-typed-values-refused ;rpcd/tg_test/token-with-a-line-break-refused ' \
+	"$RPCD" "*) tok=\$v ;; esac; fi" '*) : ;; esac; fi'
+ctl ui3-tg-test-mask-as-token rpcd fail 'rpcd/tg_test/masked-token-means-the-saved-one ' \
+	"$RPCD" "case \"\$v\" in *'***'*) ;; *) tok=\$v ;; esac" 'tok=$v'
+ctl ui3-tg-test-multiline-token rpcd fail 'rpcd/tg_test/token-with-a-line-break-refused ' \
+	"$RPCD" "{ [ \"\$(printf '%s' \"\$tok\" | wc -l)\" -eq 0 ] && printf" '{ printf'
+ctl ui3-tg-send-ignores-override rpcd fail 'rpcd/tg_test/typed-values-used ' \
+	"$LIBX/lib.sh" 'tok=${2:-$(uci -q get vpnpool.main.telegram_token)}' 'tok=$(uci -q get vpnpool.main.telegram_token)'
 ctl ui-pages-feed-no-i18n ui-unit fail 'FAIL - packaging' \
 	.github/workflows/pages.yml 'expected 3 .ipk' 'expected 2 .ipk'
 ctl deploy-no-translation deploy-tar fail 'Russian translation missing' \
