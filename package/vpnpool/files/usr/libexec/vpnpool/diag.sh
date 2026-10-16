@@ -10,7 +10,7 @@ EN=$(uci -q get vpnpool.main.enabled); [ -n "$EN" ] || EN=0
 RUN=false; pgrep -f '/usr/libexec/vpnpool/vpnpoold' >/dev/null 2>&1 && RUN=true
 ROUT=false; nft list table inet vpnpool >/dev/null 2>&1 && ROUT=true
 AUTOSTART=false; [ -n "$(ls /etc/rc.d/S*vpnpool 2>/dev/null)" ] && AUTOSTART=true
-SBPID=$(pgrep -f "sing-box run -c $SB_CONF" | head -1)
+SBPID=$(our_singbox_pids | head -1)
 CLASH=$(uci -q get vpnpool.main.clash_api); [ -n "$CLASH" ] || CLASH=127.0.0.1:9091
 CLASH_OK=false; [ "$RUN" = true ] && curl -s -m3 "http://$CLASH/version" >/dev/null 2>&1 && CLASH_OK=true
 
@@ -26,7 +26,8 @@ DJSON=$(curl -s -m6 https://ifconfig.co/json 2>/dev/null)
 DIP=$(echo "$DJSON" | jq -r '.ip // ""' 2>/dev/null)
 DCO=$(echo "$DJSON" | jq -r '.country_iso // .country // ""' 2>/dev/null)
 
-SBVER=$(sing-box version 2>/dev/null | head -1 | awk '{print $NF}')
+# the engine that runs (or will run) the config (lib.sh sb_bin); `version -n` = the version only
+SBVER=$("$(sb_bin)" version -n 2>/dev/null | head -1)
 COMM_N=$(uci -q get vpnpool.routing.community | tr ' ' '\n' | grep -c .)
 CACHE=false; CACHE_KB=0
 if [ -f /tmp/vpnpool/cache.db ]; then CACHE=true; CACHE_KB=$(( $(wc -c < /tmp/vpnpool/cache.db) / 1024 )); fi

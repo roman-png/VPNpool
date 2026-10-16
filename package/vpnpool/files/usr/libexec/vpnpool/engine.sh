@@ -467,6 +467,21 @@ do_install() {   # $1 = 1 for update semantics
 		'{ok:true, action:$act, changed:true, version:$v, path:$path, real_path:$real, arch:$a, sha256:$sha}')"
 }
 
+# ---------------------------------------------------------------- after a change
+# The binaries changed (only reached on success: every failure exits through out_fail):
+# re-measure them for vpnpool (enginecap.uc: version + AWG check, ROADMAP 4.1) and ask a
+# running daemon to rebuild — AWG nodes deferred for want of the engine join the pool, or are
+# deferred again after a remove. Best effort: the install result is already printed.
+engine_changed() {
+	_ec=/usr/libexec/vpnpool/enginecap.uc
+	if [ -f "$_ec" ] && command -v ucode >/dev/null 2>&1; then
+		ucode "$_ec" cap "$ENGINE_BIN" --force >/dev/null 2>&1
+		ucode "$_ec" cap "$STOCK_BIN" --force >/dev/null 2>&1
+	fi
+	[ -f /usr/libexec/vpnpool/lib.sh ] && sh -c '. /usr/libexec/vpnpool/lib.sh; signal_daemon USR1' >/dev/null 2>&1
+	return 0
+}
+
 # ---------------------------------------------------------------- main
 ACTION="${1:-}"; [ $# -gt 0 ] && shift
 RAM=0; FORCE=0; RAM_GIVEN=0
@@ -495,6 +510,7 @@ case "$ACTION" in
 			update)  do_install 1 ;;
 			remove)  do_remove ;;
 			restore-stock) do_restore_stock ;;
-		esac ;;
+		esac
+		engine_changed ;;
 	*) echo '{"ok":false,"code":"E_USAGE"}'; exit 2 ;;
 esac

@@ -83,7 +83,22 @@ if (type(communities) != 'array')
 	communities = [communities];
 
 let SRS_BASE = 'https://github.com/itdoginfo/allow-domains/releases/latest/download';
+// stand tests only: a local server with the SRS files (the stand has no network)
+if (length(getenv('VPNPOOL_SRS_BASE') ?? '')) SRS_BASE = getenv('VPNPOOL_SRS_BASE');
 // VALID_COMMUNITY: the one list lives in common.uc (the settings validator uses it too).
+
+// The config is generated FOR the engine that will run it (ROADMAP 4.2): build.sh passes its
+// `version -n` in VPNPOOL_SB_VERSION (enginecap.uc). sing-box >= 1.14 downloads rule-sets
+// through an HTTP client: `download_detour` is deprecated there (removed in 1.16) and the
+// implicit default client is deprecated too (it dials through the DEFAULT outbound = our
+// urltest). So on >= 1.14: a top-level http client WITHOUT a detour (= a plain direct dial)
+// as route.default_http_client. NOT `detour: "direct"`: 1.14 refuses that at the first download
+// ("detour to an empty direct outbound makes no sense" — a runtime error `check` does not see).
+// 1.12/1.13 (and an unknown version) keep download_detour, which they need.
+let SB_VER = getenv('VPNPOOL_SB_VERSION') ?? '';
+let sbv = match(SB_VER, /^([0-9]+)\.([0-9]+)/);
+let SB_GE_114 = sbv ? (int(sbv[1]) > 1 || (int(sbv[1]) == 1 && int(sbv[2]) >= 14)) : false;
+let HTTP_CLIENT_TAG = 'vpnpool-direct';
 
 let rule_sets = [];
 let comm_tags = [];
@@ -91,22 +106,18 @@ for (let c in communities) {
 	if (!VALID_COMMUNITY[c])
 		continue;
 	let tag = 'comm-' + c;
-	push(rule_sets, {
+	let rs = {
 		type: 'remote',
 		tag: tag,
 		format: 'binary',
 		url: SRS_BASE + '/' + c + '.srs',
-		// download_detour: route rule-set downloads via the "direct" outbound (so SRS
-		// fetches don't loop through the proxy before it's up). VERIFIED working on the
-		// targeted sing-box 1.12.25 (rule-sets download, build ok). It is DEPRECATED from
-		// 1.14 (replacement: route-level rule_set download via `http_client`) and slated
-		// for REMOVAL in 1.16 — but that replacement does NOT exist before 1.14, so we must
-		// keep download_detour while targeting 1.12.x. MIGRATION GATE: when the package
-		// bumps sing-box to >=1.14, switch to the http_client form and re-verify on that
-		// build; do NOT change it earlier or rule-set downloads break on the current target.
-		download_detour: 'direct',
 		update_interval: '24h'
-	});
+	};
+	// < 1.14: download_detour routes the SRS download via the "direct" outbound (so it does not
+	// loop through the proxy before that is up) — verified on 1.12.25. >= 1.14: route
+	// default_http_client below (see SB_GE_114).
+	if (!SB_GE_114) rs.download_detour = 'direct';
+	push(rule_sets, rs);
 	push(comm_tags, tag);
 }
 
@@ -305,6 +316,8 @@ let route = {
 };
 if (length(rule_sets))
 	route.rule_set = rule_sets;
+if (length(rule_sets) && SB_GE_114)
+	route.default_http_client = HTTP_CLIENT_TAG;
 
 // ---- inbound (tproxy) ----
 // NOTE: omit "network" so tproxy listens on BOTH tcp and udp. The field is a
@@ -359,6 +372,8 @@ let config = {
 };
 if (dns)
 	config.dns = dns;
+if (length(rule_sets) && SB_GE_114)
+	config.http_clients = [ { tag: HTTP_CLIENT_TAG } ];   // no detour = direct dial (see SB_GE_114)
 config.inbounds = inbounds;
 if (length(endpoints))
 	config.endpoints = endpoints;          // sing-box >=1.13 WireGuard/AmneziaWG endpoints

@@ -13,6 +13,29 @@ SB_CONF_FLASH="$CONF_DIR/sing-box.json"
 
 log() { logger -t "$NAME" "$1"; }
 
+# ---- the sing-box engine (ROADMAP 4.1): EVERY run of sing-box goes through sb_bin ----
+# build.sh picks the binary for the pool (enginecap.uc select: uci singbox_bin, default the
+# stock /usr/bin/sing-box; /usr/bin/sing-box-awg when there are AmneziaWG nodes and the stock one
+# can't run them), checks the config WITH it and records it in SB_BIN_FILE — so the daemon runs
+# exactly the binary the live config was validated against.
+SB_BIN_DEFAULT=/usr/bin/sing-box
+SB_BIN_FILE="$SB_DATA/.sb_bin"
+ENGINECAP=/usr/libexec/vpnpool/enginecap.uc
+sb_bin() {
+	local b
+	b=$(cat "$SB_BIN_FILE" 2>/dev/null)
+	if [ -n "$b" ] && [ -x "$b" ]; then echo "$b"; return 0; fi
+	b=$(uci -q get vpnpool.main.singbox_bin)
+	if [ -n "$b" ] && [ -x "$b" ]; then echo "$b"; return 0; fi
+	echo "$SB_BIN_DEFAULT"
+}
+# OUR sing-box processes (by our own -c config path — the RAM one, and the flash one a 1.x
+# instance still runs with right after an upgrade), whichever binary runs them (sing-box,
+# sing-box-awg): podkop's instance (-c /etc/sing-box/config.json) never matches.
+our_singbox_pids() {
+	{ pgrep -f "sing-box[^ ]* run -c $SB_CONF" 2>/dev/null; pgrep -f "sing-box[^ ]* run -c $SB_CONF_FLASH" 2>/dev/null; } | sort -u
+}
+
 # Atomic write: stdin -> "$1" via a temp file in the same directory + mv, so a reader
 # (status.sh, the generator, rpcd) never sees a half-written file.
 write_atomic() {   # $1=destination
