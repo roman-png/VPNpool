@@ -26,11 +26,18 @@ mkdir -p "$CONF_DIR"
 
 rm -f "$SB_DATA/.awgcap"   # 1.x guessed AWG support from `version`; now measured (enginecap.uc)
 
-# manual nodes (uci: list manual_node 'vless://...') and imported nodes (uci: list
-# imported_node — links the user hand-picked from a probed source) each as their own
-# file. vless:// links never contain spaces, so a uci LIST read is safe here.
+# ---- the inputs, in order (ROADMAP 9). The parser keeps the FIRST copy of a node (one id = one
+# node), so the user's own nodes come first and keep the user's name:
+#   manual    uci list manual_node ("my nodes": links)
+#   awg       /etc/vpnpool/awg/*.conf (AmneziaWG / WireGuard nodes, one per file)
+#   fav       favourites that join the pool from the archive (active) although no source has them
+#   sub:<id>  every ENABLED subscription section, its fetched copy (fetch.sh); a "pick"
+#             subscription gives only the ids it lists (--pick, before the parser's dedup)
+#   legacy    a 1.x cache file (fetch.sh uses it only when every subscription is down)
+# --hide: the ids the user hid (uci list hidden) are skipped in every input.
+# vless:// links never contain spaces, so a uci LIST read is safe here.
 . /lib/functions.sh 2>/dev/null
-write_links() {   # $1=uci option  $2=outfile (replaced by mv: a new inode for status.uc's cache)
+write_links() {   # $1=uci option  $2=outfile (replaced by mv: a new inode for readers' caches)
 	__wl_out="$2.tmp.$$"
 	: > "$__wl_out"
 	__wl_add() { printf '%s\n' "$1" >> "$__wl_out"; }
@@ -38,27 +45,45 @@ write_links() {   # $1=uci option  $2=outfile (replaced by mv: a new inode for s
 	config_list_foreach main "$1" __wl_add 2>/dev/null
 	mv -f "$__wl_out" "$2"
 }
-write_links manual_node   "$SB_DATA/manual.links"
-write_links imported_node "$SB_DATA/imported.links"
-# Saved nodes are an INACTIVE archive (kept so they survive subscription expiry) and
-# do NOT auto-join the live config. Only the ones the user explicitly promoted to the
-# active pool (uci list active_saved) are merged as real outbounds.
-write_links active_saved  "$SB_DATA/active_saved.links"
+write_links manual_node "$SB_DATA/manual.links"
+rm -f "$SB_DATA/imported.links" "$SB_DATA/active_saved.links"   # 1.x inputs, now subscriptions / favourites
+ucode "$MODEL" fav-active "$SB_DATA/fav.links" "$SB_DATA/fav.json" 2>/dev/null || { : > "$SB_DATA/fav.links"; : > "$SB_DATA/fav.json"; }
+ucode "$MODEL" hidden > "$SB_DATA/hidden.ids" 2>/dev/null || : > "$SB_DATA/hidden.ids"
 
-# gather input files: every source file + manual + imported links (parser
-# auto-detects format per file and merges with global dedup + unique tags)
-FILES=""
-for f in "$SRCDIR"/*.raw; do
-	[ -f "$f" ] && FILES="$FILES $f"
-done
-[ -s "$SB_DATA/manual.links" ]       && FILES="$FILES $SB_DATA/manual.links"
-[ -s "$SB_DATA/imported.links" ]     && FILES="$FILES $SB_DATA/imported.links"
-[ -s "$SB_DATA/active_saved.links" ] && FILES="$FILES $SB_DATA/active_saved.links"
+FILES=""; PARGS="--hide $SB_DATA/hidden.ids"; : > "$SB_DATA/.labels"
+add_input() {   # $1=file $2=label [$3=pick ids file]
+	FILES="$FILES $1"
+	if [ -n "${3:-}" ]; then PARGS="$PARGS --pick $3 $1"; else PARGS="$PARGS $1"; fi
+	printf '%s\n' "$2" >> "$SB_DATA/.labels"
+}
+[ -s "$SB_DATA/manual.links" ] && add_input "$SB_DATA/manual.links" manual
 # AmneziaWG / WireGuard nodes: each .conf is its own file (multi-line INI), so the
 # parser sees one [Interface] block per file -> one wireguard endpoint each.
 for f in /etc/vpnpool/awg/*.conf; do
-	[ -f "$f" ] && FILES="$FILES $f"
+	[ -f "$f" ] && add_input "$f" awg
 done
+[ -s "$SB_DATA/fav.links" ] && add_input "$SB_DATA/fav.links" fav
+[ -s "$SB_DATA/fav.json" ] && add_input "$SB_DATA/fav.json" fav
+rm -f "$SB_DATA"/pick-*.ids
+ucode "$MODEL" subs 2>/dev/null > "$SB_DATA/.subs.build"
+TAB=$(printf '\t')
+while IFS="$TAB" read -r sid en mode url; do
+	[ "$en" = 1 ] || continue
+	f="$SRCDIR/s-$(src_key "$url").raw"
+	[ -f "$f" ] || continue
+	if [ "$mode" = pick ]; then
+		ucode "$MODEL" pick "$sid" > "$SB_DATA/pick-$sid.ids" 2>/dev/null
+		add_input "$f" "sub:$sid" "$SB_DATA/pick-$sid.ids"
+	else
+		add_input "$f" "sub:$sid"
+	fi
+done < "$SB_DATA/.subs.build"
+rm -f "$SB_DATA/.subs.build"
+for f in "$SRCDIR"/[0-9][0-9][0-9].raw; do
+	[ -f "$f" ] && add_input "$f" legacy
+done
+LABELS=$(jq -Rsc 'split("\n") | map(select(length > 0))' "$SB_DATA/.labels" 2>/dev/null); [ -n "$LABELS" ] || LABELS='[]'
+rm -f "$SB_DATA/.labels"
 
 # Result of this build for the UI (status.sh -> "build"): written on EVERY exit, atomically.
 #   {at, ok, nodes, skipped, deferred, engine:{bin,version,awg}|null,
@@ -74,7 +99,8 @@ build_status() {   # $1=true|false $2=error code ("" on success)
 		--slurpfile rep "$SB_DATA/.build_report.json" '
 		[inputs | split("\t") | select(.[0] == "tag")
 			| {tag:.[1], reason:.[3]} + (if (.[4] // "") != "" then {detail:.[4]} else {} end)] as $eng
-		| (($rep[0] // []) | map(select(.status == "skip" and .reason != "duplicate" and .reason != "not_a_node"))) as $sk
+		| (($rep[0] // []) | map(select(.status == "skip" and .reason != "duplicate" and .reason != "not_a_node"
+	                                 and .reason != "hidden" and .reason != "not_picked"))) as $sk
 		| {at:$at, ok:$ok, nodes:$n, skipped:($sk | length), deferred:$ndef,
 		   engine: (if $engine == null then null else ($engine | {bin, version, awg}) end),
 		   dropped: (($sk[:100] | map({source, reason} + (if .line != null then {line} else {item} end)
@@ -98,16 +124,25 @@ on_signal() {
 trap on_signal INT TERM HUP
 
 # ONE parse for the node list AND the tag->link map (--keep-link), with the node identity
-# (--with-id; generator.uc strips id/_link before they could reach sing-box).
+# (--with-id) and the input each node came from (--with-src -> `_src` = its label above);
+# generator.uc strips id and every `_` field before they could reach sing-box. The hidden ids and
+# the picks of "pick" subscriptions act inside the parser, before its dedup.
 # shellcheck disable=SC2086
-ucode /usr/libexec/vpnpool/parser.uc --keep-link --with-id $FILES > "$NB.full" 2>"$SB_DATA/build.err"
+ucode /usr/libexec/vpnpool/parser.uc --keep-link --with-id --with-src $PARGS > "$NB.full" 2>"$SB_DATA/build.err"
+jq -c --argjson lab "$LABELS" 'map(._src = ($lab[._src] // "legacy"))' "$NB.full" > "$NB.x" 2>/dev/null \
+	&& mv -f "$NB.x" "$NB.full" || echo '[]' > "$NB.full"
 jq -c 'map(del(._link))' "$NB.full" > "$NB" 2>/dev/null || echo '[]' > "$NB"
 # Per-line report (skipped lines and their reasons) for build_status.json; source = file name.
 # shellcheck disable=SC2086
-ucode /usr/libexec/vpnpool/parser.uc --report $FILES 2>/dev/null \
-	| jq -c --arg f "$FILES" '($f | split(" ") | map(select(length > 0) | split("/") | last)) as $names
-		| map(. + {source: ($names[.src] // "")})' > "$SB_DATA/.build_report.json" 2>/dev/null
+ucode /usr/libexec/vpnpool/parser.uc --report $PARGS 2>/dev/null \
+	| jq -c --arg f "$FILES" --argjson lab "$LABELS" '($f | split(" ") | map(select(length > 0) | split("/") | last)) as $names
+		| map(. + {source: ($names[.src] // ""), src_label: ($lab[.src] // "legacy")})' > "$SB_DATA/.build_report.json" 2>/dev/null
 jq -e 'type=="array"' "$SB_DATA/.build_report.json" >/dev/null 2>&1 || echo '[]' > "$SB_DATA/.build_report.json"
+# The nodes the user hid that a source still has (the UI's "Hidden" group: name + "Return"):
+#   hidden.json [{id, tag, type, server, port, src}] — one per id
+jq -c 'map(select(.status == "skip" and .reason == "hidden") | {id, tag, type, server, port, src: .src_label})
+	| unique_by(.id)' "$SB_DATA/.build_report.json" 2>/dev/null | write_atomic "$SB_DATA/hidden.json"
+jq -e 'type=="array"' "$SB_DATA/hidden.json" >/dev/null 2>&1 || echo '[]' | write_atomic "$SB_DATA/hidden.json"
 # AWG files the parser refuses (e.g. a 1.x file with values that are now checked): not a node,
 # but the user must see them and be able to remove them -> awg_unreadable.json [{file, reason, field?}]
 # (status "unreadable"; rpcd delete_node {file}). One parser run over the AWG files only.
@@ -116,7 +151,7 @@ for f in /etc/vpnpool/awg/*.conf; do [ -f "$f" ] && set -- "$@" "$f"; done
 if [ $# -gt 0 ]; then
 	ucode /usr/libexec/vpnpool/parser.uc --report "$@" 2>/dev/null \
 		| jq -c '($ARGS.positional | map(split("/") | last)) as $names
-			| map(select(.status == "skip" and .reason != "duplicate") | {file: $names[.src], reason}
+			| map(select(.status == "skip" and .reason != "duplicate" and .reason != "hidden") | {file: $names[.src], reason}
 			      + (if .field != null then {field} else {} end))' --args "$@" 2>/dev/null | write_atomic "$SB_DATA/awg_unreadable.json"
 	jq -e 'type == "array"' "$SB_DATA/awg_unreadable.json" >/dev/null 2>&1 || echo '[]' | write_atomic "$SB_DATA/awg_unreadable.json"
 else
@@ -134,37 +169,16 @@ fi
 # build/generator-tags-reserved-in-parser checks that every tag the generator adds is in that
 # list, so no second copy of the rule lives here.
 
-# Persistent tag->link map for the "Save node" feature: re-parse the SAME inputs
-# with --keep-link so every displayed node's original vless:// link is recorded.
-# The flash copy (/etc/vpnpool/links.json, read by rpcd/snapshot) survives a reboot so a
-# node can be saved even right before the subscription expires — and it is rewritten only
-# when the map changed. nodes.json itself stays link-free (links must never leak into the
-# sing-box outbounds).
-jq -c 'map({tag, id, link:._link}) | map(select(.link != null and .link != ""))' "$NB.full" 2>/dev/null \
+# Persistent id -> link map ({tag, id, link, src}): node_link / QR, favourites (a favourite keeps
+# the link so it outlives its subscription), the auto-favourites snapshot, the 1.x migration.
+# The flash copy (/etc/vpnpool/links.json) survives a reboot — and it is rewritten only when the
+# map changed. nodes.json itself stays link-free (links must never leak into the sing-box
+# outbounds).
+jq -c 'map({tag, id, link:._link, src:._src}) | map(select(.link != null and .link != ""))' "$NB.full" 2>/dev/null \
 	| write_atomic "$LINKS_RAM"
 rm -f "$NB.full"
 jq -e 'type=="array"' "$LINKS_RAM" >/dev/null 2>&1 || echo '[]' | write_atomic "$LINKS_RAM"
 persist_if_changed "$LINKS_RAM" "$LINKS_FLASH"
-
-# User-excluded nodes (dashboard ✕ on a subscription node -> uci list excluded_node,
-# holding the node's link). Drop them from the node list by identity so they never reach
-# the config and can't return on a refetch. Matched via links.json (tag->link). Cleared
-# wholesale on del_subscription.
-EXCJSON=$(uci -q get vpnpool.main.excluded_node 2>/dev/null | tr ' ' '\n' | grep '://' | jq -R . | jq -cs . 2>/dev/null)
-if [ -n "$EXCJSON" ] && [ "$EXCJSON" != "[]" ]; then
-	jq -c --argjson exc "$EXCJSON" 'map(select(.link as $l | ($exc|index($l))!=null)) | map(.tag)' \
-		"$LINKS_RAM" > "$SB_DATA/.exctags.json" 2>/dev/null
-	if [ -s "$SB_DATA/.exctags.json" ] && [ "$(cat "$SB_DATA/.exctags.json")" != "[]" ]; then
-		jq --slurpfile et "$SB_DATA/.exctags.json" 'map(select(.tag as $t | ($et[0]|index($t))==null))' \
-			"$NB" > "$NB.x" 2>/dev/null && mv "$NB.x" "$NB"
-		log "build: excluded $(jq 'length' "$SB_DATA/.exctags.json") user-deleted node(s)"
-	fi
-	rm -f "$SB_DATA/.exctags.json"
-fi
-CNT=$(jq 'length' "$NB" 2>/dev/null || echo 0)
-if [ "${CNT:-0}" -lt 1 ]; then
-	log "build: 0 nodes after exclude filter"; fail no_nodes_after_exclude
-fi
 
 # ---- the engine and the deferred nodes (ROADMAP 4.1, 4.7) ----
 # The binary that will run this config (enginecap.uc select): measured, cached by mtime:size.
@@ -198,13 +212,13 @@ jq -c --argjson eng "$ENG_JSON" --slurpfile bad "$BAD_NODES" --argjson now "$(da
 			or (($n.peers // [])[0].persistent_keepalive_interval | type) == "string")) as $n31
 		| (if ($eng.reason // null) != null and $n.type == "awg" then {reason: $eng.reason}
 		   elif $n31 and ($eng.awg31 // false) != true then {reason: "engine_no_awg31"}
-		   elif $m != null and $m.engine == $eng.sig and $m.cfg == ($n | del(.tag, .id) | tojson)
+		   elif $m != null and $m.engine == $eng.sig and $m.cfg == ($n | del(.tag, .id, ._src) | tojson)
 		        and (($m.at // 0) + $ttl) > $now
 		   then {reason: "start_failed", detail: $m.detail}
 		   else null end) as $d
 		| {n: $n, d: $d})
 	| {keep: map(select(.d == null) | .n),
-	   deferred: map(select(.d != null) | (.n | {id, tag, type,
+	   deferred: map(select(.d != null) | (.n | {id, tag, type, _src,
 	                 server: (.server // .peers[0].address), port: (.server_port // .peers[0].port)}
 	                 + (if .random_trailers == true then {hints: ["awg_random_trailers"]} else {} end)) + .d)}' \
 	"$NB" > "$NB.x" 2>/dev/null || { log "build: deferring nodes failed"; fail build_failed; }

@@ -2,7 +2,7 @@
 # vpnpool stand test runner (busybox ash). Runs INSIDE the stand container:
 #   stand/tests/run-in-docker.sh            (from the host — builds nothing, needs vpnpool-stand)
 #   sh /repo/stand/tests/run.sh [suite...]  (inside a container started by run-in-docker.sh)
-# Suites: parser build rpcd sched adaptive fetch status daemon tgbot uitext awgdecode engine awg   (default: all)
+# Suites: parser build rpcd sched adaptive fetch status daemon tgbot uitext awgdecode engine awg migrate   (default: all)
 # Env: T_VERBOSE=1 prints PASS lines and the reasons behind XFAIL.
 #
 # Output contract (CI and the integrator read ONLY this line, never the absence of "FAIL"):
@@ -103,8 +103,18 @@ rcall() {
 
 at_least() { [ -n "$1" ] && [ "$2" -ge "$1" ]; }   # <min> <actual>
 
+# a subscription section (ROADMAP 9.1): sub_section <id> <url> [all|pick] [1|0 enabled] [pick ids...]
+sub_section() {
+	_ss=$1; uci set "vpnpool.$_ss=subscription"; uci set "vpnpool.$_ss.url=$2"
+	uci set "vpnpool.$_ss.mode=${3:-all}"; uci set "vpnpool.$_ss.enabled=${4:-1}"
+	shift 2; [ $# -gt 0 ] && shift; [ $# -gt 0 ] && shift
+	uci -q delete "vpnpool.$_ss.pick"
+	for _sp in "$@"; do uci add_list "vpnpool.$_ss.pick=$_sp"; done
+	uci commit vpnpool
+}
+
 # ---- suites ----
-ALL_SUITES="parser build rpcd sched adaptive fetch status daemon tgbot uitext awgdecode engine awg"
+ALL_SUITES="parser build rpcd sched adaptive fetch status daemon tgbot uitext awgdecode engine awg migrate"
 SUITES=${*:-$ALL_SUITES}
 START=$(date +%s)
 for s in $SUITES; do

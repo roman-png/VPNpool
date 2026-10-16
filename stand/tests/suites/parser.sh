@@ -189,17 +189,23 @@ P base64url-subscription-blob - \
 P utf8-bom-and-comments - "$(printf '\357\273\277#profile-title: x\n// note\nvless://%s@203.0.113.27:443?security=tls#BOM\n' "$U")" \
 	'length==1 and .[0].tag=="BOM"'
 P unknown-schemes-dropped - "$(printf 'socks://abc\nssr://abc\nwireguard://abc\nhysteria://abc\n')" 'length==0'
-# dedup key = name + config: the same config under another name is a separate node (a user's
-# imported copy of a subscription node must not vanish; merging is ROADMAP 2.2)
-P dedup-keeps-differently-named-node - \
-	"$(printf 'vless://%s@203.0.113.28:443?security=tls#First\nvless://%s@203.0.113.28:443?security=tls#Second\nvless://%s@203.0.113.28:443?security=tls&type=tcp#First\n' "$U" "$U" "$U")" \
-	'length==2' 'map(.tag)==["First","Second"]'
-begin "parser/dedup-subscription-vs-imported-file"
+# dedup key = the config WITHOUT the name = the node id (ROADMAP 2.2): the same config under
+# another name is ONE node, the first input wins (positive control: a really different config
+# under the same name stays a node of its own)
+P dedup-same-config-other-name-is-one-node - \
+	"$(printf 'vless://%s@203.0.113.28:443?security=tls#First\nvless://%s@203.0.113.28:443?security=tls#Second\nvless://%s@203.0.113.28:443?security=tls&type=tcp#First\nvless://%s@203.0.113.27:443?security=tls#First\n' "$U" "$U" "$U" "$U")" \
+	'length==2' 'map(.tag)==["First","First #2"]' 'map(.server)==["203.0.113.28","203.0.113.27"]'
+# build.sh passes the user's own nodes FIRST: the user's copy of a subscription node keeps the
+# user's name (and the subscription's copy is the duplicate)
+begin "parser/dedup-users-file-first-keeps-users-name"
 mkdir -p "$T_STATE/parser"
 printf 'vless://%s@203.0.113.29:443?security=tls#ProviderName\n' "$U" > "$T_STATE/parser/sub.raw"
 printf 'vless://%s@203.0.113.29:443?security=tls#MyImported\n' "$U" > "$T_STATE/parser/imported.links"
-_o=$(ucode "$PARSER" "$T_STATE/parser/sub.raw" "$T_STATE/parser/imported.links" 2>/dev/null)
-expect_jq "both nodes, each under its own name" "$_o" 'map(.tag)==["ProviderName","MyImported"]'
+_o=$(ucode "$PARSER" "$T_STATE/parser/imported.links" "$T_STATE/parser/sub.raw" 2>/dev/null)
+expect_jq "one node under the user's name" "$_o" 'map(.tag)==["MyImported"]'
+_r=$(ucode "$PARSER" --report "$T_STATE/parser/imported.links" "$T_STATE/parser/sub.raw" 2>/dev/null)
+expect_jq "the subscription's copy: duplicate of it, with the same id" "$_r" \
+	'.[1].status=="skip" and .[1].reason=="duplicate" and .[1].dup_of=="MyImported" and .[1].id==.[0].id and (.[0].id|length)==12'
 end
 P json-key-order-dedup - \
 	"[{\"type\":\"vless\",\"tag\":\"K\",\"server\":\"203.0.113.30\",\"server_port\":443,\"uuid\":\"$U\"},{\"uuid\":\"$U\",\"server_port\":443,\"server\":\"203.0.113.30\",\"tag\":\"K\",\"type\":\"vless\"}]" \
@@ -289,13 +295,38 @@ expect_true "id computed ($_j1)" [ ${#_j1} -eq 12 ]
 expect_eq "permuted JSON keys (and another name) -> same id" "$_j2" "$_j1"
 expect_eq "the equivalent link -> same id" "$_j3" "$_j1"
 end
-# in nodes.json the id must be unique: same config under two names -> today two nodes with one
-# id; merging them (user's source wins) is ROADMAP 2.2
+# in nodes.json the id is unique: the same config under two names is one node
 begin "parser/id-unique-in-output"
-_u=$(printf 'vless://%s@203.0.113.84:443?security=tls#Sub\nvless://%s@203.0.113.84:443?security=tls#Mine\n' "$U" "$U" | ucode "$PARSER" --with-id 2>/dev/null)
-expect_jq "nodes parsed, all with an id" "$_u" 'length>=1 and all(.[]; (.id|length)==12)'
+_u=$(printf 'vless://%s@203.0.113.84:443?security=tls#Sub\nvless://%s@203.0.113.84:443?security=tls#Mine\nvless://%s@203.0.113.86:443?security=tls#Third\n' "$U" "$U" "$U" | ucode "$PARSER" --with-id 2>/dev/null)
+expect_jq "two nodes parsed (positive control), all with an id" "$_u" 'length==2 and all(.[]; (.id|length)==12)'
 expect_jq "no two nodes share an id" "$_u" '(map(.id)|unique|length)==length'
-end 2.2
+end
+# ---- the per-input filters of build.sh (ROADMAP 9): hidden ids, picks, the source index ----
+HP_LINKS=$(printf 'vless://%s@203.0.113.87:443?security=tls#HP1\nvless://%s@203.0.113.88:443?security=tls#HP2\nvless://%s@203.0.113.89:443?security=tls#HP3\n' "$U" "$U" "$U")
+printf '%s\n' "$HP_LINKS" > "$T_STATE/parser/hp.links"
+HP_IDS=$(ucode "$PARSER" --with-id "$T_STATE/parser/hp.links" 2>/dev/null | jq -r '.[].id')
+printf '%s\n' "$HP_IDS" | sed -n 2p > "$T_STATE/parser/hide.ids"
+begin "parser/hide-skips-the-id-in-every-input"
+expect_eq "control: three ids" "$(printf '%s\n' "$HP_IDS" | grep -c .)" 3
+_o=$(ucode "$PARSER" --with-id --hide "$T_STATE/parser/hide.ids" "$T_STATE/parser/hp.links" "$T_STATE/parser/hp.links" 2>/dev/null)
+expect_jq "HP2 gone from both inputs, the others stay" "$_o" 'map(.tag)==["HP1","HP3"]'
+_r=$(ucode "$PARSER" --report --hide "$T_STATE/parser/hide.ids" "$T_STATE/parser/hp.links" 2>/dev/null)
+expect_jq "report: hidden, with its id, name and server" "$_r" ".[1] | .status==\"skip\" and .reason==\"hidden\" and .tag==\"HP2\" and .server==\"203.0.113.88\" and .id==\"$(printf '%s\n' "$HP_IDS" | sed -n 2p)\""
+end
+printf '%s\n' "$HP_IDS" | sed -n 3p > "$T_STATE/parser/pick.ids"
+printf 'vless://%s@203.0.113.88:443?security=tls#Own-HP2\n' "$U" > "$T_STATE/parser/own.links"
+begin "parser/pick-only-for-the-next-file-before-dedup"
+# the picked file comes FIRST: its not-picked HP2 must not shadow the next file's copy of HP2
+_o=$(ucode "$PARSER" --with-id --with-src --pick "$T_STATE/parser/pick.ids" "$T_STATE/parser/hp.links" "$T_STATE/parser/own.links" 2>/dev/null)
+expect_jq "from the picked file only HP3; HP2 comes from the other file under its name" "$_o" 'map(.tag)==["HP3","Own-HP2"]'
+expect_jq "_src = the index of the input file" "$_o" 'map(._src)==[0,1]'
+_r=$(ucode "$PARSER" --report --pick "$T_STATE/parser/pick.ids" "$T_STATE/parser/hp.links" 2>/dev/null)
+expect_jq "the others: not_picked with their ids" "$_r" '[.[] | .reason // "ok"]==["not_picked","not_picked","ok"] and (.[0].id|length)==12'
+end
+begin "parser/src-and-filters-off-by-default"
+_o=$(ucode "$PARSER" "$T_STATE/parser/hp.links" 2>/dev/null)
+expect_jq "3 nodes, no _src / id without the flags" "$_o" 'length==3 and all(.[]; (has("_src")|not) and (has("id")|not))'
+end
 begin "parser/id-not-in-default-output"
 _o=$(printf '%s\n' "$ID_LINKS" | ucode "$PARSER" 2>/dev/null)
 expect_jq "6 nodes parsed" "$_o" 'length==6'

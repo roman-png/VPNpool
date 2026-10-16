@@ -2,12 +2,15 @@
 # Coexists with podkop (separate sing-box instance). Editable via uci / LuCI.
 
 config vpnpool 'main'
+	# Data model version (2 = vpnpool 2.0: subscriptions are their own sections, every node
+	# store keys on the node ID). A 1.x config has none: migrate.sh moves it to 2 at install.
+	option schema '2'
 	option enabled '0'
 	option mode 'selective'
-	option subscription_url ''
-	# Extra FULL subscriptions, bulk-merged into the pool like the primary one
-	# (quota/expiry are read only from the primary). Managed via the UI.
-	# list extra_sub 'https://...'
+	# Subscriptions: one 'config subscription' section each (below), all equal — each with its
+	# own expiry, quota and "updated". Your own nodes: list manual_node (links); AmneziaWG /
+	# WireGuard nodes are files /etc/vpnpool/awg/<id>.conf.
+	# list manual_node 'vless://...'
 	# Subscription refresh period (e.g. 30m, 6h). Minimum 10m: panels rate-limit faster polling.
 	option subscription_interval '6h'
 	# Fallback liveness URL for sing-box urltest when check_services is empty.
@@ -23,10 +26,16 @@ config vpnpool 'main'
 	option failover_interval '60'
 	option failover_tolerance '50'
 	option auto_switch '1'
-	# persisted manual node pick (empty = AUTO/urltest); set by the UI "Use" button
-	option selected_node ''
-	# preferred node: soft pin with switch-back (empty = pure auto/urltest)
+	# "Connect": the preferred node (its ID) — a soft pin with failover and switch-back; empty =
+	# the automatic choice ("Back to automatic choice" clears it). Set by the UI.
 	option preferred_node ''
+	# The automatic choice uses only the favourite nodes (when at least one is in the pool).
+	option favorites_only '0'
+	# Managed by the UI, by node ID: list hidden (subscription nodes you removed; "Return" brings
+	# them back), list auto_member (which nodes take part in the automatic choice; empty = all),
+	# list keep_auto (kept in the automatic choice although the service check fails them).
+	# Favourites live in /etc/vpnpool/favorites.map.json (with their links, so they outlive
+	# their subscription).
 	# IPv6 policy: block (fail-closed: LAN IPv6 to the internet is rejected) | off
 	option ipv6 'block'
 	# Kill-switch (opt-in): routing is NEVER taken down when the tunnel dies (fail-closed:
@@ -38,12 +47,9 @@ config vpnpool 'main'
 	# Per-client routing: all | exclude (listed bypass) | include (only listed).
 	# Clients are IPv4 addresses, e.g.:  list client '192.168.1.50'
 	option client_mode 'all'
-	# Saved nodes: links promoted from the subscription into a persistent store so
-	# they stay usable after the subscription expires (managed via the UI ⭐ button).
-	# list saved_node 'vless://...'
-	# Auto-snapshot: periodically persist the currently-reachable nodes into the
-	# saved store (bounded to auto_snapshot_max) so a working fallback survives
-	# subscription expiry. Opt-in.
+	# Add working nodes to the favourites automatically: periodically keep the currently
+	# reachable nodes (the fastest auto_snapshot_max) as automatic favourites, so a working
+	# fallback survives a subscription's expiry. Your own favourites are never touched. Opt-in.
 	option auto_snapshot '0'
 	option auto_snapshot_max '20'
 	# Scheduler (HH:MM, router local time): off/on the service + refresh subscription
@@ -111,6 +117,14 @@ config vpnpool 'main'
 	# the AmneziaWG build /usr/bin/sing-box-awg (engine.sh install) while AmneziaWG nodes exist.
 	# Another path pins that binary for everything.
 	# option singbox_bin '/usr/bin/sing-box'
+
+# A subscription (added by the UI; name = sub_<key>):
+# config subscription 'sub_0123456789ab'
+#	option name 'My provider'
+#	option url 'https://...'
+#	option enabled '1'
+#	option mode 'all'          # all = take every node | pick = only the node IDs listed in pick
+#	list pick '0123456789ab'
 
 # Selective routing lists. Starter set mirrors podkop; fully editable.
 config routing 'routing'

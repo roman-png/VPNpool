@@ -34,6 +34,9 @@ start_tgbot_instance() {
 }
 
 start_service() {
+	# A 1.x configuration (sysupgrade kept it, the package's uci-defaults run failed, ...) is moved
+	# to the 2.0 data model before anything reads it; on schema 2 this returns at once.
+	[ -x /usr/libexec/vpnpool/migrate.sh ] && /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1
 	config_load vpnpool
 
 	local enabled

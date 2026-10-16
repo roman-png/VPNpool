@@ -30,12 +30,18 @@ done
 ulist() { uci -q get "$1" | tr ' ' '\n' | grep -v '^$'; }
 jarg() { jq -nc "$@"; }   # build JSON args safely: jarg --arg l "$L1" '{link:$l}'
 
-fx_nodes() {   # nodes.json + links.json for Node1/Node2
+fx_nodes() {   # the last build: Node1 (a manual link) + Node2 (from subscription sp), ids, links.json
 	printf '%s\n%s\n' "$L1" "$L2" > "$FXR/links.txt"
-	ucode /usr/libexec/vpnpool/parser.uc "$FXR/links.txt" > /tmp/vpnpool/nodes.json
-	jq -nc --arg a "$L1" --arg b "$L2" '[{tag:"Node1",link:$a},{tag:"Node2",link:$b}]' > /etc/vpnpool/links.json
+	ucode /usr/libexec/vpnpool/parser.uc --with-id "$FXR/links.txt" \
+		| jq -c 'map(._src = (if .tag == "Node1" then "manual" else "sub:sp" end))' > /tmp/vpnpool/nodes.json
+	ID1=$(jq -r '.[0].id' /tmp/vpnpool/nodes.json); ID2=$(jq -r '.[1].id' /tmp/vpnpool/nodes.json)
+	jq -nc --arg a "$L1" --arg b "$L2" --arg i "$ID1" --arg j "$ID2" \
+		'[{tag:"Node1",id:$i,link:$a,src:"manual"},{tag:"Node2",id:$j,link:$b,src:"sub:sp"}]' > /tmp/vpnpool/links.json
+	cp /tmp/vpnpool/links.json /etc/vpnpool/links.json
 }
-fx_saved() { jq -nc --arg a "$L1" '{Node1:$a}' > /etc/vpnpool/saved.map.json; }
+# Node1 as a favourite (archived; <active> true = it joins the pool from the archive)
+fx_fav() { fx_nodes; jq -nc --arg a "$L1" --arg i "$ID1" --argjson act "${1:-false}" '{($i): {tag:"Node1", link:$a, active:$act, auto:false}}' > /etc/vpnpool/favorites.map.json; }
+subs_tsv() { ucode /usr/libexec/vpnpool/model.uc subs 2>/dev/null; }   # id \t enabled \t mode \t url
 
 # M <method> <ok-args> <signal|-> <ok-xfail|-> <ok-check-fn|-> <bad-args|-> <bad-xfail|->
 # Optional per-method hooks: s_<method> (setup, both cases), b_<method> (extra setup for bad).
@@ -128,9 +134,13 @@ c_set_enabled() {
 s_set_enabled() { : > "$INITD_LOG"; uci set vpnpool.main.enabled=1; uci commit vpnpool; }
 M set_enabled '{"enabled":false}' - - c_set_enabled '{"enabled":"maybe"}' -
 
+# "Connect" (ROADMAP 9.5): the soft preferred node by id + the live selector; no hard pin
 s_select() { fx_nodes; mock_on; mock_rule 'PUT http://127.0.0.1:9091/proxies/proxy' 204; }
-b_select() { mock_on; mock_rule 'PUT http://127.0.0.1:9091/proxies/proxy' 404; }
-c_select() { expect_eq "selected_node" "$(uci -q get vpnpool.main.selected_node)" Node1; }
+c_select() {
+	expect_eq "preferred_node = Node1's id" "$(uci -q get vpnpool.main.preferred_node)" "$ID1"
+	expect_jq "applied live" "$R" '.code=="applied"'
+	expect_eq "no hard pin stored" "$(uci -q get vpnpool.main.selected_node)" ''
+}
 M select '{"tag":"Node1"}' - - c_select '{"tag":"Nope"}' -
 
 s_refresh() { : > "$INITD_LOG"; uci set vpnpool.main.enabled=1; uci commit vpnpool; }
@@ -150,16 +160,17 @@ c_ping() {
 }
 M ping '{}' - - c_ping - -
 
-c_set_url() { expect_eq "subscription_url" "$(uci -q get vpnpool.main.subscription_url)" 'https://sub.example.com/s'; }
+# legacy: the first subscription that takes every node ("primary") — a section of its own
+c_set_url() { expect_eq "a subscription section" "$(subs_tsv | cut -f3,4)" "all	https://sub.example.com/s"; }
 M set_url '{"url":"https://sub.example.com/s"}' USR2 - c_set_url '{"url":"ftp://bad url"}' -
 
-s_del_subscription() { uci set vpnpool.main.subscription_url='https://sub.example.com/s'; uci commit vpnpool; }
-c_del_subscription() { expect_eq "subscription_url cleared" "$(uci -q get vpnpool.main.subscription_url)" ''; expect_jq "promoted" "$R" '.promoted==0'; }
-M del_subscription '{}' USR2 - c_del_subscription - -
+s_del_subscription() { sub_section sp 'https://sub.example.com/s'; }
+c_del_subscription() { expect_eq "no subscription left" "$(subs_tsv)" ''; }
+M del_subscription '{}' USR1 - c_del_subscription - -
 
 
-s_del_source() { uci add_list vpnpool.main.source='https://src.example.com/l'; uci commit vpnpool; }
-c_del_source() { expect_eq "source removed" "$(ulist vpnpool.main.source)" ''; }
+s_del_source() { sub_section ss 'https://src.example.com/l' pick; }
+c_del_source() { expect_eq "the pick subscription removed" "$(subs_tsv)" ''; }
 M del_source '{"url":"https://src.example.com/l"}' USR1 - c_del_source '{"url":"https://unknown.example.com/"}' -
 
 s_probe_source() { mock_on; printf '%s\n%s\n' "$L1" "$L2" > "$FXR/src.txt"; mock_rule 'GET https://src.example.com/l' 200 "$FXR/src.txt"; }
@@ -170,9 +181,15 @@ c_probe_source() {
 }
 M probe_source '{"url":"https://src.example.com/l"}' - - c_probe_source '{"url":""}' -
 
-s_import_select() { jq -nc --arg a "$L1" --arg b "$L2" '{url:"https://src.example.com/l",nodes:[{i:0,link:$a,tag:"Node1"},{i:1,link:$b,tag:"Node2"}]}' > /tmp/vpnpool/.probe-cache.json; }
-c_import_select() { expect_eq "imported_node" "$(ulist vpnpool.main.imported_node)" "$L1"; expect_jq "count" "$R" '.count==1'; }
-M import_select '{"url":"https://src.example.com/l","idx":[0]}' USR1 - c_import_select '{"url":"https://other.example.com/","idx":[0]}' -
+# the picks of the probe dialog -> a subscription in "pick" mode taking exactly those ids
+s_import_select() { fx_nodes; jq -nc --arg a "$L1" --arg b "$L2" --arg i "$ID1" --arg j "$ID2" '{url:"https://src.example.com/l",nodes:[{i:0,id:$i,link:$a,tag:"Node1"},{i:1,id:$j,link:$b,tag:"Node2"}]}' > /tmp/vpnpool/.probe-cache.json; }
+c_import_select() {
+	expect_eq "a pick subscription for the URL" "$(subs_tsv | cut -f2-4)" "1	pick	https://src.example.com/l"
+	_sid=$(subs_tsv | cut -f1)
+	expect_eq "picks = Node1's id" "$(ulist "vpnpool.$_sid.pick")" "$ID1"
+	expect_jq "count" "$R" '.count==1'
+}
+M import_select '{"url":"https://src.example.com/l","idx":[0]}' USR2 - c_import_select '{"url":"https://other.example.com/","idx":[0]}' -
 
 c_add_node() { expect_eq "manual_node" "$(ulist vpnpool.main.manual_node)" "$L1"; }
 M add_node "$(jarg --arg l "$L1" '{link:$l}')" USR1 - c_add_node '{"link":"this is not a node"}' -
@@ -189,42 +206,48 @@ s_delete_node() { fx_nodes; uci add_list vpnpool.main.manual_node="$L1"; uci com
 c_delete_node() { expect_eq "manual_node empty" "$(ulist vpnpool.main.manual_node)" ''; expect_jq "pruned from nodes.json" "$(cat /tmp/vpnpool/nodes.json)" 'map(.tag)==["Node2"]'; }
 M delete_node '{"tag":"Node1"}' USR1 - c_delete_node '{"tag":"Nope"}' -
 
-s_delete_nodes() { fx_nodes; uci add_list vpnpool.main.manual_node="$L1"; uci add_list vpnpool.main.manual_node="$L2"; uci commit vpnpool; }
-c_delete_nodes() { expect_eq "manual_node empty" "$(ulist vpnpool.main.manual_node)" ''; }
+s_delete_nodes() { fx_nodes; uci add_list vpnpool.main.manual_node="$L1"; uci commit vpnpool; }
+c_delete_nodes() {
+	expect_eq "the manual link removed" "$(ulist vpnpool.main.manual_node)" ''
+	expect_eq "the subscription node hidden (its source would bring it back)" "$(ulist vpnpool.main.hidden)" "$ID2"
+	expect_jq "two deleted" "$R" '.deleted==2 and .missing==[]'
+}
 M delete_nodes '{"tags":["Node1","Node2"]}' USR1 - c_delete_nodes '{"tags":["Nope"]}' -
 
-s_restore_node() { fx_nodes; echo '["Node1"]' > /tmp/vpnpool/.dead_tags.json; }
-c_restore_node() { expect_eq "keep_auto" "$(ulist vpnpool.main.keep_auto)" Node1; expect_jq "dead set pruned" "$(cat /tmp/vpnpool/.dead_tags.json)" '.==[]'; }
+s_restore_node() { fx_nodes; jq -nc --arg i "$ID1" '[$i]' > /tmp/vpnpool/.dead_ids.json; }
+c_restore_node() { expect_eq "keep_auto = the id" "$(ulist vpnpool.main.keep_auto)" "$ID1"; expect_jq "dead set pruned" "$(cat /tmp/vpnpool/.dead_ids.json)" '.==[]'; }
 M restore_node '{"tag":"Node1"}' USR1 - c_restore_node '{"tag":"Nope"}' -
 
-s_refilter_node() { fx_nodes; uci add_list vpnpool.main.keep_auto=Node1; uci commit vpnpool; }
+s_refilter_node() { fx_nodes; uci add_list vpnpool.main.keep_auto="$ID1"; uci commit vpnpool; }
 c_refilter_node() { expect_eq "keep_auto empty" "$(ulist vpnpool.main.keep_auto)" ''; }
 M refilter_node '{"tag":"Node1"}' USR1 - c_refilter_node '{"tag":"Nope"}' -
 
+# favourites (ROADMAP 9.3; the legacy names save_node / unsave_node / activate_saved /
+# deactivate_saved act on them): by id, with the node's link
 s_save_node() { fx_nodes; }
-c_save_node() { expect_true "saved.map has Node1" jq -e '.Node1|startswith("vless://")' /etc/vpnpool/saved.map.json; expect_eq "uci saved_node" "$(ulist vpnpool.main.saved_node)" "$L1"; }
+c_save_node() { expect_true "a favourite with the link" jq -e --arg i "$ID1" --arg l "$L1" '.[$i].link==$l and .[$i].active==false and .[$i].auto==false and .[$i].tag=="Node1"' /etc/vpnpool/favorites.map.json; }
 M save_node '{"tag":"Node1"}' - - c_save_node '{"tag":"Nope"}' -
 
-s_unsave_node() { fx_nodes; fx_saved; }
-c_unsave_node() { expect_true "saved.map empty" jq -e '.==({})' /etc/vpnpool/saved.map.json; }
+s_unsave_node() { fx_fav; }
+c_unsave_node() { expect_true "no favourite left" jq -e '.==({})' /etc/vpnpool/favorites.map.json; }
 M unsave_node '{"tag":"Node1"}' - - c_unsave_node '{"tag":"Nope"}' -
 
-s_activate_saved() { fx_saved; }
-c_activate_saved() { expect_eq "active_saved" "$(ulist vpnpool.main.active_saved)" "$L1"; }
+s_activate_saved() { fx_fav; }
+c_activate_saved() { expect_true "the favourite joins the pool from the archive" jq -e --arg i "$ID1" '.[$i].active==true' /etc/vpnpool/favorites.map.json; }
 M activate_saved '{"tag":"Node1"}' USR1 - c_activate_saved '{"tag":"Nope"}' -
 
-s_deactivate_saved() { fx_saved; uci add_list vpnpool.main.active_saved="$L1"; uci commit vpnpool; }
-c_deactivate_saved() { expect_eq "active_saved empty" "$(ulist vpnpool.main.active_saved)" ''; }
+s_deactivate_saved() { fx_fav true; }
+c_deactivate_saved() { expect_true "back to the archive only" jq -e --arg i "$ID1" '.[$i].active==false' /etc/vpnpool/favorites.map.json; }
 M deactivate_saved '{"tag":"Node1"}' USR1 - c_deactivate_saved '{"tag":"Nope"}' -
 
 s_add_sub() { mock_on; printf '%s\n%s\n' "$L1" "$L2" > "$FXR/sub.txt"; mock_rule 'GET https://extra.example.com/x' 200 "$FXR/sub.txt"; }
 b_add_sub() { mock_on; mock_rule 'GET https://extra.example.com/x' 500; }
-c_add_sub() { expect_jq "fetched 2" "$R" '.fetched==2'; expect_eq "extra_sub" "$(ulist vpnpool.main.extra_sub)" 'https://extra.example.com/x'; }
+c_add_sub() { expect_jq "fetched 2" "$R" '.fetched==2'; expect_eq "a subscription section" "$(subs_tsv | cut -f2-4)" "1	all	https://extra.example.com/x"; }
 M add_sub '{"url":"https://extra.example.com/x"}' USR2 - c_add_sub '{"url":"https://extra.example.com/x"}' -
 
-s_del_sub() { uci add_list vpnpool.main.extra_sub='https://extra.example.com/x'; uci commit vpnpool; }
-c_del_sub() { expect_eq "extra_sub empty" "$(ulist vpnpool.main.extra_sub)" ''; }
-M del_sub '{"url":"https://extra.example.com/x"}' USR2 - c_del_sub '{"url":"https://unknown.example.com/"}' -
+s_del_sub() { sub_section se 'https://extra.example.com/x'; }
+c_del_sub() { expect_eq "no subscription left" "$(subs_tsv)" ''; }
+M del_sub '{"url":"https://extra.example.com/x"}' USR1 - c_del_sub '{"url":"https://unknown.example.com/"}' -
 
 s_set_schedule() { mkdir -p /etc/crontabs; : > /etc/crontabs/root; }
 c_set_schedule() {
@@ -264,11 +287,13 @@ c_set_clients() {
 }
 M set_clients '{"mode":"include","clients":["192.168.1.10"],"devices":["aa:bb:cc:dd:ee:ff"]}' USR1 - c_set_clients '{"mode":"zzz","clients":["999.1.1.1"],"devices":[]}' -
 
-c_set_auto_members() { expect_eq "auto_member" "$(ulist vpnpool.main.auto_member)" Node1; }
+# the auto-pool members by id; a tag of the last build is mapped to its id (older screens)
+s_set_auto_members() { fx_nodes; }
+c_set_auto_members() { expect_eq "auto_member = Node1's id" "$(ulist vpnpool.main.auto_member)" "$ID1"; }
 M set_auto_members '{"members":["Node1"]}' USR1 - c_set_auto_members '{"members":"Node1"}' -
 
 s_set_preferred() { fx_nodes; }
-c_set_preferred() { expect_eq "preferred_node" "$(uci -q get vpnpool.main.preferred_node)" Node1; }
+c_set_preferred() { expect_eq "preferred_node = Node1's id" "$(uci -q get vpnpool.main.preferred_node)" "$ID1"; }
 M set_preferred '{"tag":"Node1"}' - - c_set_preferred '{"tag":"Nope"}' -
 
 s_speedtest() { fx_nodes; uci set vpnpool.main.speedtest_min_mem_kb=1; uci commit vpnpool; }
@@ -305,7 +330,8 @@ s_add() { mock_on; printf '%s\n%s\n' "$L1" "$L2" > "$FXR/newsub.txt"; mock_rule 
 c_add() {
 	expect_jq "added 2" "$R" '.added==2 and .dup==0 and .failed==[]'
 	expect_eq "manual_node" "$(ulist vpnpool.main.manual_node)" "$L1"
-	expect_eq "extra_sub" "$(ulist vpnpool.main.extra_sub)" 'https://new.example.com/s'
+	expect_eq "the URL: a subscription section of its own" "$(subs_tsv | cut -f2-4)" "1	all	https://new.example.com/s"
+	expect_jq "its id in the reply" "$R" "(.sub_ids|length)==1 and .sub_ids[0]==\"$(subs_tsv | cut -f1)\""
 	expect_eq "ONE signal: the refetch (it rebuilds too), no extra rebuild" "$(gcount '^USR1$' "$FAKED_LOG")" 0
 }
 M add "$(jarg --arg t "$L1
@@ -471,12 +497,13 @@ expect_true "crontab rewritten (sched_on changed)" [ -f /etc/crontabs/root ]
 end
 
 reset_state; daemon_start; : > "$INITD_LOG"
-rcall set_config '{"settings":{"failover_interval":"90","subscription_url":"https://sub.example.com/new"}}'
+rcall set_config '{"settings":{"failover_interval":"90","mode":"exclude","favorites_only":true}}'
 begin "rpcd/set_config/one-signal-only"
 expect_jq "saved, signalled" "$R" '.ok==true and .daemon=="signalled"'
-expect_eq "USR2 (refetch + rebuild) once" "$(signals_seen USR2)" 1
-expect_eq "no second rebuild signal" "$(gcount '^USR1$' "$FAKED_LOG")" 0
+expect_eq "USR1 (rebuild) once for three rebuild fields" "$(signals_seen USR1)" 1
+expect_eq "no refetch" "$(gcount '^USR2$' "$FAKED_LOG")" 0
 expect_eq "bot untouched" "$(gcount '^vpnpool reload' "$INITD_LOG")" 0
+expect_eq "favourites only stored" "$(uci -q get vpnpool.main.favorites_only)" 1
 end
 : > "$FAKED_LOG"
 rcall set_config '{"settings":{"failover_interval":"90"}}'
@@ -486,7 +513,7 @@ expect_eq "no signal" "$(gcount -e '^USR1$' -e '^USR2$' "$FAKED_LOG")" 0
 end
 
 reset_state; daemon_start
-uci set vpnpool.main.telegram_token='123456:SECRET-BOT-TOKEN'; uci set vpnpool.main.subscription_url='https://sub.example.com/s/TOKEN'; uci commit vpnpool
+uci set vpnpool.main.telegram_token='123456:SECRET-BOT-TOKEN'; uci commit vpnpool; sub_section sp 'https://sub.example.com/s/TOKEN'
 rcall status
 MTOK=$(printf '%s' "$R" | jq -r '.settings.telegram_token'); MURL=$(printf '%s' "$R" | jq -r '.subscription.url')
 rcall set_config "$(jq -nc --arg t "$MTOK" '{settings:{telegram_token:$t, failover_interval:"91"}}')"
@@ -498,12 +525,12 @@ end
 rcall set_url "$(jq -nc --arg u "$MURL" '{url:$u}')"
 begin "rpcd/set_url/masked-url-sent-back-unchanged"
 expect_jq "unchanged, no signal" "$R" '.ok==true and .code=="unchanged" and .daemon=="n/a"'
-expect_eq "real URL kept" "$(uci -q get vpnpool.main.subscription_url)" 'https://sub.example.com/s/TOKEN'
+expect_eq "real URL kept" "$(uci -q get vpnpool.sp.url)" 'https://sub.example.com/s/TOKEN'
 end
 rcall export
 begin "rpcd/export/subscription-url-masked"
 expect_eq "token path in export" "$(printf '%s' "$R" | gcount 's/TOKEN')" 0
-expect_jq "masked line present" "$R" '.config | contains("option subscription_url '"'"'https://sub.example.com/***'"'"'")'
+expect_jq "masked line present" "$R" '.config | contains("option url '"'"'https://sub.example.com/***'"'"'")'
 end
 rcall import "$(printf '%s' "$R" | jq -c '{config}')"
 begin "rpcd/import/masked-export-refused"
@@ -512,25 +539,25 @@ expect_eq "real token kept" "$(uci -q get vpnpool.main.telegram_token)" '123456:
 end
 
 reset_state; daemon_start
-uci add_list vpnpool.main.extra_sub='https://e1.example.com/a/SECRET'; uci commit vpnpool
+sub_section e0 'https://e1.example.com/a/SECRET'
 rcall del_sub '{"url":"https://e1.example.com/***"}'
 begin "rpcd/del_sub/masked-url-resolved"
 expect_jq "deleted" "$R" '.ok==true and .code=="deleted"'
-expect_eq "extra_sub empty" "$(ulist vpnpool.main.extra_sub)" ''
+expect_eq "no subscription left" "$(subs_tsv)" ''
 end
 # two subscriptions on ONE host: the masked form is ambiguous -> refused; the status key picks one
-uci add_list vpnpool.main.extra_sub='https://e1.example.com/a/ONE'; uci add_list vpnpool.main.extra_sub='https://e1.example.com/b/TWO'; uci commit vpnpool
+sub_section e1 'https://e1.example.com/a/ONE'; sub_section e2 'https://e1.example.com/b/TWO'
 rcall del_sub '{"url":"https://e1.example.com/***"}'
 begin "rpcd/del_sub/ambiguous-mask-refused"
 expect_jq "ambiguous (not a silent pick of one)" "$R" '.ok==false and .code=="ambiguous"'
-expect_eq "both kept" "$(ulist vpnpool.main.extra_sub | wc -l)" 2
+expect_eq "both kept" "$(subs_tsv | wc -l)" 2
 end
 rcall status
-K2=$(printf '%s' "$R" | jq -r '.subscriptions[] | select(.kind=="extra") | .key' | sed -n 2p)
+K2=$(printf '%s' "$R" | jq -r '.subscriptions[1].key')
 rcall del_sub "$(jq -nc --arg k "$K2" '{url:$k}')"
 begin "rpcd/del_sub/by-status-key"
 expect_jq "deleted" "$R" '.ok==true and .code=="deleted"'
-expect_eq "the second one removed" "$(ulist vpnpool.main.extra_sub)" 'https://e1.example.com/a/ONE'
+expect_eq "the second one removed" "$(subs_tsv | cut -f4)" 'https://e1.example.com/a/ONE'
 end
 
 reset_state
@@ -543,7 +570,7 @@ expect_eq "main untouched" "$(uci -q get vpnpool.main.failover_interval)" 60
 end
 
 # ---- analyze: every status, nothing written ----
-reset_state; uci add_list vpnpool.main.manual_node="$L1"; uci set vpnpool.main.subscription_url='https://sub.example.com/s'; uci commit vpnpool
+reset_state; uci add_list vpnpool.main.manual_node="$L1"; uci commit vpnpool; sub_section sp 'https://sub.example.com/s'
 cp /etc/config/vpnpool "$FXR/before.cfg"
 L3="vless://$U@203.0.113.73:443?security=tls&sni=a.example#Node3"
 L1R="vless://$U@203.0.113.71:443?security=tls&sni=a.example#Renamed"
@@ -593,15 +620,15 @@ reset_state
 uci set vpnpool.main.telegram_token='123456:SECRET-BOT-TOKEN'; uci add_list vpnpool.main.manual_node="$L1"; uci set vpnpool.main.enabled=1; uci commit vpnpool
 mkdir -p /etc/vpnpool/awg; cp "$T_DIR/fixtures/awg/awg2.conf" /etc/vpnpool/awg/a1.conf; cp "$T_DIR/fixtures/awg/wg-plain.conf" /etc/vpnpool/awg/a2.conf
 NAWG=$(ls /etc/vpnpool/awg/*.conf | wc -l)
-echo '{"Node1":"'"$L1"'"}' > /etc/vpnpool/saved.map.json
+echo '{"0123456789ab":{"tag":"Node1","link":"'"$L1"'","active":false,"auto":false}}' > /etc/vpnpool/favorites.map.json
 rcall backup
 printf '%s' "$R" | jq -r '.data' | base64 -d > "$FXR/full.tgz" 2>/dev/null
 mkdir -p "$FXR/full"; tar -xzf "$FXR/full.tgz" -C "$FXR/full" 2>/dev/null
 begin "rpcd/backup/full-copy-with-secrets"
 expect_true "real token inside (it is THE backup)" grep -q 'SECRET-BOT-TOKEN' "$FXR/full/etc/config/vpnpool"
 expect_eq "AWG confs inside" "$(ls "$FXR/full/etc/vpnpool/awg/"*.conf 2>/dev/null | wc -l)" "$NAWG"
-expect_true "saved map inside" [ -s "$FXR/full/etc/vpnpool/saved.map.json" ]
-expect_jq "report counts" "$R" ".report.nodes==1 and .report.awg==$NAWG and .report.saved==0"
+expect_true "favourites map inside" [ -s "$FXR/full/etc/vpnpool/favorites.map.json" ]
+expect_jq "report counts (the favourite counted)" "$R" ".report.nodes==1 and .report.awg==$NAWG and .report.saved==1"
 end
 BK=$(printf '%s' "$R" | jq -r '.data')
 reset_state
@@ -617,7 +644,7 @@ begin "rpcd/restore/replace-all"
 expect_jq "restored" "$R" '.ok==true and .code=="restored" and .daemon=="signalled"'
 expect_eq "token back" "$(uci -q get vpnpool.main.telegram_token)" '123456:SECRET-BOT-TOKEN'
 expect_eq "AWG confs back" "$(ls /etc/vpnpool/awg/*.conf 2>/dev/null | wc -l)" "$NAWG"
-expect_true "saved map back" [ -s /etc/vpnpool/saved.map.json ]
+expect_true "favourites map back" [ -s /etc/vpnpool/favorites.map.json ]
 end
 # foreign member (anything outside the backup's own paths) -> refused, nothing touched
 reset_state
@@ -801,9 +828,9 @@ expect_jq "write_failed at the copy step" "$R" '.ok==false and .code=="write_fai
 expect_eq "config untouched" "$(uci -q get vpnpool.main.failover_interval)" 61
 end
 
-# V6: a mask never travels on as an address; looked up in the method's own list only
+# V6: a mask never travels on as an address; looked up in the method's own kind of subscription
 reset_state; daemon_start; mock_on
-uci add_list vpnpool.main.source='https://h.example/AAA'; uci add_list vpnpool.main.source='https://h.example/BBB'; uci commit vpnpool
+sub_section s1 'https://h.example/AAA' pick; sub_section s2 'https://h.example/BBB' pick
 rcall probe_source '{"url":"https://h.example/***"}'
 begin "rpcd/probe_source/ambiguous-mask-refused"
 expect_jq "ambiguous" "$R" '.ok==false and .code=="ambiguous"'
@@ -814,18 +841,23 @@ begin "rpcd/probe_source/unknown-mask-refused"
 expect_jq "not_found" "$R" '.ok==false and .code=="not_found"'
 end
 reset_state; daemon_start; mock_on
-uci add_list vpnpool.main.source='https://h.example/AAA'; uci add_list vpnpool.main.extra_sub='https://h.example/BBB'; uci commit vpnpool
+sub_section s1 'https://h.example/AAA' pick; sub_section s2 'https://h.example/BBB' all
 printf '%s\n' "$L1" > "$FXR/src1.txt"; mock_rule 'GET https://h.example/AAA' 200 "$FXR/src1.txt"
-rcall probe_source '{"url":"https://h.example/***"}'
-begin "rpcd/probe_source/mask-resolved-in-sources-only"
-expect_jq "started (the subscription on the same host does not make it ambiguous)" "$R" '.ok==true and .code=="started"'
+rcall probe_source '{"url":"s1"}'
+begin "rpcd/probe_source/by-subscription-id"
+expect_jq "started" "$R" '.ok==true and .code=="started"'
 _i=0; while [ $_i -lt 20 ] && [ -f /tmp/vpnpool/.probe-running ]; do sleep 1; _i=$((_i+1)); done
 expect_true "the real source was fetched" [ "$(mock_calls 'GET https://h.example/AAA')" -ge 1 ]
+end
+rcall del_source '{"url":"https://h.example/***"}'
+begin "rpcd/del_source/mask-resolved-in-pick-subscriptions-only"
+expect_jq "deleted (the all-mode subscription on the same host does not make it ambiguous)" "$R" '.ok==true and .code=="deleted"'
+expect_eq "the other one kept" "$(subs_tsv | cut -f1)" s2
 end
 rcall add_sub '{"url":"https://h.example/***"}'
 begin "rpcd/add_sub/mask-literal-refused"
 expect_jq "invalid url, nothing stored" "$R" '.ok==false and .code=="invalid"'
-expect_eq "extra_sub unchanged" "$(ulist vpnpool.main.extra_sub)" 'https://h.example/BBB'
+expect_eq "subscriptions unchanged" "$(subs_tsv | cut -f4)" 'https://h.example/BBB'
 end
 
 # V7: add with a URL = the add_sub rule (trial download, 0 nodes -> not stored)
@@ -834,7 +866,7 @@ rcall add "$(jarg --arg t "$L1
 https://dead.example.com/s" '{text:$t}')"
 begin "rpcd/add/url-without-nodes-not-stored"
 expect_jq "the link added, the URL failed with fetch_failed" "$R" '.ok==true and .added==1 and .failed==[{line:2,reason:"fetch_failed",http:"500"}]'
-expect_eq "extra_sub empty" "$(ulist vpnpool.main.extra_sub)" ''
+expect_eq "no subscription" "$(subs_tsv)" ''
 expect_eq "the trial download happened" "$(mock_calls 'GET https://dead.example.com/s')" 1
 end
 # the URL even serves nodes: only add_node's own refusal keeps it from becoming a subscription
@@ -842,15 +874,15 @@ printf '%s\n' "$L2" > "$FXR/evil.txt"; mock_rule 'GET https://evil.example/sub' 
 rcall add_node '{"link":"https://evil.example/sub"}'
 begin "rpcd/add_node/url-refused"
 expect_jq "invalid" "$R" '.ok==false and .code=="invalid"'
-expect_eq "no subscription created" "$(ulist vpnpool.main.extra_sub)" ''
+expect_eq "no subscription created" "$(subs_tsv)" ''
 end
 
 # M6: set_url "" clears the subscription again
-reset_state; uci set vpnpool.main.subscription_url='https://sub.example.com/s'; uci commit vpnpool
+reset_state; sub_section sp 'https://sub.example.com/s'
 rcall set_url '{"url":""}'
 begin "rpcd/set_url/empty-clears"
 expect_jq "saved" "$R" '.ok==true and .code=="saved"'
-expect_eq "cleared" "$(uci -q get vpnpool.main.subscription_url)" ''
+expect_eq "cleared" "$(subs_tsv)" ''
 end
 
 # M7: a missing section is created with the type the package expects
@@ -868,6 +900,162 @@ rm -f /etc/crontabs
 begin "rpcd/set_schedule/cron-failure-is-a-warning"
 expect_jq "ok + warning" "$R" '.ok==true and .warning=="schedule_failed"'
 expect_eq "stored" "$(uci -q get vpnpool.main.sched_on)" '07:00'
+end
+
+# ---------------- stage 6: the data model (ROADMAP 9) ----------------
+# favourites / hidden / "Connect" / "Back to automatic choice" / one subscription — by node id
+# the ids of Node1 / Node2 (the same parser as fx_nodes) for the method arguments
+printf '%s\n%s\n' "$L1" "$L2" > "$FXR/l2.txt"
+FA1=$(ucode /usr/libexec/vpnpool/parser.uc --with-id "$FXR/l2.txt" | jq -c '{id: .[0].id}')
+FA=$(ucode /usr/libexec/vpnpool/parser.uc --with-id "$FXR/l2.txt" | jq -c '{id: .[1].id}')
+s_fav() { fx_nodes; }
+c_fav() { expect_true "a favourite with the link, type and server" jq -e --arg i "$ID2" --arg l "$L2" '.[$i] | .link==$l and .tag=="Node2" and .server=="203.0.113.72" and .type=="vless" and .active==false' /etc/vpnpool/favorites.map.json; }
+M fav "$FA" - - c_fav '{"id":"aaaaaaaaaaaa"}' -
+
+s_unfav() { fx_fav; }
+c_unfav() { expect_true "no favourite left" jq -e '.==({})' /etc/vpnpool/favorites.map.json; }
+M unfav "$FA1" - - c_unfav '{"id":"aaaaaaaaaaaa"}' -
+
+s_hide() { fx_nodes; }
+c_hide() {
+	expect_eq "hidden = the id" "$(ulist vpnpool.main.hidden)" "$ID2"
+	expect_jq "it left the node list at once" "$(cat /tmp/vpnpool/nodes.json)" 'map(.tag)==["Node1"]'
+	expect_jq "code hidden" "$R" '.code=="hidden"'
+}
+M hide "$FA" USR1 - c_hide '{"id":"aaaaaaaaaaaa"}' -
+
+s_unhide() { fx_nodes; uci add_list vpnpool.main.hidden="$ID2"; uci commit vpnpool; }
+c_unhide() { expect_eq "hidden list empty" "$(ulist vpnpool.main.hidden)" ''; }
+M unhide "$FA" USR1 - c_unhide '{"id":"aaaaaaaaaaaa"}' -
+
+s_connect() { fx_nodes; mock_on; mock_rule 'PUT http://127.0.0.1:9091/proxies/proxy' 204; }
+c_connect() {
+	expect_eq "preferred = Node2's id" "$(uci -q get vpnpool.main.preferred_node)" "$ID2"
+	expect_jq "applied live" "$R" '.code=="applied"'
+	expect_eq "the live selector switched once" "$(mock_calls 'PUT http://127.0.0.1:9091/proxies/proxy')" 1
+}
+M connect "$FA" - - c_connect '{"id":"aaaaaaaaaaaa"}' -
+
+s_auto_select() { fx_nodes; uci set vpnpool.main.preferred_node="$ID1"; uci commit vpnpool; mock_on; mock_rule 'PUT http://127.0.0.1:9091/proxies/proxy' 204; }
+c_auto_select() {
+	expect_eq "no preferred node" "$(uci -q get vpnpool.main.preferred_node)" ''
+	expect_jq "applied: the selector on the automatic choice" "$R" '.code=="applied"'
+}
+M auto_select '{}' - - c_auto_select - -
+
+s_sub_set() { fx_nodes; sub_section sp 'https://sub.example.com/s'; }
+c_sub_set() {
+	expect_eq "name" "$(uci -q get vpnpool.sp.name)" 'My provider'
+	expect_eq "mode" "$(uci -q get vpnpool.sp.mode)" pick
+	expect_eq "picks" "$(ulist vpnpool.sp.pick)" "$ID2"
+	expect_jq "saved" "$R" '.code=="saved"'
+}
+M sub_set "$(jq -nc --argjson f "$FA" '{id:"sp", name:"My provider", mode:"pick", pick:[$f.id]}')" USR1 - c_sub_set '{"id":"nope","name":"x"}' -
+
+s_sub_del() { sub_section sp 'https://sub.example.com/s'; sub_section se 'https://extra.example.com/x'; }
+c_sub_del() { expect_eq "only the other one left" "$(subs_tsv | cut -f1)" se; }
+M sub_del '{"id":"sp"}' USR1 - c_sub_del '{"id":"nope"}' -
+
+# ---- semantics beyond the grid ----
+reset_state; daemon_start; fx_nodes
+rcall delete_node '{"tag":"Node2"}'
+begin "rpcd/delete_node/subscription-node-is-hidden"
+expect_jq "deleted" "$R" '.ok==true and .code=="deleted" and .ids==["'"$ID2"'"]'
+expect_eq "hidden by id (the subscription can't bring it back)" "$(ulist vpnpool.main.hidden)" "$ID2"
+expect_eq "the manual list untouched" "$(ulist vpnpool.main.manual_node)" ''
+end
+rcall unhide "$(jq -nc --arg i "$ID2" '{id:$i}')"
+begin "rpcd/unhide/returns-it"
+expect_jq "restored" "$R" '.ok==true and .code=="restored"'
+expect_eq "no hidden id left" "$(ulist vpnpool.main.hidden)" ''
+end
+
+reset_state; daemon_start; fx_nodes; mock_on; mock_rule 'PUT http://127.0.0.1:9091/proxies/proxy' 204
+uci set vpnpool.main.preferred_node="$ID2"; uci commit vpnpool
+rcall hide "$(jq -nc --arg i "$ID2" '{id:$i}')"
+begin "rpcd/hide/clears-the-preferred-node"
+expect_jq "hidden" "$R" '.code=="hidden"'
+expect_eq "it is not the preferred node any more" "$(uci -q get vpnpool.main.preferred_node)" ''
+end
+
+# a favourite no source has: "Connect" brings it into the pool (archive -> active) and prefers it
+reset_state; daemon_start
+echo '{"aaaaaaaaaaaa":{"tag":"Gone-Fav","link":"vless://9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce@203.0.113.99:443?security=tls#Gone-Fav","active":false,"auto":false}}' > /etc/vpnpool/favorites.map.json
+rcall connect '{"id":"aaaaaaaaaaaa"}'
+begin "rpcd/connect/favourite-not-in-a-source-joins-the-pool"
+expect_jq "connect_pending, rebuild signalled" "$R" '.ok==true and .code=="connect_pending" and .daemon=="signalled"'
+expect_true "the favourite is active now" jq -e '.aaaaaaaaaaaa.active==true' /etc/vpnpool/favorites.map.json
+expect_eq "preferred" "$(uci -q get vpnpool.main.preferred_node)" aaaaaaaaaaaa
+end
+
+# probe dialog picked again: the picks of that URL's subscription are replaced, not added
+reset_state; daemon_start; fx_nodes
+jq -nc --arg a "$L1" --arg b "$L2" --arg i "$ID1" --arg j "$ID2" '{url:"https://src.example.com/l",nodes:[{i:0,id:$i,link:$a,tag:"Node1"},{i:1,id:$j,link:$b,tag:"Node2"}]}' > /tmp/vpnpool/.probe-cache.json
+rcall import_select '{"url":"https://src.example.com/l","idx":[0,1],"name":"Free list"}'
+_c1=$(subs_tsv | wc -l)
+rcall import_select '{"url":"https://src.example.com/l","idx":[1]}'
+_sid=$(subs_tsv | cut -f1)
+begin "rpcd/import_select/re-pick-replaces"
+expect_eq "one subscription for the URL" "$(subs_tsv | wc -l)" 1
+expect_eq "control: it existed after the first pick" "$_c1" 1
+expect_eq "its picks = the second choice only" "$(ulist "vpnpool.$_sid.pick")" "$ID2"
+expect_eq "named by the first pick" "$(uci -q get "vpnpool.$_sid.name")" 'Free list'
+end
+
+# add: a URL in "pick" mode with the chosen ids; a bad mode is refused (nothing written)
+reset_state; daemon_start; mock_on; printf '%s\n%s\n' "$L1" "$L2" > "$FXR/newsub.txt"; mock_rule 'GET https://new.example.com/s' 200 "$FXR/newsub.txt"
+rcall add '{"items":["https://new.example.com/s"],"options":{"mode":"pick","pick":["0123456789ab"],"name":"Picked"}}'
+_sid=$(subs_tsv | cut -f1)
+begin "rpcd/add/url-in-pick-mode"
+expect_jq "added" "$R" '.ok==true and .added==1'
+expect_eq "pick mode" "$(subs_tsv | cut -f2-3)" "1	pick"
+expect_eq "its picks" "$(ulist "vpnpool.$_sid.pick")" 0123456789ab
+expect_eq "its name" "$(uci -q get "vpnpool.$_sid.name")" Picked
+end
+reset_state; daemon_start
+rcall add '{"items":["https://new.example.com/s"],"options":{"mode":"some"}}'
+begin "rpcd/add/bad-mode-refused"
+expect_jq "invalid, the field named" "$R" '.ok==false and .code=="invalid" and .errors["options.mode"]=="bad_mode"'
+expect_eq "nothing written" "$(subs_tsv)" ''
+end
+
+# singbox_bin in the set_config schema (stage 4b leftover): a path that is no program is refused
+reset_state; daemon_start
+rcall set_config '{"settings":{"singbox_bin":"/usr/bin/no-such-sing-box"}}'
+begin "rpcd/set_config/singbox-bin-missing-refused"
+expect_jq "bad_path" "$R" '.ok==false and .errors.singbox_bin=="bad_path"'
+expect_eq "not stored" "$(uci -q get vpnpool.main.singbox_bin)" ''
+end
+rcall set_config '{"settings":{"singbox_bin":"../relative"}}'
+begin "rpcd/set_config/singbox-bin-relative-refused"
+expect_jq "bad_path" "$R" '.ok==false and .errors.singbox_bin=="bad_path"'
+end
+rcall set_config '{"settings":{"singbox_bin":"/bin/sh"}}'
+begin "rpcd/set_config/singbox-bin-existing-accepted"   # positive control
+expect_jq "saved, rebuild" "$R" '.ok==true and .code=="saved" and .daemon=="signalled"'
+expect_eq "stored" "$(uci -q get vpnpool.main.singbox_bin)" /bin/sh
+end
+rcall set_config '{"settings":{"singbox_bin":""}}'
+begin "rpcd/set_config/singbox-bin-empty-is-automatic"
+expect_jq "saved" "$R" '.ok==true'
+expect_eq "cleared" "$(uci -q get vpnpool.main.singbox_bin)" ''
+end
+
+# a 1.x backup restored on 2.0: migrated to the 2.0 data model right after the restore
+reset_state; daemon_start
+FXM="$T_DIR/fixtures/migrate/141"
+mkdir -p "$FXR/old/etc/config" "$FXR/old/etc/vpnpool/awg"
+cp "$FXM/etc-config-vpnpool" "$FXR/old/etc/config/vpnpool"
+cp "$FXM/saved.map.json" "$FXM/snapshot.map.json" "$FXM/imported.map.json" "$FXR/old/etc/vpnpool/"
+tar -czf "$FXR/old.tgz" -C "$FXR/old" etc/config/vpnpool etc/vpnpool/saved.map.json etc/vpnpool/snapshot.map.json etc/vpnpool/imported.map.json
+cp "$FXM/links.json" /etc/vpnpool/links.json
+rcall restore "$(jq -nc --arg d "$(base64 -w0 "$FXR/old.tgz")" '{data:$d, replace_all:true}')"
+begin "rpcd/restore/1x-backup-migrated"
+expect_jq "restored" "$R" '.ok==true and .code=="restored"'
+expect_eq "schema 2" "$(uci -q get vpnpool.main.schema)" 2
+expect_eq "4 subscription sections" "$(subs_tsv | wc -l)" 4
+expect_eq "no 1.x option left" "$(uci -q show vpnpool.main | gcount -e subscription_url -e extra_sub -e '\.source=' -e selected_node -e saved_node)" 0
+expect_true "favourites from the saved maps" jq -e 'length==3' /etc/vpnpool/favorites.map.json
 end
 
 # ---------------- coverage: ACL <-> rpcd list <-> this suite ----------------

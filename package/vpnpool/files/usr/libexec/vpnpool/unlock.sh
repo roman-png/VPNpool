@@ -5,13 +5,17 @@
 # low-mem guarded. Result: /tmp/vpnpool/.unlock-result.json; badges: unlock.map.json.
 . /usr/libexec/vpnpool/lib.sh
 
-TAG="$1"
+# $1 = the node id (or its tag in the last build: older screens / the bot send names)
+ARG="$1"
 OUT=/tmp/vpnpool/.unlock-result.json
 MAP=/etc/vpnpool/unlock.map.json
 mkdir -p /tmp/vpnpool /etc/vpnpool
 [ -f "$MAP" ] || echo '{}' > "$MAP"
 NTP=$(uci -q get vpnpool.main.node_test_port); [ -n "$NTP" ] || NTP=1606
-[ -n "$TAG" ] || { echo '{"ok":false,"error":"no tag"}' > "$OUT"; exit 0; }
+[ -n "$ARG" ] || { echo '{"ok":false,"code":"invalid","error":"invalid"}' > "$OUT"; exit 0; }
+# the node of the last build: its id keys the result, its tag is what the test selector knows
+R=$(node_resolve "$ARG") || { jq -nc --arg t "$ARG" '{ok:false, tag:$t, code:"not_found", error:"not_found"}' > "$OUT"; exit 0; }
+ID=${R%%	*}; TAG=${R#*	}
 
 # low-memory guard (same threshold as speedtest)
 MINKB=$(uci -q get vpnpool.main.speedtest_min_mem_kb); [ -n "$MINKB" ] || MINKB=8192
@@ -21,12 +25,12 @@ if [ -n "$AVAIL" ] && [ "$AVAIL" -lt "$MINKB" ]; then
 	echo "{\"ok\":false,\"code\":\"low_memory\",\"error\":\"low_memory\",\"lowmem\":true,\"avail_kb\":${AVAIL:-0},\"need_kb\":$MINKB}" > "$OUT"; exit 0
 fi
 
-node_test_lock || { jq -nc --arg t "$TAG" '{ok:false, tag:$t, code:"busy", error:"busy"}' > "$OUT"; exit 0; }
+node_test_lock || { jq -nc --arg t "$TAG" --arg i "$ID" '{ok:false, id:$i, tag:$t, code:"busy", error:"busy"}' > "$OUT"; exit 0; }
 trap node_test_unlock EXIT
 trap 'exit 1' INT TERM   # a killed test must stop, not carry on after releasing the lock
 
 if ! node_test_select "$TAG"; then
-	jq -nc --arg t "$TAG" '{ok:false, tag:$t, code:"not_found", error:"not_found"}' > "$OUT"; exit 0
+	jq -nc --arg t "$TAG" --arg i "$ID" '{ok:false, id:$i, tag:$t, code:"not_found", error:"not_found"}' > "$OUT"; exit 0
 fi
 
 probe() {   # $1=url -> 1 if reachable (2xx/3xx and not 4xx/5xx), else 0
@@ -44,9 +48,9 @@ GG=$(probe https://www.google.com/)
 RES=$(jq -n --argjson yt "${YT:-0}" --argjson oai "${OAI:-0}" --argjson nfx "${NFX:-0}" \
 	--argjson ig "${IG:-0}" --argjson tg "${TG:-0}" --argjson gg "${GG:-0}" \
 	'{youtube:($yt==1),openai:($oai==1),netflix:($nfx==1),instagram:($ig==1),telegram:($tg==1),google:($gg==1)}')
-jq -n --arg t "$TAG" --argjson r "$RES" '{ok:true,tag:$t,results:$r}' > "$OUT"
-# persist for dashboard badges — only when the badges changed (flash wear)
-jq --arg t "$TAG" --argjson r "$RES" '.[$t]=$r' "$MAP" > "$SB_DATA/.unlock.map.new" 2>/dev/null \
+jq -n --arg t "$TAG" --arg i "$ID" --argjson r "$RES" '{ok:true,id:$i,tag:$t,results:$r}' > "$OUT"
+# persist for dashboard badges, BY NODE ID — only when the badges changed (flash wear)
+jq --arg i "$ID" --argjson r "$RES" '.[$i]=$r' "$MAP" > "$SB_DATA/.unlock.map.new" 2>/dev/null \
 	&& persist_if_changed "$SB_DATA/.unlock.map.new" "$MAP"
 rm -f "$SB_DATA/.unlock.map.new"
 exit 0

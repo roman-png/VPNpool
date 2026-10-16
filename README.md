@@ -147,7 +147,7 @@ CI builds both formats for aarch64_cortex-a53, x86_64 and mipsel_24kc and attach
 
 ```sh
 # the same from the CLI
-uci set vpnpool.main.subscription_url='https://example.com/sub'
+uci set vpnpool.sub1=subscription; uci set vpnpool.sub1.url='https://example.com/sub'
 uci set vpnpool.main.enabled='1'; uci commit vpnpool
 /etc/init.d/vpnpool enable; /etc/init.d/vpnpool restart
 ```
@@ -283,20 +283,20 @@ Everything lives in `/etc/config/vpnpool`, section `config vpnpool 'main'`.
 |---|---|---|
 | `enabled` | `0` | Start the daemon (the LuCI on/off switch) |
 | `mode` | `selective` | `selective` = proxy only the lists; `exclude` = everything except them |
-| `subscription_url` | — | Main subscription (quota/expiry come from it) |
 | `subscription_interval` | `6h` | Auto-refresh period |
 | `check_services` | `www.youtube.com` | **The** criterion of a working node, one host per line |
 | `health_url` | `http://cp.cloudflare.com/generate_204` | Fallback probe when `check_services` is empty |
 | `failover_interval` / `failover_tolerance` | `60` / `50` | urltest interval (s) and tolerance (ms) |
 | `auto_switch` | `1` | `0` pins the selector to the first node |
-| `selected_node` / `preferred_node` | — | Hard manual pick / soft 📌 pin with switch-back |
+| `preferred_node` | — | "Connect": the soft pin (a node id) with failover and switch-back; empty = automatic choice |
+| `favorites_only` | `0` | The automatic choice uses only favourite nodes |
 | `dead_filter` / `dead_filter_strikes` / `dead_filter_tries` | `1` / `3` / `3` | Service filter for the auto-pool, failed cycles before demotion, retries per cycle |
 | `ipv6` | `block` | `block` = fail-closed IPv6 guard; `off` = don't touch IPv6 |
 | `killswitch` / `dns_protect` | `0` / `0` | Fail-closed IPv4 in `exclude` mode / LAN DNS through the tunnel |
 | `client_mode` | `all` | `all` / `exclude` / `include` per-device routing |
 | `antidpi` | `off` | `off` / `on` (`tls_fragment`) / `aggressive` (+ `tls_record_fragment`) |
 | `adaptive_routing` / `adaptive_max_per_run` | `0` / `8` | Auto-detect direct-blocked domains |
-| `auto_snapshot` / `auto_snapshot_max` | `0` / `20` | Auto-save reachable nodes |
+| `auto_snapshot` / `auto_snapshot_max` | `0` / `20` | Add working nodes to the favourites automatically |
 | `sched_enabled`, `sched_on`, `sched_off`, `sched_refresh` | `0`, — | Daily timetable (HH:MM) |
 | `telegram_enabled`, `telegram_token`, `telegram_chat` | `0`, — | Alerts |
 | `telegram_control` / `telegram_via_proxy` | `0` / `1` | Two-way bot / reach Telegram through the tunnel |
@@ -306,10 +306,13 @@ Everything lives in `/etc/config/vpnpool`, section `config vpnpool 'main'`.
 | `tproxy_port` / `test_port` / `clash_api` | `1603` / `1605` / `127.0.0.1:9091` | Inbounds and control API |
 | `lan_if` / `coexist` / `log_level` | auto / `auto` / `warn` | LAN device, podkop yield, sing-box log level |
 
-Lists kept by the app: `source`, `extra_sub`, `manual_node`, `imported_node`, `saved_node`,
-`active_saved`, `excluded_node`, `auto_member`, `keep_auto`, `client`, `client_dev`,
-`probe_ua`; `config routing 'routing'` holds `community`, `domain`, `auto_domain`.
-AmneziaWG nodes are files in `/etc/vpnpool/awg/*.conf`.
+Lists kept by the app: `manual_node` (your own links), `hidden`, `auto_member`, `keep_auto`
+(node ids), `client`, `client_dev`, `probe_ua`; `config routing 'routing'` holds `community`,
+`domain`, `auto_domain`. Every subscription is its own section `config subscription` with `url`,
+`name`, `enabled` and `mode` (`all` = every node, `pick` = only the node ids in `list pick`).
+Favourites: `/etc/vpnpool/favorites.map.json`; AmneziaWG nodes: `/etc/vpnpool/awg/<id>.conf`.
+A 1.x configuration is moved to this layout at install (a copy of the old one goes to
+`/etc/vpnpool/backup-1.x/`).
 
 </details>
 

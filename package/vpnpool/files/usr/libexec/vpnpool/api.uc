@@ -11,16 +11,23 @@
 //       the two — and/or "bot" (init.d reload: Telegram bot) / "sched" (rewrite the crontab).
 //   api.uc analyze                 stdin {text}  -> {ok, code, items:[{line, kind, status, ...}]}
 //   api.uc add                     stdin {text?, items?, lines?, options?} -> writes manual_node /
-//                                  extra_sub / /etc/vpnpool/awg/<id>.conf, {ok, code, added, dup,
+//                                  a subscription section per URL (options {mode all|pick, pick,
+//                                  name, enabled}) / /etc/vpnpool/awg/<id>.conf, {ok, code, added, dup,
 //                                  failed:[{line, reason}], actions, probes:[{line, fetched, http}],
 //                                  awg_ids?, warning? (engine_missing|engine_no_awg: an AWG node
 //                                  is stored deferred until the engine is installed)}. A subscription URL is taken only
 //                                  after a trial download that yields nodes (else fetch_failed) —
 //                                  the same rule as add_sub (add_sub goes through here).
-//   api.uc resolve_url <opt[,opt]> <value>   the configured URL equal to <value>, or the one
-//                                  whose key (status subscriptions[].key) equals it, or the ONE
-//                                  whose masked form (scheme://host/***) equals it; rc 1 if none,
-//                                  rc 3 if the masked form fits several (ambiguous)
+//   api.uc node <op>               stdin {id?|tag?, ids?|tags?}: fav unfav activate deactivate hide
+//                                  unhide keep unkeep connect auto delete prefer_toggle (ROADMAP 9:
+//                                  every store keyed by the node id; a tag of the last build is
+//                                  accepted for the older screens / the bot)
+//   api.uc sub <op>                stdin: set {id, name?, url?, enabled?, mode?, pick?} | del {id|url}
+//                                  | probe_pick {url, idx?|ids?, name?} | set_primary {url} (legacy)
+//   api.uc resolve_url <kinds> <value>   the URL of a subscription (kinds: all,pick or *) equal to
+//                                  <value>, or whose key (status subscriptions[].key) or id equals
+//                                  it, or the ONE whose masked form (scheme://host/***) equals it;
+//                                  rc 1 if none, rc 3 if the masked form fits several (ambiguous)
 //   api.uc check_config <dir> <savedir>   check every VALUE of a uci config dir (import/restore)
 //                                  with the same schema as set_config: {ok} | {ok:false,
 //                                  code:"invalid", errors:{option: code}}
@@ -33,7 +40,7 @@
 //
 // Field error codes (machine codes; the human texts live in the UI translations):
 //   bad_type bad_value too_small too_large bad_time bad_url bad_domain bad_community bad_ipv4
-//   bad_mac bad_ifname bad_mark bad_token bad_chat bad_tag unknown_field
+//   bad_mac bad_ifname bad_mark bad_token bad_chat bad_tag bad_path bad_mode unknown_field
 // analyze item: kind link|subscription_url|awg|unknown; status add|dup|skip;
 //   reason (skip: the parser.uc --report code, + field for an AWG .conf value; a vpn:// link:
 //   api_key full_access unsupported_container (+found) no_conf decode_failed (+detail);
@@ -42,10 +49,11 @@
 //   engine). summary.pending = items that will be stored deferred.
 'use strict';
 
-import { readfile, writefile, stdin, popen, unlink, mkdir, stat, lsdir, rename, chmod } from 'fs';
+import { readfile, writefile, stdin, popen, unlink, mkdir, stat, lsdir, rename, chmod, access } from 'fs';
 import { cursor } from 'uci';
 import { rand } from 'math';
-import { VALID_COMMUNITY, uniq, read_json, mask_url, mask_token, str_key, as_list, engine_select } from './common.uc';
+import { VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list, engine_select,
+	SCHEMA as DATA_SCHEMA, is_id, subs_of, sub_name_for, fav_read, fav_write, live_nodes, node_lookup, link_of } from './common.uc';
 
 const SB = '/tmp/vpnpool';
 const PARSER = '/usr/libexec/vpnpool/parser.uc';
@@ -199,6 +207,22 @@ let L_IPV4 = (x) => (type(x) == 'string' && is_ipv4(trim(x))) ? [ trim(x), null 
 let L_MAC = (x) => (type(x) == 'string' && match(trim(x), /^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/))
 	? [ lc(trim(x)), null ] : [ null, 'bad_mac' ];
 let L_TAG = (x) => (type(x) == 'string' && length(x)) ? chk_tag(x) : [ null, 'bad_tag' ];
+// A node of the stores (ROADMAP 9: node ids everywhere): an id, or the tag of a node of the last
+// build (older screens send names) -> its id. '' = none (preferred_node: the automatic choice).
+let NODES_CACHE = null;
+function chk_node(v, allow_empty) {
+	if (type(v) != 'string') return [ null, 'bad_tag' ];
+	if (v == '' && allow_empty) return [ '', null ];
+	if (is_id(v)) return [ v, null ];
+	NODES_CACHE ??= live_nodes();
+	let r = node_lookup(v, NODES_CACHE);
+	return (r && r.node) ? [ r.id, null ] : [ null, 'bad_tag' ];
+}
+let L_NODE = (x) => chk_node(x, false);
+function chk_path(v) {
+	let r = chk_re(v, /^\/[A-Za-z0-9._\/-]{1,255}$/, 'bad_path', true);
+	return (r[1] == 'bad_value') ? [ null, 'bad_path' ] : r;
+}
 
 // ---------------------------------------------------------------- the settings schema
 // field -> { s: uci section, o: uci option (default = field), c: check, list: bool, a: action,
@@ -229,13 +253,16 @@ const SCHEMA = {
 	test_port:             { s: 'main', c: I(1, 65535), a: 'USR1' },
 	node_test_port:        { s: 'main', c: I(1, 65535), a: 'USR1' },
 	subscription_interval: { s: 'main', c: chk_interval, a: 'none' },
-	subscription_url:      { s: 'main', c: (v) => chk_url(v, true), a: 'USR2', secret: 'url' },   // "" = no subscription
 	telegram_enabled:      { s: 'main', c: chk_bool, a: 'none' },
 	telegram_token:        { s: 'main', c: (v) => chk_re(v, /^[0-9]+:[A-Za-z0-9_-]+$/, 'bad_token', true), a: 'bot', secret: 'token' },
 	telegram_chat:         { s: 'main', c: (v) => chk_re(v, /^(-?[0-9]{1,20}|@[A-Za-z0-9_]{4,64})$/, 'bad_chat', true), a: 'bot' },
 	telegram_control:      { s: 'main', c: chk_bool, a: 'bot' },
 	telegram_via_proxy:    { s: 'main', c: chk_bool, a: 'bot' },
-	preferred_node:        { s: 'main', c: chk_tag, a: 'none' },
+	preferred_node:        { s: 'main', c: (v) => chk_node(v, true), a: 'none' },   // read live by the daemon
+	favorites_only:        { s: 'main', c: chk_bool, a: 'USR1' },
+	// the sing-box binary: '' / the stock path = automatic (ROADMAP 4.1); another path pins it. On
+	// save (not on import / restore) it must be an executable file on this router.
+	singbox_bin:           { s: 'main', c: chk_path, live: (v) => (v == '' || (stat(v)?.type == 'file' && access(v, 'x'))) ? null : 'bad_path', a: 'USR1' },
 	auto_snapshot:         { s: 'main', c: chk_bool, a: 'none' },
 	auto_snapshot_max:     { s: 'main', c: I(1, 1000), a: 'none' },
 	adaptive_max_per_run:  { s: 'main', c: I(1, 50), a: 'none' },
@@ -253,13 +280,13 @@ const SCHEMA = {
 	communities:           { s: 'routing', o: 'community', list: L_COMM, a: 'USR1' },
 	clients:               { s: 'main', o: 'client', list: L_IPV4, a: 'USR1' },
 	client_devices:        { s: 'main', o: 'client_dev', list: L_MAC, a: 'USR1' },
-	auto_members:          { s: 'main', o: 'auto_member', list: L_TAG, a: 'USR1' }
+	auto_members:          { s: 'main', o: 'auto_member', list: L_NODE, a: 'USR1' }
 };
 
 function cur_value(u, f) {
 	let d = SCHEMA[f];
 	let v = u.get('vpnpool', d.s, d.o ?? f);
-	if (d.list) return as_list(v, f != 'auto_members');
+	if (d.list) return as_list(v, true);
 	return (v == null) ? '' : ('' + v);
 }
 function masked_of(d, cur) {
@@ -286,6 +313,7 @@ function set_config(input, single) {
 		// a secret the status reply showed masked comes back unchanged -> keep the real value
 		if (d.secret && type(v) == 'string' && v == masked_of(d, cur)) continue;
 		let r = d.c(v);
+		if (!r[1] && d.live) r[1] = d.live(r[0]);
 		if (r[1]) { errors[f] = r[1]; continue; }
 		if (r[0] != cur) push(plan, { f: f, d: d, v: r[0] });
 	}
@@ -465,9 +493,7 @@ function analyze(text, nowrap) {
 	}
 	let u = cursor();
 	let subs = {};
-	let su = u.get('vpnpool', 'main', 'subscription_url');
-	if (su) subs[su] = true;
-	for (let x in as_list(u.get('vpnpool', 'main', 'extra_sub'), true)) subs[x] = true;
+	for (let s in subs_of(u)) subs[s.url] = true;
 
 	let cand = [], cand_line = [], ln = 0, seen_url = {};
 	// vpn:// (AmneziaVPN): a messenger wraps the long link over several lines — the lines right
@@ -553,6 +579,328 @@ function analyze(text, nowrap) {
 	return { items: items, lines: texts };
 }
 
+// ---------------------------------------------------------------- the data model (ROADMAP 9)
+function uniq_list(a) { let seen = {}, r = []; for (let x in a) if (!seen[x]) { seen[x] = true; push(r, x); } return r; }
+
+// write a subscription section: {url, name?, enabled?, mode?, pick?} (null fields untouched)
+function sub_write(u, sid, f) {
+	if (u.get('vpnpool', sid) == null && !u.set('vpnpool', sid, 'subscription')) return false;
+	if (f.url != null && !u.set('vpnpool', sid, 'url', f.url)) return false;
+	if (f.name != null) { if (length(f.name)) u.set('vpnpool', sid, 'name', f.name); else u.delete('vpnpool', sid, 'name'); }
+	if (f.enabled != null) u.set('vpnpool', sid, 'enabled', f.enabled ? '1' : '0');
+	if (f.mode != null) u.set('vpnpool', sid, 'mode', f.mode);
+	if (f.pick != null) { if (length(f.pick)) u.set('vpnpool', sid, 'pick', f.pick); else u.delete('vpnpool', sid, 'pick'); }
+	return true;
+}
+function sub_find(u, key) {
+	if (type(key) != 'string' || !length(key)) return null;
+	for (let s in subs_of(u)) if (s.id == key || s.url == key || str_key(s.url) == key) return s;
+	return null;
+}
+
+// The clash API of the running sing-box (the live selector). -> HTTP code ('000' = no answer)
+function clash_put(selector, name) {
+	let api = cursor().get('vpnpool', 'main', 'clash_api') ?? '127.0.0.1:9091';
+	let code = trim(run(sprintf("curl -s -m5 -o /dev/null -w '%%{http_code}' -X PUT %s --data %s 2>/dev/null",
+		sq('http://' + api + '/proxies/' + selector), sq(sprintf('%J', { name: name })))));
+	return length(code) ? code : '000';
+}
+
+// A favourite entry for a live node: the link (or, for a node of a sing-box JSON source, its
+// outbound; AWG nodes live in their own files) so the favourite outlives its source.
+function fav_entry(n, old) {
+	let p0 = (type(n.peers) == 'array') ? n.peers[0] : null;
+	let e = { tag: n.tag, link: link_of(n.id), active: old?.active === true, auto: false, at: time(),
+		type: n.type, server: n.server ?? p0?.address, port: n.server_port ?? p0?.port };
+	if (e.link == null && n.type != 'awg' && n.type != 'wireguard') {
+		let o = {};
+		for (let k, v in n) if (k != 'id' && k != 'tag' && substr(k, 0, 1) != '_') o[k] = v;
+		e.ob = o;
+	}
+	return e;
+}
+
+// drop ids from the RAM marks of the node checker (dead set, strikes, delays) — a node the user
+// returned / removed leaves them at once
+function drop_marks(ids) {
+	let set = {};
+	for (let i in ids) set[i] = true;
+	let d = read_json(SB + '/.dead_ids.json', null);
+	if (type(d) == 'array') write_atomic(SB + '/.dead_ids.json', sprintf('%J', filter(d, (x) => !set[x])));
+	let st = readfile(SB + '/.deadstrikes');
+	if (st != null) {
+		let keep = filter(split(st, '\n'), (l) => length(l) && !set[split(l, '\t')[0]]);
+		write_atomic(SB + '/.deadstrikes', length(keep) ? join('\n', keep) + '\n' : '');
+	}
+}
+// remove ids from the last build's lists right now (the next status poll shows the change; the
+// rebuild signalled after it writes the authoritative ones)
+function prune_live(ids) {
+	let set = {};
+	for (let i in ids) set[i] = true;
+	for (let f in [ SB + '/nodes.json', SB + '/deferred.json' ]) {
+		let a = read_json(f, null);
+		if (type(a) == 'array') write_atomic(f, sprintf('%J', filter(a, (n) => !(type(n) == 'object' && set[n.id]))));
+	}
+}
+function list_add(u, opt, id) {
+	let l = as_list(u.get('vpnpool', 'main', opt), true);
+	if (id in l) return false;
+	push(l, id);
+	u.set('vpnpool', 'main', opt, l);
+	return true;
+}
+function list_del(u, opt, ids) {
+	let set = {};
+	for (let i in ids) set[i] = true;
+	let l = as_list(u.get('vpnpool', 'main', opt), true);
+	let r = filter(l, (x) => !set[x]);
+	if (length(r) == length(l)) return false;
+	if (length(r)) u.set('vpnpool', 'main', opt, r); else u.delete('vpnpool', 'main', opt);
+	return true;
+}
+
+// Remove one node from the user's stores: a manual link leaves manual_node, an AWG / WireGuard node
+// its file, a subscription node is HIDDEN (its source would bring it back otherwise), a favourite
+// in the pool only from the archive goes back to the archive (the favourite itself stays: delete
+// never touches favourites). -> true if something changed.
+function delete_one(u, r) {
+	let n = r.node, src = '' + (n?._src ?? '');
+	let changed = false;
+	if (n && (n.type == 'awg' || n.type == 'wireguard') && src == 'awg') {
+		if (stat(AWG_DIR + '/' + r.id + '.conf')) { unlink(AWG_DIR + '/' + r.id + '.conf'); changed = true; }
+		else for (let f in (lsdir(AWG_DIR) ?? [])) {
+			if (!match(f, /\.conf$/)) continue;
+			let rep = parse_json_file(sprintf('ucode %s --report --with-id %s 2>/dev/null', PARSER, sq(AWG_DIR + '/' + f)));
+			if (rep[0]?.id == r.id) { unlink(AWG_DIR + '/' + f); changed = true; break; }
+		}
+	} else if (src == 'manual') {
+		let link = link_of(r.id);
+		let ml = as_list(u.get('vpnpool', 'main', 'manual_node'), true);
+		let keep = filter(ml, (x) => x != link);
+		if (length(keep) != length(ml)) {
+			if (length(keep)) u.set('vpnpool', 'main', 'manual_node', keep); else u.delete('vpnpool', 'main', 'manual_node');
+			changed = true;
+		}
+	} else if (src == 'fav') {
+		let fav = fav_read();
+		if (type(fav[r.id]) == 'object' && fav[r.id].active) { fav[r.id].active = false; fav_write(fav); changed = true; }
+	} else if (n) {
+		changed = list_add(u, 'hidden', r.id);
+	}
+	if (changed) list_del(u, 'keep_auto', [ r.id ]);
+	return changed;
+}
+
+// api.uc node <op>  stdin {id?|tag?, ids?|tags?} -> {ok, code, actions, ...}. A node is named by
+// its id (or, for the older screens and the bot, by its tag in the last build).
+function node_op(op, inp) {
+	if (type(inp) != 'object') return { ok: false, code: 'invalid', errors: { '': 'bad_type' } };
+	let u = cursor();
+	let key = inp.id ?? inp.tag;
+	if (op == 'auto') {
+		let had = length(u.get('vpnpool', 'main', 'preferred_node') ?? '') > 0;
+		if (had) { u.delete('vpnpool', 'main', 'preferred_node'); if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' }; }
+		let c = clash_put('proxy', 'auto');
+		if (c == '204') return { ok: true, code: 'applied', actions: [] };
+		if (c == '000') return { ok: true, code: had ? 'saved_not_applied' : 'unchanged', actions: [] };
+		return { ok: false, code: 'clash_failed', http: c };
+	}
+	if (op == 'delete') {
+		let keys_ = (type(inp.ids) == 'array') ? inp.ids : ((type(inp.tags) == 'array') ? inp.tags : [ key ]);
+		let nodes = live_nodes(), done = [], missing = [];
+		for (let k in keys_) {
+			let r = (type(k) == 'string') ? node_lookup(k, nodes) : null;
+			if (r && r.node && delete_one(u, r)) push(done, r.id); else push(missing, k);
+		}
+		if (!length(done)) return { ok: false, code: 'not_found', deleted: 0, missing: missing };
+		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
+		prune_live(done); drop_marks(done);
+		return { ok: true, code: 'deleted', deleted: length(done), missing: missing, ids: done, actions: [ 'USR1' ] };
+	}
+	if (op == 'prefer_toggle') {
+		// legacy set_preferred: the preferred node again (or an empty name) = back to automatic
+		let cur = u.get('vpnpool', 'main', 'preferred_node') ?? '';
+		let rr = (type(key) == 'string' && length(key)) ? node_lookup(key) : null;
+		if (key == null || key == '' || (rr && rr.id == cur)) {
+			u.delete('vpnpool', 'main', 'preferred_node');
+			if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
+			return { ok: true, code: 'cleared', actions: [] };
+		}
+		if (!rr || !rr.node || rr.node._deferred) return { ok: false, code: 'not_found' };
+		u.set('vpnpool', 'main', 'preferred_node', rr.id);
+		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
+		return { ok: true, code: 'set', id: rr.id, actions: [] };
+	}
+	if (type(key) != 'string' || !length(key) || length(key) > 256) return { ok: false, code: 'invalid', errors: { id: 'bad_tag' } };
+	let r = node_lookup(key);
+	if (op == 'unhide') {
+		let id = r?.id ?? key;
+		if (!list_del(u, 'hidden', [ id ])) return { ok: false, code: 'not_found' };
+		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
+		return { ok: true, code: 'restored', id: id, actions: [ 'USR1' ] };
+	}
+	if (op == 'hide') {
+		if (!r || !r.node) return { ok: false, code: 'not_found' };
+		if (!list_add(u, 'hidden', r.id)) return { ok: true, code: 'unchanged', id: r.id, actions: [] };
+		// a hidden node can't be the preferred one
+		if (u.get('vpnpool', 'main', 'preferred_node') == r.id) u.delete('vpnpool', 'main', 'preferred_node');
+		list_del(u, 'keep_auto', [ r.id ]);
+		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
+		prune_live([ r.id ]); drop_marks([ r.id ]);
+		return { ok: true, code: 'hidden', id: r.id, actions: [ 'USR1' ] };
+	}
+	if (op == 'fav') {
+		if (!r) return { ok: false, code: 'not_found' };
+		let fav = fav_read();
+		let old = fav[r.id];
+		if (type(old) == 'object' && old.auto !== true) return { ok: true, code: 'unchanged', id: r.id, actions: [] };
+		if (r.node) fav[r.id] = fav_entry(r.node, old);
+		else { old.auto = false; fav[r.id] = old; }
+		if (!fav_write(fav)) return { ok: false, code: 'write_failed' };
+		// a favourite changes the pool only with "favourites only" on
+		return { ok: true, code: 'saved', id: r.id, actions: (u.get('vpnpool', 'main', 'favorites_only') == '1') ? [ 'USR1' ] : [] };
+	}
+	if (op == 'unfav') {
+		let id = r?.id ?? key;
+		let fav = fav_read();
+		if (type(fav[id]) != 'object') return { ok: false, code: 'not_found' };
+		let was_active = fav[id].active === true;
+		delete fav[id];
+		if (!fav_write(fav)) return { ok: false, code: 'write_failed' };
+		let reload = was_active || u.get('vpnpool', 'main', 'favorites_only') == '1';
+		return { ok: true, code: 'deleted', id: id, actions: reload ? [ 'USR1' ] : [] };
+	}
+	if (op == 'activate' || op == 'deactivate') {
+		let id = r?.id ?? key;
+		let fav = fav_read();
+		if (type(fav[id]) != 'object') return { ok: false, code: 'not_found' };
+		let want = (op == 'activate');
+		if ((fav[id].active === true) == want) return { ok: true, code: 'unchanged', id: id, actions: [] };
+		fav[id].active = want;
+		if (!fav_write(fav)) return { ok: false, code: 'write_failed' };
+		if (want) list_del(u, 'hidden', [ id ]) && u.commit('vpnpool');
+		return { ok: true, code: 'saved', id: id, actions: [ 'USR1' ] };
+	}
+	if (op == 'keep' || op == 'unkeep') {
+		if (!r || !r.node) return { ok: false, code: 'not_found' };
+		let ch = (op == 'keep') ? list_add(u, 'keep_auto', r.id) : list_del(u, 'keep_auto', [ r.id ]);
+		if (!ch) return (op == 'keep') ? { ok: true, code: 'unchanged', id: r.id, actions: [] } : { ok: false, code: 'not_found' };
+		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
+		if (op == 'keep') drop_marks([ r.id ]);
+		return { ok: true, code: 'saved', id: r.id, actions: [ 'USR1' ] };
+	}
+	if (op == 'connect') {
+		if (!r) return { ok: false, code: 'not_found' };
+		if (r.node?._deferred) return { ok: false, code: 'not_found' };
+		u.set('vpnpool', 'main', 'preferred_node', r.id);
+		let acts = [];
+		// a favourite no source has: it joins the pool from the archive, then the daemon switches
+		if (!r.node && r.fav) {
+			let fav = fav_read();
+			fav[r.id].active = true;
+			if (!fav_write(fav)) return { ok: false, code: 'write_failed' };
+			list_del(u, 'hidden', [ r.id ]);
+			acts = [ 'USR1' ];
+		}
+		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
+		if (!r.node) return { ok: true, code: 'connect_pending', id: r.id, actions: acts };
+		let c = clash_put('proxy', r.tag);
+		if (c == '204') return { ok: true, code: 'applied', id: r.id, actions: acts };
+		if (c == '000') return { ok: true, code: 'saved_not_applied', id: r.id, actions: acts };
+		return { ok: false, code: 'clash_failed', http: c };
+	}
+	return { ok: false, code: 'unknown_method' };
+}
+
+// api.uc sub <op>  stdin {...} -> {ok, code, actions, ...}
+//   set {id, name?, url?, enabled?, mode?, pick?}   del {id|url}   probe_pick {url, idx?|ids?, name?}
+//   set_primary {url} (legacy set_url: the first subscription that takes every node)
+function sub_op(op, inp) {
+	if (type(inp) != 'object') return { ok: false, code: 'invalid', errors: { '': 'bad_type' } };
+	let u = cursor();
+	if (op == 'set') {
+		let s = sub_find(u, inp.id);
+		if (!s) return { ok: false, code: 'not_found' };
+		let errors = {}, f = {}, acts = {};
+		if (inp.name != null) { if (type(inp.name) != 'string') errors.name = 'bad_type'; else f.name = clean_name(inp.name) ?? ''; }
+		if (inp.url != null) {
+			// the masked URL the status showed, sent back = unchanged
+			if (type(inp.url) == 'string' && inp.url == mask_url(s.url)) { }
+			else { let r = chk_url(inp.url, false); if (r[1]) errors.url = r[1]; else if (r[0] != s.url) { f.url = r[0]; acts.USR2 = true; } }
+		}
+		if (inp.enabled != null) {
+			let r = chk_bool(inp.enabled);
+			if (r[1]) errors.enabled = r[1];
+			else if ((r[0] == '1') != s.enabled) { f.enabled = (r[0] == '1'); acts[f.enabled ? 'USR2' : 'USR1'] = true; }
+		}
+		if (inp.mode != null) {
+			if (!(inp.mode in [ 'all', 'pick' ])) errors.mode = 'bad_mode';
+			else if (inp.mode != s.mode) { f.mode = inp.mode; acts.USR1 = true; }
+		}
+		if (inp.pick != null) {
+			if (type(inp.pick) != 'array' || length(filter(inp.pick, (x) => !is_id(x)))) errors.pick = 'bad_value';
+			else { let p = uniq_list(inp.pick); if (join(',', p) != join(',', s.pick)) { f.pick = p; acts.USR1 = true; } }
+		}
+		if (length(errors)) return { ok: false, code: 'invalid', errors: errors };
+		if (!length(f)) return { ok: true, code: 'unchanged', id: s.id, actions: [] };
+		if (!sub_write(u, s.id, f) || !u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
+		return { ok: true, code: 'saved', id: s.id, actions: acts.USR2 ? [ 'USR2' ] : (acts.USR1 ? [ 'USR1' ] : []) };
+	}
+	if (op == 'del') {
+		let s = sub_find(u, inp.id ?? inp.url);
+		if (!s) return { ok: false, code: 'not_found' };
+		u.delete('vpnpool', s.id);
+		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
+		// favourites from it stay (kept with their links; "connect" brings one back)
+		return { ok: true, code: 'deleted', id: s.id, actions: [ 'USR1' ] };
+	}
+	if (op == 'set_primary') {
+		let url = inp.url;
+		let prim = null;
+		for (let s in subs_of(u)) if (s.mode == 'all') { prim = s; break; }
+		if (type(url) != 'string') return { ok: false, code: 'bad_url', errors: { url: 'bad_url' } };
+		if (prim && url == mask_url(prim.url)) return { ok: true, code: 'unchanged', actions: [] };
+		if (url == '') {
+			if (!prim) return { ok: true, code: 'unchanged', actions: [] };
+			u.delete('vpnpool', prim.id);
+			if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
+			return { ok: true, code: 'saved', actions: [ 'USR2' ] };
+		}
+		let r = chk_url(url, false);
+		if (r[1]) return { ok: false, code: r[1], errors: { url: r[1] } };
+		if (prim && prim.url == r[0]) return { ok: true, code: 'unchanged', actions: [] };
+		let sid = prim ? prim.id : sub_name_for(u, r[0]);
+		if (!sub_write(u, sid, prim ? { url: r[0] } : { url: r[0], enabled: true, mode: 'all' }) || !u.commit('vpnpool'))
+			return { ok: false, code: 'write_failed' };
+		return { ok: true, code: 'saved', id: sid, actions: [ 'USR2' ] };
+	}
+	if (op == 'probe_pick') {
+		// the nodes picked in the probe dialog (probe.sh cached the probed list of THIS url) ->
+		// a subscription in "pick" mode taking exactly those ids (a new one, or this URL's own)
+		let cache = read_json(SB + '/.probe-cache.json', null);
+		if (type(cache) != 'object' || cache.url != inp.url || !length(inp.url)) return { ok: false, code: 'not_found' };
+		let ids = [];
+		if (inp.ids != null) {
+			if (type(inp.ids) != 'array' || length(filter(inp.ids, (x) => !is_id(x)))) return { ok: false, code: 'invalid', errors: { ids: 'bad_value' } };
+			ids = inp.ids;
+		} else {
+			if (type(inp.idx) != 'array') return { ok: false, code: 'invalid', errors: { idx: 'bad_type' } };
+			let want = {};
+			for (let i in inp.idx) want['' + i] = true;
+			for (let n in (cache.nodes ?? [])) if (want['' + n.i] && is_id(n.id)) push(ids, n.id);
+		}
+		ids = uniq_list(ids);
+		let s = sub_find(u, inp.url);
+		let sid = s ? s.id : sub_name_for(u, inp.url);
+		let f = { url: inp.url, mode: 'pick', pick: ids, enabled: true };
+		if (!s && type(inp.name) == 'string') f.name = clean_name(inp.name);
+		if (!sub_write(u, sid, f) || !u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
+		return { ok: true, code: 'imported', id: sid, count: length(ids), actions: [ s && s.enabled ? 'USR1' : 'USR2' ] };
+	}
+	return { ok: false, code: 'unknown_method' };
+}
+
 // Trial download of a subscription URL: does it give nodes at all? (a typo / a panel port blocked
 // from the router must not be stored silently). Short timeouts keep a call inside rpcd's budget.
 function sub_probe(url) {
@@ -579,6 +927,20 @@ function add(input) {
 	}
 	if (type(text) != 'string' || !length(trim(text)))
 		return { ok: false, code: 'invalid', errors: { text: 'bad_value' } };
+	// options for the subscription URLs of this add (ROADMAP 9.1, "add URL: take every node / pick
+	// nodes"): mode all|pick, pick = the ids to take, name (one URL only), enabled
+	let opts = (type(input.options) == 'object') ? input.options : {};
+	if (input.options != null && type(input.options) != 'object') return { ok: false, code: 'invalid', errors: { options: 'bad_type' } };
+	let sub_mode = opts.mode ?? 'all';
+	if (!(sub_mode in [ 'all', 'pick' ])) return { ok: false, code: 'invalid', errors: { 'options.mode': 'bad_mode' } };
+	let sub_pick = [];
+	if (opts.pick != null) {
+		if (type(opts.pick) != 'array' || length(filter(opts.pick, (x) => !is_id(x))))
+			return { ok: false, code: 'invalid', errors: { 'options.pick': 'bad_value' } };
+		sub_pick = uniq_list(opts.pick);
+	}
+	let sub_label = (type(opts.name) == 'string') ? clean_name(opts.name) : null;
+	let sub_on = (opts.enabled == null) ? true : (chk_bool(opts.enabled)[0] == '1');
 	let pick = null;
 	if (input.lines != null) {
 		if (type(input.lines) != 'array') return { ok: false, code: 'invalid', errors: { lines: 'bad_type' } };
@@ -587,7 +949,7 @@ function add(input) {
 	}
 	let a = analyze(text, type(input.items) == 'array');
 	let u = cursor();
-	let added = 0, dup = 0, failed = [], acts = {}, addlinks = [], addurls = [], probes = [], addawg = [], awg_ids = [], warning = null;
+	let added = 0, dup = 0, failed = [], acts = {}, addlinks = [], addurls = [], probes = [], addawg = [], awg_ids = [], sub_ids = [], warning = null;
 	for (let it in a.items) {
 		if (pick && !pick['' + it.line]) continue;
 		if (it.status == 'dup') { dup++; continue; }
@@ -602,7 +964,7 @@ function add(input) {
 			let pr = sub_probe(line);
 			push(probes, { line: it.line, fetched: pr.n, http: pr.http });
 			if (pr.n < 1) { push(failed, { line: it.line, reason: 'fetch_failed', http: pr.http }); continue; }
-			push(addurls, line); acts.USR2 = true;
+			push(addurls, line); acts[sub_on ? 'USR2' : 'none'] = true;
 		} else if (it.kind == 'link') { push(addlinks, line); acts.USR1 = true; }
 		else if (it.kind == 'awg' && AN.confs['' + it.line]) {
 			let c = AN.confs['' + it.line];
@@ -638,33 +1000,38 @@ function add(input) {
 	}
 	if (length(addlinks) || length(addurls)) {
 		let ml = as_list(u.get('vpnpool', 'main', 'manual_node'), true);
-		let es = as_list(u.get('vpnpool', 'main', 'extra_sub'), true);
 		for (let x in addlinks) push(ml, x);
-		for (let x in addurls) push(es, x);
 		if (length(addlinks) && !u.set('vpnpool', 'main', 'manual_node', ml))
 			return { ok: false, code: 'write_failed' };
-		if (length(addurls) && !u.set('vpnpool', 'main', 'extra_sub', es))
-			return { ok: false, code: 'write_failed' };
+		// every subscription is its own section (all subscriptions are equal, ROADMAP 9.1)
+		for (let x in addurls) {
+			let sid = sub_name_for(u, x);
+			if (!sub_write(u, sid, { url: x, name: (length(addurls) == 1) ? sub_label : null,
+			                         enabled: sub_on, mode: sub_mode, pick: sub_pick }))
+				return { ok: false, code: 'write_failed' };
+			push(sub_ids, sid);
+		}
 		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
 	}
 	let actions = acts.USR2 ? [ 'USR2' ] : (acts.USR1 ? [ 'USR1' ] : []);
 	let res = { ok: added > 0, code: added > 0 ? 'added' : 'nothing_added', added: added, dup: dup,
 		failed: failed, probes: probes, actions: actions };
 	if (length(awg_ids)) res.awg_ids = awg_ids;
+	if (length(sub_ids)) res.sub_ids = sub_ids;
 	// stored, but it waits for the AmneziaWG engine (deferred): say so
 	if (added > 0 && ADD_WARN[warning]) res.warning = ADD_WARN[warning].warning;
 	return res;
 }
 
 // ---------------------------------------------------------------- misc
-function resolve_url(opts, val) {
-	let u = cursor(), all = [];
-	for (let o in split(opts, ',')) {
-		let v = u.get('vpnpool', 'main', o);
-		for (let x in as_list(v, true)) push(all, x);
-	}
+// <kinds>: comma-separated "all" / "pick" (the mode of the subscriptions to look in) or "*"
+function resolve_url(kinds, val) {
+	let u = cursor(), all = [], want = {};
+	for (let k in split(kinds, ',')) want[k] = true;
+	for (let s in subs_of(u)) if (want['*'] || want[s.mode]) push(all, s.url);
 	for (let x in all) if (x == val) return x;
 	for (let x in all) if (str_key(x) == val) return x;
+	for (let s in subs_of(u)) if (s.id == val && (want['*'] || want[s.mode])) return s.url;
 	// two URLs on one host share the masked form: ambiguous -> nothing (use the key)
 	let hit = filter(all, (x) => mask_url(x) == val);
 	if (length(hit) > 1) return { ambiguous: true };
@@ -674,32 +1041,58 @@ function resolve_url(opts, val) {
 // ---------------------------------------------------------------- import / restore check
 // Options outside SCHEMA that a config may carry, with their check; anything else is kept as is
 // (old versions' options, e.g. subscription_ua) — unknown options are not used by the scripts.
+// A 1.x config (no schema '2', restored or imported) still has its stores by TAG and its
+// subscriptions as main options: they are checked here and turned into the 2.0 model by
+// migrate.sh after the restore / import.
 const EXTRA_CHECKS = {
-	enabled:        (v) => chk_bool(v),
-	clash_api:      (v) => chk_re(v, /^[A-Za-z0-9.-]+:[0-9]{1,5}$/, 'bad_value', false),
-	route_table:    (v) => chk_int(v, 1, 2147483647),
-	route_priority: (v) => chk_int(v, 1, 32767),
-	speedtest_url:  (v) => chk_url(v, true),
-	selected_node:  (v) => chk_tag(v),
-	probe_ua:       (v) => chk_re(v, /^[[:print:]]{1,1024}$/, 'bad_value', false),
-	singbox_bin:    (v) => chk_re(v, /^\/[A-Za-z0-9._\/-]{1,255}$/, 'bad_value', false)
+	enabled:          (v) => chk_bool(v),
+	clash_api:        (v) => chk_re(v, /^[A-Za-z0-9.-]+:[0-9]{1,5}$/, 'bad_value', false),
+	route_table:      (v) => chk_int(v, 1, 2147483647),
+	route_priority:   (v) => chk_int(v, 1, 32767),
+	speedtest_url:    (v) => chk_url(v, true),
+	selected_node:    (v) => chk_tag(v),
+	subscription_url: (v) => chk_url(v, true),
+	probe_ua:         (v) => chk_re(v, /^[[:print:]]{1,1024}$/, 'bad_value', false),
+	schema:           (v) => chk_re(v, /^[0-9]{1,3}$/, 'bad_value', false)
 };
 const EXTRA_URL_LISTS = { extra_sub: 1, source: 1 };
 function check_config(dir, savedir) {
 	let u = cursor(dir, savedir);
 	let errors = {};
+	let v2 = (u.get('vpnpool', 'main', 'schema') == DATA_SCHEMA);
 	for (let f, d in SCHEMA) {
 		let v = u.get('vpnpool', d.s, d.o ?? f);
 		if (v == null) continue;
+		// the node stores of a 1.x config hold tags (the migration maps them to ids); a 2.0 config
+		// may name a node that is not in this router's pool: an id is checked by its form only
+		let item = d.list, chk = d.c;
+		if (f == 'auto_members') item = v2 ? ((x) => is_id(x) ? [ x, null ] : [ null, 'bad_tag' ]) : L_TAG;
+		if (f == 'preferred_node') chk = v2 ? ((x) => is_id(x) ? [ x, null ] : [ null, 'bad_tag' ]) : chk_tag;
 		if (d.list) {
-			let r = chk_list(d.o ?? f, as_list(v, f != 'auto_members'), d.list);
+			let r = chk_list(d.o ?? f, as_list(v, f != 'auto_members' || v2), item);
 			if (r[1]) for (let k, c in r[1]) errors[k] = c;
 			continue;
 		}
 		if (type(v) == 'array') { errors[d.o ?? f] = 'bad_type'; continue; }
 		if (v == '') continue;                 // empty = unset = the default
-		let r = d.c(v);
+		let r = chk(v);
 		if (r[1]) errors[d.o ?? f] = r[1];
+	}
+	// 2.0 lists of node ids and the subscription sections
+	for (let o in [ 'keep_auto', 'hidden' ]) {
+		if (!v2) continue;
+		let i = 0;
+		for (let x in as_list(u.get('vpnpool', 'main', o), true)) { if (!is_id(x)) errors[o + '[' + i + ']'] = 'bad_tag'; i++; }
+	}
+	for (let sub in subs_of(u)) {
+		let k = sub.id + '.';
+		if (!is_url(sub.url)) errors[k + 'url'] = 'bad_url';
+		let m = u.get('vpnpool', sub.id, 'mode');
+		if (m != null && !(m in [ 'all', 'pick' ])) errors[k + 'mode'] = 'bad_mode';
+		let en = u.get('vpnpool', sub.id, 'enabled');
+		if (en != null && chk_bool(en)[1]) errors[k + 'enabled'] = 'bad_value';
+		let i = 0;
+		for (let x in as_list(u.get('vpnpool', sub.id, 'pick'), true)) { if (!is_id(x)) errors[k + 'pick[' + i + ']'] = 'bad_value'; i++; }
 	}
 	for (let o, c in EXTRA_CHECKS) {
 		let v = u.get('vpnpool', 'main', o);
@@ -718,7 +1111,8 @@ function check_config(dir, savedir) {
 	return length(errors) ? { ok: false, code: 'invalid', errors: errors } : { ok: true, code: 'ok' };
 }
 
-const SECRET_URL_OPTS = { subscription_url: 1, extra_sub: 1, source: 1 };
+// subscription URLs (url of a subscription section; the 1.x options) carry the access token
+const SECRET_URL_OPTS = { url: 1, subscription_url: 1, extra_sub: 1, source: 1 };
 function export_masked() {
 	let txt = run('uci export vpnpool 2>/dev/null');
 	if (!length(txt)) return null;
@@ -759,6 +1153,10 @@ if (cmd == 'set_config') {
 		           pending: length(filter(a.items, (i) => i.status == 'add' && i.deferred)) } });
 } else if (cmd == 'add') {
 	out(add(read_input()));
+} else if (cmd == 'node') {
+	out(node_op(ARGV[1] ?? '', read_input()));
+} else if (cmd == 'sub') {
+	out(sub_op(ARGV[1] ?? '', read_input()));
 } else if (cmd == 'resolve_url') {
 	let r = resolve_url(ARGV[1] ?? '', ARGV[2] ?? '');
 	if (r == null) exit(1);
@@ -794,6 +1192,6 @@ if (cmd == 'set_config') {
 	out({ ok: true, code: 'ok', daemon: 'n/a', name: ARGV[2], size: length(d), format: 'tar.gz+base64',
 		report: rep, data: b64enc(d) });
 } else {
-	warn('usage: api.uc set_config|analyze|add|resolve_url|export|has_masked|b64enc|b64dec_field|backup_reply\n');
+	warn('usage: api.uc set_config|analyze|add|node <op>|sub <op>|resolve_url|check_config|check_domain|export|has_masked|b64enc|b64dec_field|backup_reply\n');
 	exit(2);
 }

@@ -148,7 +148,7 @@ CI собирает оба формата под aarch64_cortex-a53, x86_64 и m
 
 ```sh
 # то же из консоли
-uci set vpnpool.main.subscription_url='https://example.com/sub'
+uci set vpnpool.sub1=subscription; uci set vpnpool.sub1.url='https://example.com/sub'
 uci set vpnpool.main.enabled='1'; uci commit vpnpool
 /etc/init.d/vpnpool enable; /etc/init.d/vpnpool restart
 ```
@@ -284,20 +284,20 @@ fake-IP и без перехвата dnsmasq.
 |---|---|---|
 | `enabled` | `0` | Запуск службы (переключатель в LuCI) |
 | `mode` | `selective` | `selective` — через VPN только списки; `exclude` — всё, кроме них |
-| `subscription_url` | — | Основная подписка (из неё берутся трафик и срок) |
 | `subscription_interval` | `6h` | Период автообновления |
 | `check_services` | `www.youtube.com` | **Главный** критерий рабочего узла, по хосту в строке |
 | `health_url` | `http://cp.cloudflare.com/generate_204` | Запасная проверка, если `check_services` пуст |
 | `failover_interval` / `failover_tolerance` | `60` / `50` | Интервал urltest (с) и допуск (мс) |
 | `auto_switch` | `1` | `0` закрепляет селектор на первом узле |
-| `selected_node` / `preferred_node` | — | Жёсткий ручной выбор / мягкий 📌 с возвратом |
+| `preferred_node` | — | «Подключиться»: мягкое предпочтение (id узла) с переключением при сбое и возвратом; пусто — автовыбор |
+| `favorites_only` | `0` | Автовыбор только среди избранных узлов |
 | `dead_filter` / `dead_filter_strikes` / `dead_filter_tries` | `1` / `3` / `3` | Фильтр авто-пула по сервисам, провалов до исключения, повторов за цикл |
 | `ipv6` | `block` | `block` — IPv6 закрыт; `off` — IPv6 не трогаем |
 | `killswitch` / `dns_protect` | `0` / `0` | Закрытый IPv4 в режиме `exclude` / DNS LAN через туннель |
 | `client_mode` | `all` | `all` / `exclude` / `include` по устройствам |
 | `antidpi` | `off` | `off` / `on` (`tls_fragment`) / `aggressive` (+ `tls_record_fragment`) |
 | `adaptive_routing` / `adaptive_max_per_run` | `0` / `8` | Поиск доменов, заблокированных напрямую |
-| `auto_snapshot` / `auto_snapshot_max` | `0` / `20` | Автосохранение доступных узлов |
+| `auto_snapshot` / `auto_snapshot_max` | `0` / `20` | Автоматически добавлять рабочие узлы в избранное |
 | `sched_enabled`, `sched_on`, `sched_off`, `sched_refresh` | `0`, — | Расписание на день (ЧЧ:ММ) |
 | `telegram_enabled`, `telegram_token`, `telegram_chat` | `0`, — | Уведомления |
 | `telegram_control` / `telegram_via_proxy` | `0` / `1` | Двусторонний бот / Telegram через туннель |
@@ -307,9 +307,12 @@ fake-IP и без перехвата dnsmasq.
 | `tproxy_port` / `test_port` / `clash_api` | `1603` / `1605` / `127.0.0.1:9091` | Входы и управляющий API |
 | `lan_if` / `coexist` / `log_level` | авто / `auto` / `warn` | Устройство LAN, уступка podkop, уровень лога sing-box |
 
-Списки, которые ведёт приложение: `source`, `extra_sub`, `manual_node`, `imported_node`,
-`saved_node`, `active_saved`, `excluded_node`, `auto_member`, `keep_auto`, `client`,
-`client_dev`, `probe_ua`; в `config routing 'routing'` — `community`, `domain`, `auto_domain`.
+Списки, которые ведёт приложение: `manual_node` (ваши ссылки), `hidden`, `auto_member`,
+`keep_auto` (id узлов), `client`, `client_dev`, `probe_ua`; в `config routing 'routing'` —
+`community`, `domain`, `auto_domain`. Каждая подписка — своя секция `config subscription` с
+`url`, `name`, `enabled` и `mode` (`all` — все узлы, `pick` — только id из `list pick`).
+Избранное — `/etc/vpnpool/favorites.map.json`. Настройки 1.x при установке переводятся в этот
+вид (копия старых — в `/etc/vpnpool/backup-1.x/`).
 Узлы AmneziaWG — файлы `/etc/vpnpool/awg/*.conf`.
 
 </details>

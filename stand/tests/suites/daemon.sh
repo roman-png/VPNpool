@@ -228,7 +228,9 @@ sc_wd() {   # three supervise ticks with an old start time
 	watchdog_check; gcount '^route down' "$RLOG" > "$DS/after1"
 	watchdog_check; watchdog_check
 }
-ds_reset 0 down; uci set vpnpool.main.selected_node=Node1; uci commit vpnpool; in_daemon sc_wd
+# a preferred node ("Connect") does not switch the watchdog off: a dead preferred node is exactly
+# the case where the LAN must not stay in a black hole
+ds_reset 0 down; uci set vpnpool.main.preferred_node=0123456789ab; uci commit vpnpool; in_daemon sc_wd
 begin "daemon/watchdog-dead-tunnel-takes-routes-down"
 expect_eq "one failed check is tolerated" "$(cat "$DS/after1")" 0
 expect_eq "routes taken down once" "$(gcount '^route down' "$RLOG")" 1
@@ -291,22 +293,48 @@ cat > "$FXD/proxies.json" <<'EOF'
 {"proxies":{"proxy":{"now":"Node1"},"auto":{"now":"Node2"},"Node1":{"history":[{"delay":120}]},"Node2":{"history":[{"delay":90}]}}}
 EOF
 sc_pref() { preferred_check; }
-ds_reset 0 up
-uci set vpnpool.main.preferred_node=Node1; uci commit vpnpool
-echo '["Node1"]' > /tmp/vpnpool/.dead_tags.json
+# the stores key on the node ID (ROADMAP 2.2/9.5): the pin is Node1's id, the clash API knows the
+# node by its tag of this build
+pref_nodes() {
+	printf 'vless://9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce@203.0.113.81:443?security=tls#Node1\nvless://9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce@203.0.113.82:443?security=tls#Node2\n' > "$DS/pref.links"
+	ucode /usr/libexec/vpnpool/parser.uc --with-id "$DS/pref.links" > /tmp/vpnpool/nodes.json
+	PID1=$(jq -r '.[0].id' /tmp/vpnpool/nodes.json)
+}
+ds_reset 0 up; pref_nodes
+uci set vpnpool.main.preferred_node="$PID1"; uci commit vpnpool
+jq -nc --arg i "$PID1" '[$i]' > /tmp/vpnpool/.dead_ids.json
 mock_on; mock_rule 'GET http://127.0.0.1:9091/proxies' 200 "$FXD/proxies.json"; mock_rule 'PUT http://127.0.0.1:9091/proxies/proxy' 204
 in_daemon sc_pref
 begin "daemon/preferred-in-dead-set-hands-to-auto-keeps-pin"
+expect_true "control: an id ($PID1)" [ ${#PID1} -eq 12 ]
 expect_eq "selector switched to auto" "$(mock_calls 'PUT http://127.0.0.1:9091/proxies/proxy')" 1
-expect_eq "preference kept" "$(uci -q get vpnpool.main.preferred_node)" Node1
+expect_eq "preference kept" "$(uci -q get vpnpool.main.preferred_node)" "$PID1"
 end
 sed 's/"now":"Node1"/"now":"auto"/' "$FXD/proxies.json" > "$FXD/p2.json"
-echo '[]' > /tmp/vpnpool/.dead_tags.json
+echo '[]' > /tmp/vpnpool/.dead_ids.json
 rm -f /tmp/curlmock/calls.log; mock_on; mock_rule 'GET http://127.0.0.1:9091/proxies' 200 "$FXD/p2.json"; mock_rule 'PUT http://127.0.0.1:9091/proxies/proxy' 204
 in_daemon sc_pref
 begin "daemon/preferred-recovered-switches-back"   # positive control: the pin still acts
-expect_eq "selector switched back to the preferred node" "$(mock_calls 'PUT http://127.0.0.1:9091/proxies/proxy')" 1
-expect_eq "preference kept" "$(uci -q get vpnpool.main.preferred_node)" Node1
+expect_eq "selector switched back to the preferred node (by its tag)" "$(mock_calls 'PUT http://127.0.0.1:9091/proxies/proxy')" 1
+expect_eq "preference kept" "$(uci -q get vpnpool.main.preferred_node)" "$PID1"
+end
+# a preferred node that left the pool: cleared after 4 ticks — never while a rebuild runs, never
+# for a favourite (it comes back with the node)
+sc_pref4() { preferred_check; preferred_check; preferred_check; preferred_check; }
+ds_reset 0 up; pref_nodes
+uci set vpnpool.main.preferred_node=0123456789ab; uci commit vpnpool
+mock_on; mock_rule 'GET http://127.0.0.1:9091/proxies' 200 "$FXD/p2.json"
+: > /tmp/vpnpool/.reload_running; in_daemon sc_pref4; rm -f /tmp/vpnpool/.reload_running
+_during=$(uci -q get vpnpool.main.preferred_node)
+echo '{"0123456789ab":{"tag":"Fav","link":"vless://x","active":true,"auto":false}}' > /etc/vpnpool/favorites.map.json
+in_daemon sc_pref4
+_fav=$(uci -q get vpnpool.main.preferred_node)
+rm -f /etc/vpnpool/favorites.map.json
+in_daemon sc_pref4
+begin "daemon/preferred-gone-cleared-except-rebuild-or-favourite"
+expect_eq "kept while a rebuild runs" "$_during" 0123456789ab
+expect_eq "kept for a favourite" "$_fav" 0123456789ab
+expect_eq "cleared after 4 ticks otherwise" "$(uci -q get vpnpool.main.preferred_node)" ''
 end
 
 # ---- nodecheck: no verdicts while WAN is down (2.10) ----
@@ -314,7 +342,7 @@ nc_setup() {   # <wan code>
 	reset_state
 	U=9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce
 	printf 'vless://%s@203.0.113.71:443?security=tls&sni=a.example#Node1\n' "$U" > "$DS/l.txt"
-	ucode /usr/libexec/vpnpool/parser.uc "$DS/l.txt" > /tmp/vpnpool/nodes.json
+	ucode /usr/libexec/vpnpool/parser.uc --with-id "$DS/l.txt" > /tmp/vpnpool/nodes.json
 	mock_on   # every clash delay probe fails (no rule -> 000)
 	mock_rule 'GET http://cp.cloudflare.com/generate_204' "$1"
 	mock_rule 'GET http://connectivitycheck.gstatic.com/generate_204' "$1"
@@ -328,8 +356,9 @@ end
 nc_setup 204
 begin "daemon/nodecheck-wan-up-strikes-dead-node"   # positive control
 expect_true "delay probes sent" [ "$(mock_calls '/delay?')" -ge 1 ]
-expect_eq "strike recorded" "$(awk -F'\t' '$1=="Node1"{print $2}' /tmp/vpnpool/.deadstrikes 2>/dev/null)" 1
-expect_true "dead set is valid JSON" jq -e 'type=="array"' /tmp/vpnpool/.dead_tags.json
+_nid=$(jq -r '.[0].id' /tmp/vpnpool/nodes.json)
+expect_eq "strike recorded by the node id ($_nid)" "$(awk -F'\t' -v k="$_nid" '$1==k{print $2}' /tmp/vpnpool/.deadstrikes 2>/dev/null)" 1
+expect_true "dead set is valid JSON" jq -e 'type=="array"' /tmp/vpnpool/.dead_ids.json
 end
 
 # ---- the single "is it alive" criterion (2.4) ----
@@ -384,30 +413,41 @@ expect_true "table gone" sh -c '! nft list table inet vpnpool'
 expect_eq "rule gone" "$(ip rule show | gcount 'fwmark 0x400000/0x400000')" 0
 end
 
-# ---- per-node tests never touch the LAN selector (2.8) ----
+# ---- per-node tests never touch the LAN selector (2.8); by node id, results keyed by it ----
 reset_state
 uci set vpnpool.main.speedtest_min_mem_kb=1; uci commit vpnpool
+printf 'vless://9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce@203.0.113.71:443?security=tls#Node1\n' > "$DS/nt.links"
+ucode /usr/libexec/vpnpool/parser.uc --with-id "$DS/nt.links" > /tmp/vpnpool/nodes.json
+NID=$(jq -r '.[0].id' /tmp/vpnpool/nodes.json)
 head -c 5000 /dev/zero > "$DS/blob"
 mock_on
 mock_rule 'PUT http://127.0.0.1:9091/proxies/vpnpool-test' 204
 mock_rule 'P GET https://speed.cloudflare.com/*' 200 "$DS/blob"
 mock_rule 'P GET https://www.youtube.com/' 200 "$DS/blob"
-sh /usr/libexec/vpnpool/speedtest.sh Node1 >/dev/null 2>&1
-sh /usr/libexec/vpnpool/unlock.sh Node1 >/dev/null 2>&1
+sh /usr/libexec/vpnpool/speedtest.sh "$NID" >/dev/null 2>&1
+sh /usr/libexec/vpnpool/unlock.sh Node1 >/dev/null 2>&1   # the tag still works (older screens, the bot)
 begin "daemon/node-tests-use-test-selector-only"
 expect_eq "test selector switched (speedtest + unlock)" "$(mock_calls 'PUT http://127.0.0.1:9091/proxies/vpnpool-test')" 2
 expect_eq "LAN selector never touched" "$(mock_calls 'proxies/proxy')" 0
-expect_true "speedtest measured through the test path" jq -e '.ok==true and .bytes>0' /tmp/vpnpool/.speedtest-result.json
+expect_true "speedtest measured through the test path, result names the id" jq -e --arg i "$NID" '.ok==true and .bytes>0 and .id==$i and .tag=="Node1"' /tmp/vpnpool/.speedtest-result.json
 expect_true "unlock result" jq -e '.ok==true and .results.youtube==true and .results.google==false' /tmp/vpnpool/.unlock-result.json
+expect_true "unlock badges kept by the node id" jq -e --arg i "$NID" '.[$i].youtube==true and (has("Node1")|not)' /etc/vpnpool/unlock.map.json
 expect_true "lock released" [ ! -d /tmp/vpnpool/.nodetest.lock ]
 end
 rm -f /tmp/curlmock/calls.log; mock_on
 mock_rule 'PUT http://127.0.0.1:9091/proxies/vpnpool-test' 404
 mock_rule 'P GET https://speed.cloudflare.com/*' 200 "$DS/blob"
-sh /usr/libexec/vpnpool/speedtest.sh Gone >/dev/null 2>&1
+sh /usr/libexec/vpnpool/speedtest.sh "$NID" >/dev/null 2>&1
 begin "daemon/node-test-refused-selector-no-download"
-expect_true "honest failure" jq -e '.ok==false' /tmp/vpnpool/.speedtest-result.json
+expect_true "honest failure" jq -e '.ok==false and .code=="not_found"' /tmp/vpnpool/.speedtest-result.json
 expect_eq "no download through a selector that did not switch" "$(mock_calls 'speed.cloudflare.com')" 0
+end
+rm -f /tmp/curlmock/calls.log; mock_on
+mock_rule 'PUT http://127.0.0.1:9091/proxies/vpnpool-test' 204
+sh /usr/libexec/vpnpool/speedtest.sh Gone >/dev/null 2>&1
+begin "daemon/node-test-unknown-node-touches-nothing"
+expect_true "not_found" jq -e '.ok==false and .code=="not_found"' /tmp/vpnpool/.speedtest-result.json
+expect_eq "the test selector not even switched" "$(mock_calls 'vpnpool-test')" 0
 end
 
 # ---- route.sh: refused new rules never remove the working ones (fail-closed) ----

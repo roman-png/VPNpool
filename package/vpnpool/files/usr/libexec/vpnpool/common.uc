@@ -3,7 +3,7 @@
 // engine_cap (and only when a sing-box binary changed).
 'use strict';
 
-import { readfile, writefile, stat, open, rename, unlink, popen, access, mkdir } from 'fs';
+import { readfile, writefile, stat, open, rename, unlink, popen, access, mkdir, chmod } from 'fs';
 import { rand } from 'math';
 
 // Community rule-set names (itdoginfo/allow-domains SRS assets). The ONE list: generator.uc
@@ -34,22 +34,16 @@ function uniq() {
 }
 
 // Atomic write (temp file in the same directory + rename) — readers never see half a file.
-function write_atomic(path, data) {
+function write_atomic(path, data, perm) {
 	let t = sprintf('%s.tmp.%s', path, uniq());   // own name: writers may overlap
 	let f = open(t, 'w');
 	if (!f) return false;
+	if (perm != null) chmod(t, perm);             // before the data goes in
 	f.write(data);
 	f.close();
 	if (rename(t, path)) return true;
 	unlink(t);
 	return false;
-}
-
-// "inode:mtime:size" of a file ('-' when absent): cache key of a derived value (a rewrite of the
-// same size in the same second still gets a new inode: write_atomic / mv replace the file).
-function file_sig(path) {
-	let s = stat(path);
-	return s ? (s.inode + ':' + s.mtime + ':' + s.size) : '-';
 }
 
 // Subscription URLs carry the access token: show scheme://host/*** only (same rule as
@@ -91,17 +85,80 @@ function as_list(v, split_ws) {
 	return filter(split(v, /[ \t\r\n]+/), (x) => length(x));
 }
 
-// jq-compatible tostring (null -> "null").
-function jstr(v) {
-	return (v == null) ? 'null' : ('' + v);
+// ---- the data model (ROADMAP 9, schema 2) ----
+// A node is known by its ID (parser.uc: 12 hex of the canonical config without the name; AWG:
+// sha256 of the private key) in EVERY store; the tag is only its display name in one build.
+//   uci  config subscription 'sub_<key>'  name, url, enabled, mode all|pick, list pick <id>
+//   uci  main: preferred_node <id>, list auto_member / keep_auto / hidden <id>, favorites_only,
+//        list manual_node <link> ("my nodes"; AmneziaWG ones are /etc/vpnpool/awg/<id>.conf)
+//   /etc/vpnpool/favorites.map.json  { <id>: {tag, link|ob|null, active, auto, at} }
+//        link: the node's link (ob: its outbound, for a node of a sing-box JSON source; null: an
+//        AWG file node) — so a favourite outlives its subscription; active = it joins the pool
+//        from here although no source has it; auto = added by "add working nodes automatically"
+const CONF_DIR = '/etc/vpnpool';
+const RUN_DIR = '/tmp/vpnpool';
+const FAV_MAP = CONF_DIR + '/favorites.map.json';
+const SUBS_META = CONF_DIR + '/subs.meta.json';
+const SCHEMA = '2';
+
+function is_id(s) { return type(s) == 'string' && !!match(s, /^[0-9a-f]{12}$/); }
+
+// the subscription sections in config order -> [{id, name, url, enabled, mode, pick}]
+function subs_of(u) {
+	let out = [];
+	u.foreach('vpnpool', 'subscription', function(s) {
+		push(out, { id: s['.name'], name: s.name ?? '', url: s.url ?? '',
+			enabled: (s.enabled ?? '1') != '0', mode: (s.mode == 'pick') ? 'pick' : 'all',
+			pick: filter(as_list(s.pick, true), is_id) });
+	});
+	return out;
+}
+// a new section name for a URL: sub_<key of the URL>, unique among the existing sections
+function sub_name_for(u, url) {
+	let base = 'sub_' + str_key(url), n = base, i = 1;
+	while (u.get('vpnpool', n) != null) n = base + '_' + (++i);
+	return n;
 }
 
-// The legacy node identity server:port:uuid:sni:short_id (saved-archive matching, 1.x stores).
-function nid(n) {
-	let p0 = (type(n.peers) == 'array') ? n.peers[0] : null;
-	return jstr(n.server ?? p0?.address) + ':' + jstr(n.server_port ?? p0?.port) + ':' +
-		(n.uuid ?? p0?.public_key ?? '') + ':' + (n.tls?.server_name ?? '') + ':' +
-		(n.tls?.reality?.short_id ?? '');
+function fav_read() {
+	let m = read_json(FAV_MAP, {});
+	return (type(m) == 'object') ? m : {};
+}
+// the favourites hold node links (credentials): owner-only, like the AWG files
+function fav_write(m) {
+	mkdir(CONF_DIR);
+	return write_atomic(FAV_MAP, sprintf('%J', m), 0600);
+}
+
+// the last build's nodes: in the config (nodes.json) and waiting for the engine (deferred.json)
+function live_nodes() {
+	let a = read_json(RUN_DIR + '/nodes.json', []), d = read_json(RUN_DIR + '/deferred.json', []);
+	let out = [];
+	for (let n in ((type(a) == 'array') ? a : [])) if (type(n) == 'object') push(out, n);
+	for (let n in ((type(d) == 'array') ? d : [])) if (type(n) == 'object') { n._deferred = true; push(out, n); }
+	return out;
+}
+// A node by its id, or (legacy screens / the bot still send names) by its tag in the last build.
+// -> {id, tag, node} | null. An id that is not live resolves through the favourites archive.
+function node_lookup(key, nodes) {
+	if (type(key) != 'string' || !length(key)) return null;
+	nodes ??= live_nodes();
+	for (let n in nodes) if (n.id == key) return { id: n.id, tag: n.tag, node: n };
+	for (let n in nodes) if (n.tag == key && n.id) return { id: n.id, tag: n.tag, node: n };
+	if (is_id(key)) {
+		let f = fav_read()[key];
+		if (type(f) == 'object') return { id: key, tag: f.tag, node: null, fav: f };
+	}
+	return null;
+}
+// link of a node by id: links.json of the last build, else the favourites archive
+function link_of(id) {
+	for (let p in [ RUN_DIR + '/links.json', CONF_DIR + '/links.json' ]) {
+		let l = read_json(p, []);
+		if (type(l) == 'array') for (let x in l) if (type(x) == 'object' && x.id == id && length(x.link)) return x.link;
+	}
+	let f = fav_read()[id];
+	return (type(f) == 'object' && type(f.link) == 'string') ? f.link : null;
 }
 
 // ---- the sing-box engine (ROADMAP 4.1) ----
@@ -200,5 +257,6 @@ function engine_select(cfg_bin, has_awg) {
 	return r;
 }
 
-export { VALID_COMMUNITY, uniq, read_json, write_atomic, file_sig, mask_url, mask_token, str_key, as_list, jstr, nid,
+export { VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list,
+	CONF_DIR, RUN_DIR, FAV_MAP, SUBS_META, SCHEMA, is_id, subs_of, sub_name_for, fav_read, fav_write, live_nodes, node_lookup, link_of,
 	SB_STOCK, SB_AWG, ENGINE_CAP, sb_version_mm, engine_cap, engine_select };
