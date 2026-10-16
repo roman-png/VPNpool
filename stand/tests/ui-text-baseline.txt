@@ -9,9 +9,6 @@ luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/diagnostics.js	rul
 luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/diagnostics.js	srs	SRS cache present
 luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/diagnostics.js	srs	SRS cache size (KB)
 luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/diagnostics.js	tproxy	tproxy port
-luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/settings.js	clash	Clash API
-luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/settings.js	fwmark	fwmark
-luci-app-vpnpool/files/www/luci-static/resources/view/vpnpool/settings.js	tproxy	tproxy port
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	clash	Clash API
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	clash	Clash API reachable
 luci-app-vpnpool/files/www/luci-static/resources/vpnpool/i18n.js	clash	Clash API доступен
