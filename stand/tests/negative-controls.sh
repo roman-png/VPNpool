@@ -107,7 +107,7 @@ ctl parser-tag-one-attempt parser fail 'parser/tag-suffix-unique-loop ' \
 ctl parser-reserved-off parser fail 'parser/reserved-tags-renamed ;parser/json-outbound-reserved-tag ;parser/report-reasons ' \
 	"$LIBX/parser.uc" "let RESERVED_TAGS = { auto: 1, proxy: 1, direct: 1, block: 1, 'dns-out': 1, 'vpnpool-test': 1 };" 'let RESERVED_TAGS = {};'
 # id: TLS left out of the canonical config -> fp chrome/firefox share an id
-ctl parser-id-skips-tls parser fail 'parser/id-covers-every-config-field ' \
+ctl parser-id-skips-tls parser fail 'parser/id-covers-every-config-field ;parser/corpus-accepted-by-sing-box-check ' \
 	"$LIBX/parser.uc" "k != '_link') c[k] = ob[k];" "k != '_link' && k != 'tls') c[k] = ob[k];"
 # id depends on the display name -> renaming changes it
 ctl parser-id-uses-name parser fail 'parser/id-stable-across-order-and-name ;parser/id-changes-with-port-and-credential ;parser/id-json-key-order-and-link-agree ;parser/dedup-same-config-other-name-is-one-node ;parser/dedup-users-file-first-keeps-users-name ;parser/id-unique-in-output ' \
@@ -135,7 +135,7 @@ ctl parser-hy2-port-not-hopped parser fail 'parser/hy2-port-hopping ' \
 ctl parser-unknown-transport-kept parser fail 'parser/vless-xhttp-refused ;parser/vless-splithttp-refused ;parser/vless-kcp-refused ;parser/trojan-xhttp-refused ;parser/vmess-xhttp-refused ;parser/report-reasons ' \
 	"$LIBX/parser.uc" "	return 'unsupported_transport';" "	return { type: t };"
 # every case that inspects the installed config goes red
-ctl build-config-not-installed build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/json-source-long-short-id-no-panic ;build/awg-node-on-stock-engine-deferred ;build/unchanged-pool-no-flash-write ;build/changed-pool-flash-updated ;build/after-reboot-failed-build-keeps-flash-config ;build/node-test-selector-separate-from-proxy ;build/poison-json-source-unknown-field ;build/poison-json-endpoint-unknown-field ;build/generator-tags-reserved-in-parser ;build/status-file-lists-engine-drop ;build/nodes-carry-id-config-does-not ;build/log-counts-the-final-pool ;build/term-writes-interrupted ' \
+ctl build-config-not-installed build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/json-source-long-short-id-no-panic ;build/awg-node-on-stock-engine-deferred ;build/unchanged-pool-no-flash-write ;build/changed-pool-flash-updated ;build/after-reboot-failed-build-keeps-flash-config ;build/node-test-selector-separate-from-proxy ;build/poison-json-source-unknown-field ;build/poison-json-endpoint-unknown-field ;build/generator-tags-reserved-in-parser ;build/status-file-lists-engine-drop ;build/nodes-carry-id-config-does-not ;build/log-counts-the-final-pool ;build/term-writes-interrupted ;build/model-inputs-sources-and-filters ;build/model-auto-members-and-dead-by-id ;build/model-favourites-only-and-preferred-default ;build/model-favourites-only-never-empties-the-pool ;build/model-active-favourites-join-the-pool ' \
 	"$LIBX/build.sh" 'mv "$SB_CONF.new" "$SB_CONF"' 'rm -f "$SB_CONF.new"'
 # add / add_node write but never signal (and say n/a instead of not_running)
 ctl rpcd-add_node-no-signal rpcd fail 'rpcd/add_node/ok ;rpcd/add_node/no-daemon-reported ;rpcd/add_sub/ok ;rpcd/add_sub/no-daemon-reported ;rpcd/add/ok ;rpcd/add/no-daemon-reported ' \
@@ -260,11 +260,10 @@ ctl status-delay-lost status fail 'status/300-nodes-daemon-up-valid ;status/over
 ctl api-config-partial-write rpcd fail 'rpcd/set_config/bad-input ;rpcd/set_config/all-or-nothing ;rpcd/set_schedule/bad-input ;rpcd/set_schedule/bad-minute-not-stored ' \
 	"$LIBX/api.uc" '	if (length(errors)) {' '	if (length(errors) && !length(plan)) {'
 # both daemon signals for one save (USR2 already rebuilds)
-ctl api-config-two-signals rpcd fail 'rpcd/set_config/one-signal-only ;rpcd/add/ok ' \
-	"$LIBX/api.uc" "	if (acts.USR2) push(actions, 'USR2'); else if (acts.USR1) push(actions, 'USR1');" "	if (acts.USR2) push(actions, 'USR2'); if (acts.USR1) push(actions, 'USR1');" \
+ctl api-config-two-signals rpcd fail 'rpcd/add/ok ' \
 	"$LIBX/api.uc" "	let actions = acts.USR2 ? [ 'USR2' ] : (acts.USR1 ? [ 'USR1' ] : []);" "	let actions = []; if (acts.USR2) push(actions, 'USR2'); if (acts.USR1) push(actions, 'USR1');"
 # the masked value the status reply shows is stored as the new secret
-ctl api-masked-secret-overwrites rpcd fail 'rpcd/set_config/masked-token-sent-back-keeps-the-real-one ;rpcd/set_url/masked-url-sent-back-unchanged ' \
+ctl api-masked-secret-overwrites rpcd fail 'rpcd/set_config/masked-token-sent-back-keeps-the-real-one ;' \
 	"$LIBX/api.uc" "		if (d.secret && type(v) == 'string' && v == masked_of(d, cur)) continue;" "		if (false) continue;"
 # analyze: no duplicate detection against the existing pool
 ctl api-analyze-no-dup-check rpcd fail 'rpcd/analyze/statuses ' \
@@ -296,7 +295,7 @@ ctl rpcd-backup-no-awg rpcd fail 'rpcd/backup/full-copy-with-secrets ;rpcd/resto
 # status: the token / the subscription URL in clear
 ctl status-token-unmasked status fail 'status/telegram-token-masked ' \
 	"$LIBX/status.uc" '		telegram_token: mask_token(token),' '		telegram_token: token,'
-ctl status-url-unmasked status fail 'status/subscription-urls-masked ;status/subscriptions-last-fetch ' \
+ctl status-url-unmasked status fail 'status/subscription-urls-masked ;status/subscriptions-last-fetch ;status/source-urls-masked ' \
 	"$LIBX/status.uc" '		title: clean_text(m.title, 64), url: mask_url(s.url),' '		title: clean_text(m.title, 64), url: s.url,'
 # status: 20 extra processes per poll -> the process threshold must catch it
 ctl status-process-burst status fail 'status/300-nodes-daemon-down-at-most-15-processes ;status/300-nodes-daemon-up-at-most-15-processes ' \
@@ -308,10 +307,10 @@ ctl status-busy-ignores-owner status fail 'status/build-busy-pause-progress ' \
 	"$LIBX/status.uc" "	if (match(pid, /^[0-9]+\$/)) return !!access('/proc/' + pid);" "	if (match(pid, /^[0-9]+\$/)) return true;"
 # generator: the node id (nodes.json carries it since stage 3) reaches the sing-box config
 # (sing-box refuses the unknown field: EVERY build that installs a config goes red)
-ctl generator-keeps-id build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/poison-json-source-unknown-field ;build/poison-json-endpoint-unknown-field ;build/status-file-lists-engine-drop ;build/log-counts-the-final-pool ;build/json-source-long-short-id-no-panic ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/awg-node-on-stock-engine-deferred ;build/unchanged-pool-no-flash-write ;build/changed-pool-flash-updated ;build/after-reboot-failed-build-keeps-flash-config ;build/node-test-selector-separate-from-proxy ;build/generator-tags-reserved-in-parser ;build/status-file-success ;build/nodes-carry-id-config-does-not ;build/before-kill-status-ok ;build/term-writes-interrupted ' \
+ctl generator-keeps-id build fail 'build/clean-subscription ;build/poison-port-70000 ;build/poison-reserved-tag-direct ;build/poison-reserved-tag-auto ;build/poison-reserved-tag-proxy ;build/poison-duplicate-tags ;build/not-frozen-new-node-arrives-despite-poison ;build/poison-json-source-unknown-field ;build/poison-json-endpoint-unknown-field ;build/status-file-lists-engine-drop ;build/log-counts-the-final-pool ;build/json-source-long-short-id-no-panic ;build/xhttp-builds ;build/xhttp-not-in-config ;build/junk-json-source-does-not-empty-pool ;build/awg-node-on-stock-engine-deferred ;build/unchanged-pool-no-flash-write ;build/changed-pool-flash-updated ;build/after-reboot-failed-build-keeps-flash-config ;build/node-test-selector-separate-from-proxy ;build/generator-tags-reserved-in-parser ;build/status-file-success ;build/nodes-carry-id-config-does-not ;build/before-kill-status-ok ;build/term-writes-interrupted ;build/model-inputs-sources-and-filters ;build/model-hidden-listed-with-name ;build/model-auto-members-and-dead-by-id ;build/model-favourites-only-and-preferred-default ;build/model-favourites-only-never-empties-the-pool ;build/model-active-favourites-join-the-pool ' \
 	"$LIBX/generator.uc" '	delete n.id;' '	n.id = n.id;'
 # build: no build_status.json on success
-ctl build-status-not-written build fail 'build/status-file-success ;build/status-file-lists-engine-drop ;build/before-kill-status-ok ;build/awg-node-on-stock-engine-deferred ;build/poison-json-endpoint-unknown-field ' \
+ctl build-status-not-written build fail 'build/status-file-success ;build/status-file-lists-engine-drop ;build/before-kill-status-ok ;build/awg-node-on-stock-engine-deferred ;build/poison-json-endpoint-unknown-field ;build/model-hidden-listed-with-name ' \
 	"$LIBX/build.sh" 'build_status true ""' ':'
 # fetch: a failed run forgets the last successful fetch time
 ctl fetch-status-forgets-last-ok fetch fail 'fetch/status-per-source ;fetch/term-records-interrupted ' \
@@ -473,7 +472,7 @@ ctl review-v5-fetch-no-trap fetch fail 'fetch/term-records-interrupted ' \
 # V6: a mask that does not resolve is used as the address; masks looked up in every list
 ctl review-v6-mask-used-as-url rpcd fail 'rpcd/probe_source/unknown-mask-refused ' \
 	"$RPCD" "	case \"\$2\" in *'***'*) rep false not_found; exit 0 ;; esac" '	:'
-ctl review-v6-mask-any-list rpcd fail 'rpcd/del_source/mask-resolved-in-pick-subscriptions-only ' \
+ctl review-v6-mask-any-list rpcd fail 'rpcd/del_source/mask-resolved-in-pick-subscriptions-only ;rpcd/add_sub/mask-literal-refused ' \
 	"$RPCD" '		need_url pick "$(printf' "		need_url '*' \"\$(printf"
 ctl review-v6-is-url-takes-mask rpcd fail 'rpcd/add_sub/mask-literal-refused ' \
 	"$LIBX/api.uc" "	if (index(s, '***') >= 0) return false;" '	;'
@@ -532,7 +531,7 @@ ctl awgb-id-not-of-the-key parser fail 'parser/awg-id-is-sha256-of-private-key '
 	"$LIBX/parser.uc" '	return substr(sha256_hex(k), 0, 12);' "	return substr(sha256_hex(k + 'x'), 0, 12);"
 ctl awgb-sha256-constant parser fail 'parser/awg-id-is-sha256-of-private-key ' \
 	"$LIBX/parser.uc" '	0x428a2f98, 0x71374491,' '	0x428a2f99, 0x71374491,'
-ctl awgb-dedup-by-name parser fail 'parser/awg-name-comment-and-identity ' \
+ctl awgb-dedup-by-name parser fail 'parser/awg-name-comment-and-identity ;parser/awg-id-is-sha256-of-private-key ' \
 	"$LIBX/parser.uc" '	if (is_awg) { if (length(ob.private_key)) id = awg_id(ob.private_key); }' '	if (is_awg) { if (length(ob.private_key)) id = awg_id(ob.private_key + base); }'
 ctl awgb-name-comment-ignored parser fail 'parser/awg-name-comment-and-identity ' \
 	"$LIBX/parser.uc" '	ep.tag = name ?? hp_label(hp.host, port);' '	ep.tag = hp_label(hp.host, port);'
@@ -581,8 +580,8 @@ ctl awgb-add-no-warning awg fail 'awg/add-vpn-link-no-engine-deferred ;awg/impor
 	"$LIBX/api.uc" '	if (added > 0 && ADD_WARN[warning]) res.warning = ADD_WARN[warning].warning;' '	;'
 ctl awgb-no-wrapped-link awg fail 'awg/analyze-vpn-link-wrapped-with-caption ' \
 	"$LIBX/api.uc" '		if (tok && !nowrap && prev_len >= WRAP_MIN' '		if (false && tok && !nowrap && prev_len >= WRAP_MIN'
-ctl awgb-delete-by-id-off awg fail 'awg/delete-by-id ;awg/delete-unknown-id ;awg/delete-deferred-by-tag ' \
-	"$LIBX/api.uc" "	if (n && (n.type == 'awg' || n.type == 'wireguard') && src == 'awg') {" '	if (false) {'
+ctl awgb-delete-by-id-off awg fail 'awg/delete-by-id ;awg/delete-deferred-by-tag ' \
+	"$LIBX/api.uc" "	if ((n && (n.type == 'awg' || n.type == 'wireguard') && src == 'awg') || (!n && r.awg_file)) {" '	if (false) {'
 # ui: every new reply code needs its text
 ctl awgb-ui-no-engine-text ui-unit fail 'every code the backend answers with has a human text' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "	engine_missing:     _('Saved." "	engine_missing_x:   _('Saved."
@@ -633,16 +632,16 @@ ctl s6-parser-pick-ignored parser fail 'parser/pick-only-for-the-next-file-befor
 	"$LIBX/parser.uc" '		PICK = f.pick;' '		PICK = null;'
 ctl s6-parser-src-wrong parser fail 'parser/pick-only-for-the-next-file-before-dedup ' \
 	"$LIBX/parser.uc" '	if (WITH_SRC) ob._src = cur_src;' '	if (WITH_SRC) ob._src = 0;'
-ctl s6-parser-dedup-by-name parser fail 'parser/dedup-same-config-other-name-is-one-node ;parser/dedup-users-file-first-keeps-users-name ;parser/id-unique-in-output ' \
+ctl s6-parser-dedup-by-name parser fail 'parser/dedup-same-config-other-name-is-one-node ;parser/dedup-users-file-first-keeps-users-name ;parser/id-unique-in-output ;parser/awg-name-comment-and-identity ' \
 	"$LIBX/parser.uc" "	let dk = id ?? ('noid:' + config_key(ob));" "	let dk = base + '\x1f' + (id ?? config_key(ob));"
 # build: the inputs of the pool
-ctl s6-build-hide-not-passed build fail 'build/model-inputs-sources-and-filters ;build/model-hidden-listed-with-name ' \
+ctl s6-build-hide-not-passed build fail 'build/model-inputs-sources-and-filters ;build/model-hidden-listed-with-name ;build/model-favourites-only-never-empties-the-pool ' \
 	"$LIBX/build.sh" 'FILES=""; PARGS="--hide $SB_DATA/hidden.ids";' 'FILES=""; PARGS="";'
-ctl s6-build-pick-not-passed build fail 'build/model-inputs-sources-and-filters ' \
+ctl s6-build-pick-not-passed build fail 'build/model-inputs-sources-and-filters ;build/model-favourites-only-never-empties-the-pool ' \
 	"$LIBX/build.sh" '	if [ -n "${3:-}" ]; then PARGS="$PARGS --pick $3 $1"; else PARGS="$PARGS $1"; fi' '	PARGS="$PARGS $1"'
-ctl s6-build-disabled-sub-used build fail 'build/model-inputs-sources-and-filters ' \
+ctl s6-build-disabled-sub-used build fail 'build/model-inputs-sources-and-filters ;build/model-favourites-only-never-empties-the-pool ' \
 	"$LIBX/build.sh" '	[ "$en" = 1 ] || continue' '	:'
-ctl s6-build-manual-after-subs build fail 'build/model-inputs-sources-and-filters ' \
+ctl s6-build-manual-after-subs build fail 'build/model-inputs-sources-and-filters ;build/model-auto-members-and-dead-by-id ' \
 	"$LIBX/build.sh" '[ -s "$SB_DATA/manual.links" ] && add_input "$SB_DATA/manual.links" manual' ':' \
 	"$LIBX/build.sh" 'for f in "$SRCDIR"/[0-9][0-9][0-9].raw; do' '[ -s "$SB_DATA/manual.links" ] && add_input "$SB_DATA/manual.links" manual; for f in "$SRCDIR"/[0-9][0-9][0-9].raw; do'
 ctl s6-build-fav-active-off build fail 'build/model-active-favourites-join-the-pool ' \
@@ -659,7 +658,7 @@ ctl s6-gen-favorites-only-empties build fail 'build/model-favourites-only-never-
 ctl s6-gen-preferred-default-off build fail 'build/model-favourites-only-and-preferred-default ' \
 	"$LIBX/generator.uc" "	def = preferred_tag ?? (length(node_tags) ? node_tags[0] : 'auto');" "	def = (length(node_tags) ? node_tags[0] : 'auto');"
 # fetch: every subscription its own meta
-ctl s6-fetch-meta-one-key fetch fail 'fetch/all-sources-ok ' \
+ctl s6-fetch-meta-one-key fetch fail 'fetch/all-sources-ok ;fetch/primary-fails-extra-ok-keeps-primary-nodes ;fetch/removed-source-dropped-from-cache ' \
 	"$LIBX/fetch.sh" "--argjson m \"\$m\" '.[\$s] = \$m')" "--argjson m \"\$m\" '.x = \$m')"
 ctl s6-fetch-meta-always-written fetch fail 'fetch/unchanged-source-cache-not-rewritten ' \
 	"$LIBX/fetch.sh" '	persist_if_changed "$SB_DATA/.meta.new" "$META"' '	cp "$SB_DATA/.meta.new" "$META"'
@@ -668,7 +667,7 @@ ctl s6-fetch-disabled-fetched fetch fail 'fetch/disabled-subscription-not-fetche
 ctl s6-fetch-removed-meta-kept fetch fail 'fetch/removed-source-dropped-from-cache ' \
 	"$LIBX/fetch.sh" "'with_entries(select(.key as \$k | \$ids | index(\$k) != null))')" "'.')"
 # status: the stores by id, the older screens' tags, masked values
-ctl s6-status-source-ignored status fail 'status/node-source-from-the-build ;status/subscriptions-last-fetch ' \
+ctl s6-status-source-ignored status fail 'status/node-source-from-the-build ;status/subscriptions-last-fetch ;status/favorites-hidden-preferred ' \
 	"$LIBX/status.uc" "	if (substr(src, 0, 4) == 'sub:') return [ 'subscription', substr(src, 4) ];" '	;'
 ctl s6-status-legacy-ids status fail 'status/favorites-hidden-preferred ' \
 	"$LIBX/status.uc" '	dead_nodes: tags_of(dead_ids),' '	dead_nodes: dead_ids,'
@@ -705,7 +704,7 @@ ctl s6-api-hide-not-pruned rpcd fail 'rpcd/hide/ok ' \
 	"$LIBX/api.uc" '		prune_live([ r.id ]); drop_marks([ r.id ]);' '		;'
 ctl s6-api-hide-keeps-preferred rpcd fail 'rpcd/hide/clears-the-preferred-node ' \
 	"$LIBX/api.uc" "		if (u.get('vpnpool', 'main', 'preferred_node') == r.id) u.delete('vpnpool', 'main', 'preferred_node');" '		;'
-ctl s6-api-delete-sub-node-not-hidden rpcd fail 'rpcd/delete_nodes/ok ;rpcd/delete_node/subscription-node-is-hidden ' \
+ctl s6-api-delete-sub-node-not-hidden rpcd fail 'rpcd/delete_nodes/ok ;rpcd/delete_node/subscription-node-is-hidden ;rpcd/unhide/returns-it ' \
 	"$LIBX/api.uc" "		changed = list_add(u, 'hidden', r.id);" '		changed = true;'
 ctl s6-api-connect-not-live rpcd fail 'rpcd/connect/ok ;rpcd/select/ok ' \
 	"$LIBX/api.uc" "		let c = clash_put('proxy', r.tag);" "		let c = '000';"
@@ -717,7 +716,7 @@ ctl s6-api-auto-members-tags rpcd fail 'rpcd/set_auto_members/ok ' \
 	"$LIBX/api.uc" "	auto_members:          { s: 'main', o: 'auto_member', list: L_NODE, a: 'USR1' }" "	auto_members:          { s: 'main', o: 'auto_member', list: L_TAG, a: 'USR1' }"
 ctl s6-api-singbox-bin-no-live rpcd fail 'rpcd/set_config/singbox-bin-missing-refused ' \
 	"$LIBX/api.uc" '		if (!r[1] && d.live) r[1] = d.live(r[0]);' '		;'
-ctl s6-api-add-url-not-a-section rpcd fail 'rpcd/add_sub/ok ;rpcd/add_sub/no-daemon-reported ;rpcd/add/ok ;rpcd/add/no-daemon-reported ;rpcd/add/url-in-pick-mode ' \
+ctl s6-api-add-url-not-a-section rpcd fail 'rpcd/add_sub/ok ;rpcd/add/ok ;rpcd/add/url-in-pick-mode ' \
 	"$LIBX/api.uc" '			let sid = sub_name_for(u, x);' "			let sid = 'main';"
 ctl s6-api-add-mode-ignored rpcd fail 'rpcd/add/url-in-pick-mode ' \
 	"$LIBX/api.uc" '			                         enabled: sub_on, mode: sub_mode, pick: sub_pick }))' "			                         enabled: sub_on, mode: 'all', pick: [] }))"
@@ -752,6 +751,10 @@ ctl s6-initd-no-migration migrate fail 'migrate/init-d-start-migrates ' \
 ctl s6-uci-defaults-hides-failure migrate fail 'migrate/uci-defaults-runs-it-and-reports ' \
 	package/vpnpool/files/etc/uci-defaults/90-vpnpool-2.0 '/usr/libexec/vpnpool/migrate.sh' '/usr/libexec/vpnpool/migrate.sh; exit 0'
 # ui: the new reply / field codes need their texts
+ctl s6-api-set-url-mask-stored rpcd fail 'rpcd/set_url/masked-url-sent-back-unchanged ' \
+	"$LIBX/api.uc" "		if (prim && url == mask_url(prim.url)) return { ok: true, code: 'unchanged', actions: [] };" '		;'
+ctl s6-api-delete-awg-file-needs-live rpcd fail 'rpcd/delete_node/awg-file-not-in-the-pool ' \
+	"$LIBX/api.uc" "			if ((!r || !r.node) && is_id(k)) r = { id: k, tag: null, node: null, awg_file: true };" '			;'
 ctl s6-ui-no-hidden-text ui-unit fail 'every code the backend answers with has a human text' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "	hidden:             _('Hidden." "	hidden_x:           _('Hidden."
 ctl s6-ui-no-bad-path-text ui-unit fail 'every code the backend answers with has a human text' \
