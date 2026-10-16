@@ -11,8 +11,10 @@
 //       the two — and/or "bot" (init.d reload: Telegram bot) / "sched" (rewrite the crontab).
 //   api.uc analyze                 stdin {text}  -> {ok, code, items:[{line, kind, status, ...}]}
 //   api.uc add                     stdin {text?, items?, lines?, options?} -> writes manual_node /
-//                                  extra_sub, {ok, code, added, dup, failed:[{line, reason}], actions,
-//                                  probes:[{line, fetched, http}]}. A subscription URL is taken only
+//                                  extra_sub / /etc/vpnpool/awg/<id>.conf, {ok, code, added, dup,
+//                                  failed:[{line, reason}], actions, probes:[{line, fetched, http}],
+//                                  awg_ids?, warning? (engine_missing|engine_no_awg: an AWG node
+//                                  is stored deferred until the engine is installed)}. A subscription URL is taken only
 //                                  after a trial download that yields nodes (else fetch_failed) —
 //                                  the same rule as add_sub (add_sub goes through here).
 //   api.uc resolve_url <opt[,opt]> <value>   the configured URL equal to <value>, or the one
@@ -32,14 +34,18 @@
 // Field error codes (machine codes; the human texts live in the UI translations):
 //   bad_type bad_value too_small too_large bad_time bad_url bad_domain bad_community bad_ipv4
 //   bad_mac bad_ifname bad_mark bad_token bad_chat bad_tag unknown_field
-// analyze item: kind link|subscription_url|awg|unknown; status add|dup|skip|pending_stage4;
-//   reason (skip: the parser.uc --report code; dup: exists|repeated; awg: needs_stage4).
+// analyze item: kind link|subscription_url|awg|unknown; status add|dup|skip;
+//   reason (skip: the parser.uc --report code, + field for an AWG .conf value; a vpn:// link:
+//   api_key full_access unsupported_container (+found) no_conf decode_failed (+detail);
+//   dup: exists|repeated). awg items: type awg|wireguard, id, name, server, port, hints?
+//   (awg_random_trailers), deferred? (engine_missing|engine_no_awg: stored, waits for the
+//   engine). summary.pending = items that will be stored deferred.
 'use strict';
 
-import { readfile, writefile, stdin, popen, unlink, mkdir, stat } from 'fs';
+import { readfile, writefile, stdin, popen, unlink, mkdir, stat, lsdir, rename } from 'fs';
 import { cursor } from 'uci';
 import { rand } from 'math';
-import { VALID_COMMUNITY, read_json, mask_url, mask_token, str_key, as_list } from './common.uc';
+import { VALID_COMMUNITY, read_json, mask_url, mask_token, str_key, as_list, engine_select } from './common.uc';
 
 const SB = '/tmp/vpnpool';
 const PARSER = '/usr/libexec/vpnpool/parser.uc';
@@ -333,9 +339,99 @@ function parse_json_file(cmd) {
 
 const MAX_LINES = 1000;
 
+// ---- AmneziaWG / WireGuard (ROADMAP 4.3-4.5, 4.7) ----
+// A .conf (pasted, or decoded from a vpn:// link by awgdecode.uc --json) is checked by the SAME
+// parser the build uses (--report: id = sha256 of the private key, type awg|wireguard, the
+// reason of a refusal); add() stores it as /etc/vpnpool/awg/<id>.conf with "# Name = …" on top.
+// An AWG node the engine can't run is still stored — DEFERRED (owner's decision 14.10.2026):
+// the item carries deferred:"engine_missing"|"engine_no_awg" and add() answers ok + warning.
+const AWGDEC = '/usr/libexec/vpnpool/awgdecode.uc';
+const AWG_DIR = '/etc/vpnpool/awg';
+const BAD_NODES = SB + '/.bad_nodes.json';
+// awgdecode E_* -> analyze reason
+const DEC_REASON = { E_API_KEY: 'api_key', E_FULL_ACCESS: 'full_access',
+	E_NO_SUPPORTED_CONTAINER: 'unsupported_container', E_NO_CONF: 'no_conf' };
+// add(): the node is stored but waits for the engine (ok:true + this warning)
+const ADD_WARN = { engine_missing: { warning: 'engine_missing' }, engine_no_awg: { warning: 'engine_no_awg' } };
+
+let AN = null;   // per-call state: known AWG ids, engine
+function awg_known_ids() {
+	if (AN.ids) return AN.ids;
+	let ids = {};
+	let files = [];
+	for (let f in (lsdir(AWG_DIR) ?? [])) if (match(f, /\.conf$/)) push(files, sq(AWG_DIR + '/' + f));
+	if (length(files))
+		for (let r in parse_json_file(sprintf('ucode %s --report --with-id %s 2>/dev/null', PARSER, join(' ', files))))
+			if (r.status == 'ok' && r.id) ids[r.id] = true;
+	// only the stored files: the build's lists (nodes.json, deferred.json) can be older than them
+	AN.ids = ids;
+	return ids;
+}
+function awg_engine() {
+	if (AN.eng == null) AN.eng = engine_select(cursor().get('vpnpool', 'main', 'singbox_bin'), true);
+	return AN.eng;
+}
+// a display name for a "# Name =" comment: one line, no control characters, bounded
+function clean_name(s) {
+	if (type(s) != 'string') return null;
+	s = trim(replace(s, /[[:cntrl:]]+/g, ' '));
+	if (length(s) > 64) s = substr(s, 0, 64);
+	return length(s) ? s : null;
+}
+// one .conf -> analyze item (nothing written); AN.confs[line] keeps what add() stores
+function awg_item(conf, ln, name, host) {
+	mkdir(SB);
+	let f = sprintf('%s/.an.awg.%d.%d', SB, time(), rand());
+	writefile(f, conf);
+	let rep = parse_json_file(sprintf('ucode %s --report --with-id %s 2>/dev/null', PARSER, sq(f)));
+	unlink(f);
+	let r = rep[0] ?? { status: 'skip', reason: 'parse_error' };
+	let it = { line: ln, kind: 'awg' };
+	if (r.status != 'ok') {
+		it.status = 'skip'; it.reason = r.reason ?? 'parse_error';
+		if (r.field) it.field = r.field;
+		return it;
+	}
+	it.type = r.type; it.id = r.id;
+	it.name = clean_name(name) ?? r.tag;
+	it.server = r.server ?? host; it.port = r.port;
+	if (r.hints) it.hints = r.hints;
+	if (awg_known_ids()[r.id] || stat(AWG_DIR + '/' + r.id + '.conf')) { it.status = 'dup'; it.reason = 'exists'; }
+	else if (AN.seen[r.id]) { it.status = 'dup'; it.reason = 'repeated'; }
+	else {
+		it.status = 'add'; AN.seen[r.id] = true;
+		AN.confs['' + ln] = { conf: conf, name: it.name, id: r.id };
+		if (r.type == 'awg' && awg_engine().reason) it.deferred = awg_engine().reason;
+	}
+	return it;
+}
+// one vpn:// token (the link, its wrapped continuation lines joined) -> items
+function vpn_items(token, ln) {
+	mkdir(SB);
+	let f = sprintf('%s/.an.vpn.%d.%d', SB, time(), rand());
+	writefile(f, token + '\n');
+	let d = null;
+	try { d = json(run(sprintf('ucode %s --json < %s 2>/dev/null', AWGDEC, sq(f)))); } catch (e) { d = null; }
+	unlink(f);
+	if (type(d) != 'object') return [ { line: ln, kind: 'awg', status: 'skip', reason: 'decode_failed' } ];
+	if (d.ok !== true || type(d.items) != 'array' || !length(d.items)) {
+		let it = { line: ln, kind: 'awg', status: 'skip', reason: DEC_REASON[d.code] ?? 'decode_failed' };
+		if (!DEC_REASON[d.code] && type(d.code) == 'string') it.detail = d.code;
+		if (type(d.found) == 'array') it.found = d.found;
+		return [ it ];
+	}
+	let out = [];
+	for (let x in d.items) {
+		if (x?.kind == 'awg' || x?.kind == 'wireguard') push(out, awg_item(x.conf, ln, x.name, x.host));
+		else if (x?.kind == 'link' && type(x.link) == 'string') push(out, { line: ln, link: x.link });
+	}
+	return out;
+}
+
 // -> { items: [...], lines: { lineno: text } }  (text = the line as it will be stored)
-function analyze(text) {
+function analyze(text, nowrap) {
 	let items = [], texts = {};
+	AN = { ids: null, eng: null, seen: {}, confs: {} };
 	if (type(text) != 'string') return null;
 	let t = trim(text);
 	if (substr(t, 0, 3) == '\xef\xbb\xbf') t = trim(substr(t, 3));
@@ -344,9 +440,9 @@ function analyze(text) {
 		let dec = b64_any(t);
 		if (dec && (index(dec, '://') >= 0 || index(lc(dec), '[interface]') >= 0)) t = trim(dec);
 	}
-	// AmneziaWG / WireGuard .conf: one config per paste — the import path of stage 4
+	// AmneziaWG / WireGuard .conf: one config per paste
 	if (index(lc(t), '[interface]') >= 0) {
-		push(items, { line: 1, kind: 'awg', status: 'pending_stage4', reason: 'needs_stage4' });
+		push(items, awg_item(t, 1, null, null));
 		return { items: items, lines: texts };
 	}
 	let c0 = substr(t, 0, 1);
@@ -365,10 +461,28 @@ function analyze(text) {
 	for (let x in as_list(u.get('vpnpool', 'main', 'extra_sub'), true)) subs[x] = true;
 
 	let cand = [], cand_line = [], ln = 0, seen_url = {};
+	// vpn:// (AmneziaVPN): a messenger wraps the long link over several lines — the lines right
+	// after it that only continue the base64 belong to it (a line is continued only while the
+	// line before is long, >= WRAP_MIN: a wrap cuts a long line; the last, short piece ends it).
+	// nowrap (add with items[]): every item is a line of its own. Each link is decoded alone.
+	const WRAP_MIN = 32;
+	let toks = [], tok = null, prev_len = 0;
 	for (let line in split(t, /\r?\n/)) {
 		ln++;
 		if (ln > MAX_LINES) { push(items, { line: ln, kind: 'unknown', status: 'skip', reason: 'too_many_lines' }); break; }
 		line = trim(line);
+		if (tok && !nowrap && prev_len >= WRAP_MIN && length(line) && match(line, /^[A-Za-z0-9+\/=_-]+$/)) {
+			tok.text += '\n' + line; prev_len = length(line);
+			continue;
+		}
+		tok = null;
+		let vp = index(lc(line), 'vpn://');
+		if (vp >= 0) {
+			tok = { line: ln, text: substr(line, vp) };
+			prev_len = length(tok.text);
+			push(toks, tok);
+			continue;
+		}
 		if (!length(line) || substr(line, 0, 1) == '#' || substr(line, 0, 2) == '//') continue;
 		texts[ln] = line;
 		if (match(line, /^https?:\/\//i)) {
@@ -380,12 +494,13 @@ function analyze(text) {
 			push(items, it);
 			continue;
 		}
-		if (match(line, /^vpn:\/\//i)) {
-			push(items, { line: ln, kind: 'awg', status: 'pending_stage4', reason: 'needs_stage4' });
-			continue;
-		}
 		push(cand, line); push(cand_line, ln);
 	}
+	for (let tk in toks)
+		for (let it in vpn_items(tk.text, tk.line)) {
+			if (it.link) { texts[it.line] = it.link; push(cand, it.link); push(cand_line, it.line); }   // xray / ss
+			else push(items, it);
+		}
 	if (length(cand)) {
 		mkdir(SB);
 		let NEWF = SB + '/.an.new', EXF = SB + '/.an.exist';
@@ -461,13 +576,18 @@ function add(input) {
 		pick = {};
 		for (let l in input.lines) pick['' + l] = true;
 	}
-	let a = analyze(text);
+	let a = analyze(text, type(input.items) == 'array');
 	let u = cursor();
-	let added = 0, dup = 0, failed = [], acts = {}, addlinks = [], addurls = [], probes = [];
+	let added = 0, dup = 0, failed = [], acts = {}, addlinks = [], addurls = [], probes = [], addawg = [], awg_ids = [], warning = null;
 	for (let it in a.items) {
 		if (pick && !pick['' + it.line]) continue;
 		if (it.status == 'dup') { dup++; continue; }
-		if (it.status != 'add') { push(failed, { line: it.line, reason: it.reason ?? it.status }); continue; }
+		if (it.status != 'add') {
+			let fl = { line: it.line, reason: it.reason ?? it.status };
+			if (it.field) fl.field = it.field;
+			push(failed, fl);
+			continue;
+		}
 		let line = a.lines[it.line];
 		if (it.kind == 'subscription_url') {
 			let pr = sub_probe(line);
@@ -475,10 +595,39 @@ function add(input) {
 			if (pr.n < 1) { push(failed, { line: it.line, reason: 'fetch_failed', http: pr.http }); continue; }
 			push(addurls, line); acts.USR2 = true;
 		} else if (it.kind == 'link') { push(addlinks, line); acts.USR1 = true; }
+		else if (it.kind == 'awg' && AN.confs['' + it.line]) {
+			let c = AN.confs['' + it.line];
+			push(addawg, { id: c.id, name: c.name, conf: c.conf });
+			if (it.deferred) warning = it.deferred;
+			acts.USR1 = true;
+		}
 		else { push(failed, { line: it.line, reason: 'unsupported' }); continue; }
 		added++;
 	}
-	if (added) {
+	// AWG / WireGuard: /etc/vpnpool/awg/<id>.conf, the name as a "# Name =" comment on top
+	// (written atomically; the parser reads the name back as the node's tag)
+	for (let a in addawg) {
+		mkdir('/etc/vpnpool'); mkdir(AWG_DIR);
+		let body = [ '# Name = ' + a.name ];
+		for (let l in split(a.conf, /\r?\n/))
+			if (!match(l, /^[#;][ \t]*[Nn][Aa][Mm][Ee][ \t]*=/)) push(body, l);
+		let dst = AWG_DIR + '/' + a.id + '.conf', tmp = dst + '.tmp.' + time();
+		if (writefile(tmp, join('\n', body) + '\n') == null || !rename(tmp, dst)) {
+			unlink(tmp);
+			return { ok: false, code: 'write_failed' };
+		}
+		push(awg_ids, a.id);
+	}
+	// a node re-added by the user gets a new try even if the start guard set it aside
+	if (length(awg_ids)) {
+		let bad = read_json(BAD_NODES, null);
+		if (type(bad) == 'object') {
+			let ch = false;
+			for (let i in awg_ids) if (bad[i] != null) { delete bad[i]; ch = true; }
+			if (ch) writefile(BAD_NODES, sprintf('%J', bad));
+		}
+	}
+	if (length(addlinks) || length(addurls)) {
 		let ml = as_list(u.get('vpnpool', 'main', 'manual_node'), true);
 		let es = as_list(u.get('vpnpool', 'main', 'extra_sub'), true);
 		for (let x in addlinks) push(ml, x);
@@ -490,8 +639,12 @@ function add(input) {
 		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };
 	}
 	let actions = acts.USR2 ? [ 'USR2' ] : (acts.USR1 ? [ 'USR1' ] : []);
-	return { ok: added > 0, code: added > 0 ? 'added' : 'nothing_added', added: added, dup: dup,
+	let res = { ok: added > 0, code: added > 0 ? 'added' : 'nothing_added', added: added, dup: dup,
 		failed: failed, probes: probes, actions: actions };
+	if (length(awg_ids)) res.awg_ids = awg_ids;
+	// stored, but it waits for the AmneziaWG engine (deferred): say so
+	if (added > 0 && ADD_WARN[warning]) res.warning = ADD_WARN[warning].warning;
+	return res;
 }
 
 // ---------------------------------------------------------------- misc
@@ -519,7 +672,8 @@ const EXTRA_CHECKS = {
 	route_priority: (v) => chk_int(v, 1, 32767),
 	speedtest_url:  (v) => chk_url(v, true),
 	selected_node:  (v) => chk_tag(v),
-	probe_ua:       (v) => chk_re(v, /^[[:print:]]{1,1024}$/, 'bad_value', false)
+	probe_ua:       (v) => chk_re(v, /^[[:print:]]{1,1024}$/, 'bad_value', false),
+	singbox_bin:    (v) => chk_re(v, /^\/[A-Za-z0-9._\/-]{1,255}$/, 'bad_value', false)
 };
 const EXTRA_URL_LISTS = { extra_sub: 1, source: 1 };
 function check_config(dir, savedir) {
@@ -593,7 +747,7 @@ if (cmd == 'set_config') {
 		summary: { add: length(filter(a.items, (i) => i.status == 'add')),
 		           dup: length(filter(a.items, (i) => i.status == 'dup')),
 		           skip: length(filter(a.items, (i) => i.status == 'skip')),
-		           pending: length(filter(a.items, (i) => i.status == 'pending_stage4')) } });
+		           pending: length(filter(a.items, (i) => i.status == 'add' && i.deferred)) } });
 } else if (cmd == 'add') {
 	out(add(read_input()));
 } else if (cmd == 'resolve_url') {
