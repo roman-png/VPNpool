@@ -58,7 +58,7 @@ function fixture(over) {
 			{ tag: 'My link', id: ID.M, proto: 'vmess', server: 'm.example', delay: 50, source: 'manual', favorite: true },
 			{ tag: 'Home AWG', id: ID.W, proto: 'awg', server: 'w.example', delay: null, source: 'awg', deferred: true, reason: 'engine_missing' }
 		],
-		auto_member_ids: [ ID.A, ID.B, ID.D, ID.M ],   // Charlie is excluded by the user
+		auto_member_ids: [], auto_exclude_ids: [ ID.C ],   // Charlie is excluded by the user
 		dead_ids: [ ID.B ], kept_ids: [],
 		favorites: [ { id: ID.M, tag: 'My link', in_pool: true }, { id: ID.F, tag: 'Old favourite', in_pool: false, type: 'vless' } ],
 		hidden: [ { id: ID.H, tag: 'Hidden one', type: 'vless', in_source: true } ],
@@ -131,7 +131,7 @@ test('groups by source, state words of every kind of card, no innerHTML', async 
 	eq(A.querySelector('.vp-card-sub').textContent, 'VLESS · 85 ms', 'Alpha type and delay');
 	eq(badgesOf(A), [ 'YouTube/vp-badge-ok', 'Netflix/vp-badge-error' ], 'service badges');
 	eq(primaryOf(A).textContent, 'Connect', 'Alpha main button');
-	eq(stateOf(card(root, 'Bravo')), 'Does not open www.youtube.com, so it is left out of the automatic choice', 'dead node');
+	eq(stateOf(card(root, 'Bravo')), 'Does not open one of the checked sites (www.youtube.com, openai.com), so it is left out of the automatic choice', 'dead node: the strict check over two sites');
 	ok(card(root, 'Bravo').classes.has('vp-dimmed'), 'dead node dimmed');
 	eq(stateOf(card(root, XSS)), 'Excluded by you from the automatic choice', 'excluded node');
 	eq(stateOf(card(root, 'Delta')), 'In the automatic choice', 'plain node');
@@ -337,10 +337,12 @@ test('"⋯" menu: favourites, hide and return, the automatic choice; the menu fo
 	t.env.handlers.restore_node = () => ({ ok: true, code: 'saved', daemon: 'signalled' });
 	clickMenu(t, card(root, 'Bravo'), 'Return to the automatic choice'); await settle(t);
 	eq(t.calls('restore_node'), [ { id: ID.B } ], 'a node that fails the check: kept by the user');
-	t.env.handlers.set_auto_members = () => ({ ok: true, code: 'saved', daemon: 'signalled' });
+	t.env.handlers.auto_include = () => ({ ok: true, code: 'saved', daemon: 'signalled' });
+	t.env.handlers.auto_exclude = () => ({ ok: true, code: 'saved', daemon: 'signalled' });
 	clickMenu(t, card(root, 'Charlie'), 'Return to the automatic choice'); await settle(t);
 	clickMenu(t, card(root, 'Alpha'), 'Exclude from the automatic choice'); await settle(t);
-	eq(t.calls('set_auto_members'), [ { members: [] }, { members: [ ID.B, ID.D, ID.M ] } ], 'back = every node (empty list), exclude = the rest');
+	eq([ t.calls('auto_include'), t.calls('auto_exclude') ], [ [ { id: ID.C } ], [ { id: ID.A } ] ], 'one node in, one node out — by id, nothing about the others');
+	eq(t.calls('set_auto_members').length, 0, 'no "everyone but" list written');
 });
 
 test('bulk panel only with a selection; bulk delete asks first and is one call', async (t) => {
@@ -428,12 +430,78 @@ test('service off: a banner; nothing at all: the empty state with "+ Add"', asyn
 	ok(b.hidden, 'banner gone when the service runs');
 });
 
+// ui1 review: who takes part in the automatic choice is said the way the engine config is built
+test('automatic choice by the engine\'s rule: a stale member list excludes nobody, "favourites only", the dialog', async (t) => {
+	const stale = fixture(s => { s.auto_member_ids = [ '0000000000c1' ]; s.auto_exclude_ids = []; });
+	ok(!stale.nodes.some(n => stale.auto_member_ids.includes(n.id)), 'fixture: the member list names no node of the build');
+	const root = await open(t, stale);
+	const words = cards(root).map(stateOf);
+	ok(!words.some(w => /Excluded by you|Not on the list/.test(w)), 'nobody is left out by a stale list: ' + JSON.stringify(words));
+	ok(menuLabels(card(root, 'Charlie')).includes('Exclude from the automatic choice'), '"Exclude" is offered (it will act)');
+	t.v.handleAutoPool();
+	const boxes = modal(t).querySelectorAll('.vp-pick-item').map(l => l.querySelector('input'));
+	eq([ boxes.length, boxes.filter(b => b.checked).length ], [ 5, 5 ], 'the dialog: every node of the build checked');
+	// a member list in effect (1.x): the others are off it, "Return" puts one back
+	await poll(t, fixture(s => { s.auto_member_ids = [ ID.A ]; s.auto_exclude_ids = []; }));
+	eq(stateOf(card(root, 'Delta')), 'Not on the list of nodes for the automatic choice', 'off a member list in effect');
+	t.env.handlers.auto_include = () => ({ ok: true, code: 'saved', daemon: 'signalled' });
+	clickMenu(t, card(root, 'Delta'), 'Return to the automatic choice'); await settle(t);
+	eq(t.calls('auto_include'), [ { id: ID.D } ], 'return by id');
+	// "favourites only" with a favourite in the pool: the others are not in the automatic choice
+	await poll(t, fixture(s => { s.settings.favorites_only = true; }));
+	eq(stateOf(card(root, 'Delta')), 'Not in the automatic choice: "favourites only" is on', 'favourites only');
+	eq(stateOf(card(root, 'My link')), 'In the automatic choice', 'the favourite takes part');
+	ok(!menuLabels(card(root, 'Delta')).some(l => /automatic choice/.test(l)), 'no Exclude / Return that would change nothing');
+	await poll(t, fixture(s => { s.settings.favorites_only = true; s.nodes.forEach(n => { n.favorite = false; }); }));
+	eq(stateOf(card(root, 'Delta')), 'In the automatic choice', 'favourites only without a favourite in the pool: no effect');
+	// the dialog saves exclusions (and drops a 1.x member list) in one call
+	await poll(t, fixture());
+	t.env.handlers.set_config = () => ({ ok: true, code: 'saved', daemon: 'signalled' });
+	t.v.handleAutoPool();
+	const b2 = modal(t).querySelectorAll('.vp-pick-item').map(l => l.querySelector('input'));
+	eq(b2.map(b => b.checked), [ true, true, false, true, true ], 'checked = not excluded (Charlie is)');
+	check(t, b2[3], false);
+	click(t, modal(t).querySelectorAll('button').find(b => b.textContent === 'Save')); await settle(t);
+	eq(t.calls('set_config'), [ { settings: { auto_members: [], auto_excludes: [ ID.C, ID.D ] } } ], 'exclusions saved');
+});
+
+test('a hidden favourite is one card (in "Hidden"), not also "not among the nodes"', async (t) => {
+	const root = await open(t, fixture(s => { s.favorites.push({ id: ID.H, tag: 'Hidden one', in_pool: false, type: 'vless' }); }));
+	eq(cards(root).filter(c => titleOf(c) === 'Hidden one').length, 1, 'one card');
+	eq(group(root, 'Favourites no subscription has').querySelectorAll('.vp-card').map(titleOf), [ 'Old favourite' ], 'favourites group');
+	ok(badgesOf(card(root, 'Hidden one')).includes('Favourite/vp-badge-info'), 'the hidden card says it is a favourite');
+	eq(stateOf(card(root, 'Old favourite')), 'Not among the nodes now: it is kept in your favourites and connects with one button', 'favourite text claims only what is known');
+});
+
+test('picking nodes shows only the result of OUR probe; a long list says it is cut', async (t) => {
+	const root = await open(t, fixture());
+	const acts = group(root, 'Main provider').querySelector('.vp-group-actions');
+	// another window is checking another address
+	t.env.handlers.probe_source = () => ({ ok: true, code: 'already_running', daemon: 'n/a', running: true, already: true });
+	t.env.handlers.probe_result = () => ({ ok: true, code: 'done', running: false, nodes: [ { id: ID.N, tag: 'Foreign' } ] });
+	clickMenu(t, acts, 'Pick nodes…'); await t.env.tick(5000);
+	eq(t.calls('probe_result').length, 0, 'no poll of someone else\'s check');
+	ok(/Another address is being checked/.test(modal(t).querySelector('.vp-pick-box').textContent), 'said: ' + modal(t).querySelector('.vp-pick-box').textContent);
+	// our start, but the result is another job's
+	t.env.handlers.probe_source = () => ({ ok: true, code: 'started', daemon: 'n/a', running: true, job: 'ours' });
+	t.env.handlers.probe_result = () => ({ ok: true, code: 'done', running: false, job: 'theirs', nodes: [ { id: ID.N, tag: 'Foreign' } ] });
+	clickMenu(t, acts, 'Pick nodes…'); await t.env.tick(5000);
+	eq(modal(t).querySelectorAll('.vp-pick-item').length, 0, 'a foreign result is not shown');
+	ok(modal(t).querySelectorAll('button').find(b => b.textContent === 'Save').disabled, 'and cannot be saved');
+	// ours, cut on the router
+	t.env.handlers.probe_result = () => ({ ok: true, code: 'done', running: false, job: 'ours', total: 512, shown: 2, capped: true,
+		nodes: [ { id: ID.A, tag: 'Alpha' }, { id: ID.C, tag: 'Charlie' } ] });
+	clickMenu(t, acts, 'Pick nodes…'); await t.env.tick(5000);
+	eq(modal(t).querySelectorAll('.vp-pick-item').length, 3, 'positive control: our result shown ("every node" + 2)');
+	eq(modal(t).querySelector('.vp-pick-capped').textContent, 'Shown: the first 2 of 512 nodes.', 'the cut is said');
+});
+
 test('only the 2.0 methods: no legacy call, every method known to common.js, no own rpc', async (t) => {
 	const src = t.viewSrc;   // the source under test (a mutation of --negative included)
 	const used = new Set([ ...src.matchAll(/(?:common\.call|pollResult)\('([a-z_]+)'/g) ].map(m => m[1]));
 	ok(used.size >= 15, 'positive control: methods found ' + used.size);
 	const LEGACY = [ 'select', 'set_preferred', 'save_node', 'unsave_node', 'activate_saved', 'deactivate_saved', 'add_node', 'del_node',
-		'import_nodes', 'set_url', 'del_subscription', 'del_source', 'add_sub', 'del_sub', 'import_select', 'set_option' ];
+		'import_nodes', 'set_url', 'del_subscription', 'del_source', 'add_sub', 'del_sub', 'import_select', 'set_option', 'set_auto_members' ];
 	eq([ ...used ].filter(m => LEGACY.includes(m)), [], 'legacy methods used');
 	eq([ ...used ].filter(m => !t.common.METHODS[m]), [], 'methods unknown to common.js');
 	ok(!/rpc\.declare|'require rpc'/.test(src), 'no own rpc declarations');
@@ -463,7 +531,16 @@ const MUTATIONS = [
 	{ name: 'cards rebuilt on every poll', from: "if (C) self.updateCard(C, it); else C = self.cards[it.key] = self.makeCard(it);", to: "C = self.cards[it.key] = self.makeCard(it);", expect: [ 'a poll updates cell by cell: same elements, focus kept, no reordering; gone and new cards' ] },
 	{ name: 'cards moved even when in place', from: "if (cur === el) return;\n", to: "if (cur === el) parent.removeChild(el);\n", expect: [ 'a poll updates cell by cell: same elements, focus kept, no reordering; gone and new cards' ] },
 	{ name: 'raw LuCI E (strings into innerHTML)', from: "var E = common.E;", to: "var E0 = common.E;", expect: [ 'groups by source, state words of every kind of card, no innerHTML' ] },
-	{ name: 'excluded nodes not recognised', from: "var excluded = members.length > 0 && members.indexOf(n.id) < 0;", to: "var excluded = false;", expect: [ 'groups by source, state words of every kind of card, no innerHTML' ] },
+	{ name: 'excluded nodes not recognised', from: "var excl = arr(st && st.auto_exclude_ids);", to: "var excl = [];", expect: [ 'groups by source, state words of every kind of card, no innerHTML' ] },
+	{ name: 'a stale member list counts (the old formula)', from: "var members = arr(st && st.auto_member_ids).filter(function(i) { return has(ids, i); });", to: "var members = arr(st && st.auto_member_ids);", expect: [ 'automatic choice by the engine\'s rule: a stale member list excludes nobody, "favourites only", the dialog' ] },
+	{ name: '"favourites only" ignored', from: "if (((st && st.settings) || {}).favorites_only) {", to: "if (false) {", expect: [ 'automatic choice by the engine\'s rule: a stale member list excludes nobody, "favourites only", the dialog' ] },
+	{ name: 'the card computes its own "excluded"', from: "var why = autoPool(st).why(n.id);", to: "var why = (arr(st.auto_member_ids).length && arr(st.auto_member_ids).indexOf(n.id) < 0) ? 'not_member' : autoPool(st).why(n.id);", expect: [ 'automatic choice by the engine\'s rule: a stale member list excludes nobody, "favourites only", the dialog' ] },
+	{ name: 'exclusion written as "everyone but"', from: "common.call('auto_exclude', { id: idOf(n) }", to: "common.call('set_auto_members', { members: autoPool(this.st).participants.filter(function(i) { return i !== n.id; }) }", expect: [ '"⋯" menu: favourites, hide and return, the automatic choice; the menu follows the node', 'only the 2.0 methods: no legacy call, every method known to common.js, no own rpc' ] },
+	{ name: 'a hidden favourite shown twice', from: "return f && f.id && !f.in_pool && !hiddenIds[f.id];", to: "return f && f.id && !f.in_pool;", expect: [ 'a hidden favourite is one card (in "Hidden"), not also "not among the nodes"' ] },
+	{ name: 'already_running taken as our start', from: "if (r && r.code === 'already_running') throw new common.Error('probe_busy', 'probe_source', r);", to: "", expect: [ 'picking nodes shows only the result of OUR probe; a long list says it is cut' ] },
+	{ name: 'the probe job not compared', from: "if (job != null && (!res || res.job !== job))", to: "if (false)", expect: [ 'picking nodes shows only the result of OUR probe; a long list says it is cut' ] },
+	{ name: 'a cut list not said', from: "var capped = !!(res && res.capped && res.total > nodes.length);", to: "var capped = false;", expect: [ 'picking nodes shows only the result of OUR probe; a long list says it is cut' ] },
+	{ name: 'the first checked site named for a strict check over several', from: "if (s.length > 1) return", to: "if (false) return", expect: [ 'groups by source, state words of every kind of card, no innerHTML' ] },
 	{ name: 'deferred node can be connected', from: "primary: n.deferred ? { label: _('Connect'), disabled: true }", to: "primary: false ? { label: _('Connect'), disabled: true }", expect: [ 'groups by source, state words of every kind of card, no innerHTML' ] },
 	{ name: 'add ignores the checkboxes', from: "if (!row.cb || !row.cb.checked) return;", to: "if (!row.cb) return;", expect: [ '"+ Add": a chip and a reason per line, add sends the checked lines, the result names the error lines' ] },
 	{ name: 'result leaves out the lines the check refused', from: "else if (it.status !== 'add') errLines.push(it.line);", to: "", expect: [ '"+ Add": a chip and a reason per line, add sends the checked lines, the result names the error lines' ] },

@@ -25,6 +25,7 @@ var E = common.E;
 // bytes of the text in one request: the router's web server takes a JSON-RPC request up to ~64 KB
 // (stand 24.10: 63.5 KB of text passed, 70 KB -> "parse error"); the rest of the request fits
 var MAX_TEXT = 60 * 1024;
+var MAX_REQUEST = 63 * 1024;   // one "add" request as a whole (its JSON arguments)
 var MAX_FILE = 1024 * 1024;   // a file bigger than this is surely not a list of links
 var LS_KEY = 'vpnpool.nodes.collapsed';
 
@@ -46,8 +47,9 @@ var CSS = [
 	'.vp-group-count{font-weight:normal;color:var(--text-color-medium,GrayText);white-space:nowrap}',
 	'.vp-group-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.4em}',
 	'.vp-group-info{flex:1 1 100%;min-width:0;color:var(--text-color-medium,GrayText);font-size:.92em;overflow-wrap:anywhere}',
-	'.vp-group-info [data-kind=error]{color:var(--error-color-medium,var(--danger-color,inherit))}',
-	'.vp-group-info [data-kind=warn]{color:var(--warn-color-high,var(--warning-color,inherit))}',
+	// the same readable mix of the theme colours as common.js (>= 4.5:1, measured)
+	'.vp-group-info [data-kind=error]{color:var(--error-color-medium,var(--danger-color,inherit));color:color-mix(in srgb,var(--error-color-medium,var(--danger-color,#c62828)) 55%,var(--text-color-high,CanvasText))}',
+	'.vp-group-info [data-kind=warn]{color:var(--warn-color-high,var(--warning-color,inherit));color:color-mix(in srgb,var(--warn-color-high,var(--warning-color,#b58900)) 35%,var(--text-color-high,CanvasText))}',
 	'.vp-group-empty{color:var(--text-color-medium,GrayText);margin:.2em 0 .6em}',
 	'.vp-bulk{position:sticky;bottom:0;z-index:120;display:flex;flex-wrap:wrap;align-items:center;gap:.5em;box-sizing:border-box;max-width:100%;margin:.6em 0 0;padding:.5em .6em;border:1px solid var(--border-color-medium,GrayText);border-radius:6px;background:var(--background-color-high,Canvas);color:var(--text-color-high,CanvasText)}',
 	'.vp-bulk-count{font-weight:bold;margin-right:auto}',
@@ -69,7 +71,7 @@ var CSS = [
 	'.vp-pick-item span{overflow-wrap:anywhere;min-width:0}',
 	'.vp-pick-tools{display:flex;flex-wrap:wrap;gap:.4em;align-items:center}',
 	'.vp-add-result{margin:.5em 0;overflow-wrap:anywhere}',
-	'.vp-add-result[data-kind=warn]{color:var(--warn-color-high,var(--warning-color,inherit))}',
+	'.vp-add-result[data-kind=warn]{color:var(--warn-color-high,var(--warning-color,inherit));color:color-mix(in srgb,var(--warn-color-high,var(--warning-color,#b58900)) 35%,var(--text-color-high,CanvasText))}',
 	'.vp-muted{color:var(--text-color-medium,GrayText)}',
 	'.vp-qr{display:flex;justify-content:center;min-height:220px;margin:.6em 0}',
 	'.vp-qr img,.vp-qr canvas{max-width:100%;height:auto}',
@@ -129,11 +131,19 @@ function deferredText(reason) {
 	if (reason === 'start_failed') return _('Set aside: the VPN engine could not start with it');
 	return _('Waits: it cannot work right now');
 }
-// the first checked site of the settings, as a host ("www.youtube.com"), for the state words
-function checkSite(st) {
-	var s = String(((st && st.settings) || {}).check_services || '').split(/[\s,]+/).filter(Boolean)[0];
-	if (!s) return _('the checked sites');
-	return s.replace(/^[a-z]+:\/\//i, '').replace(/[\/?#].*$/, '');
+/// the checked sites of the settings, as hosts ("www.youtube.com")
+function checkSites(st) {
+	return String(((st && st.settings) || {}).check_services || '').split(/[\s,]+/).filter(Boolean)
+		.map(function(s) { return s.replace(/^[a-z]+:\/\//i, '').replace(/[\/?#].*$/, ''); }).filter(Boolean);
+}
+// why a node failed the service check, in words. The check is strict (a node must open EVERY
+// checked site) and the backend does not say which site failed: with one site it is named, with
+// several the words say "one of them", with none it is the general connection check.
+function deadText(st) {
+	var s = checkSites(st);
+	if (s.length === 1) return _('Does not open %s, so it is left out of the automatic choice').format(s[0]);
+	if (s.length > 1) return _('Does not open one of the checked sites (%s), so it is left out of the automatic choice').format(s.join(', '));
+	return _('Fails the connection check, so it is left out of the automatic choice');
 }
 // the lines of a paste numbered as analyze numbers them (a leading byte-order mark and the blank
 // lines around the text dropped, then one line per newline)
@@ -143,9 +153,11 @@ function lineTexts(text) {
 	return t.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '').split(/\r?\n/).map(function(l) { return l.trim(); });
 }
 // bytes the text takes inside a JSON request (UTF-8, escapes included)
-function requestBytes(text) {
-	try { return unescape(encodeURIComponent(JSON.stringify(String(text)))).length; } catch (e) { return String(text).length * 3; }
+function jsonBytes(v) {
+	var j = JSON.stringify(v);
+	try { return unescape(encodeURIComponent(j)).length; } catch (e) { return j.length * 3; }
 }
+function requestBytes(text) { return jsonBytes(String(text)); }
 function shortLine(l) {
 	l = String(l || '');
 	return l.length > 60 ? l.slice(0, 57) + '…' : l;
@@ -279,10 +291,13 @@ function copyFrom(ta) {
 	common.toast(done ? _('Copied.') : _('Select the text and copy it.'));
 }
 
-// A list of nodes with checkboxes (the probe of a subscription address): {el, ids(), count}.
-function pickList(nodes, checked) {
+/// A list of nodes with checkboxes (the probe of a subscription address): {el, ids(), count}.
+// res: the probe result {nodes, total, shown, capped} — a long list is cut on the router, the
+// list says so.
+function pickList(res, checked) {
 	var boxes = [];
-	var items = arr(nodes).filter(function(n) { return n && n.id; }).map(function(n) {
+	var nodes = arr(res && res.nodes);
+	var items = nodes.filter(function(n) { return n && n.id; }).map(function(n) {
 		var cb = E('input', { 'type': 'checkbox', 'data-id': n.id });
 		cb.checked = !!checked(n);
 		boxes.push({ cb: cb, n: n });
@@ -293,11 +308,13 @@ function pickList(nodes, checked) {
 		]);
 	});
 	var set = function(pred) { boxes.forEach(function(b) { b.cb.checked = !!pred(b.n); }); };
+	var capped = !!(res && res.capped && res.total > nodes.length);
 	var el = E('div', {}, [
+		capped ? E('p', { 'class': 'vp-pick-capped' }, [ _('Shown: the first %d of %d nodes.').format(res.shown || nodes.length, res.total) ]) : '',
 		E('div', { 'class': 'vp-pick-tools' }, [
 			button(_('All'), '', function() { set(function() { return true; }); }),
 			button(_('Answering'), '', function() { set(function(n) { return n.delay != null && n.delay > 0; }); }),
-			button(_('None'), '', function() { set(function() { return false; }); })
+			button(_('Clear all'), '', function() { set(function() { return false; }); })
 		]),
 		E('div', { 'class': 'vp-pick-list' }, items.length ? items : [ E('em', { 'class': 'vp-muted' }, _('No nodes were found at this address.')) ])
 	]);
@@ -309,14 +326,62 @@ function pickList(nodes, checked) {
 	};
 }
 
-// Download + parse one subscription address on the router (in the background) -> its nodes
+// Download + parse one subscription address on the router (in the background) -> the probe
+// result {nodes, total, shown, capped}. Only the result of OUR start is taken: another window
+// may be checking another address (already_running -> refused, no poll), and a result whose job
+// token is not the one our start got belongs to someone else (refused, never saved).
 function probe(url) {
-	return common.call('probe_source', { url: url }, { quiet: true }).then(function() {
-		return pollResult('probe_result', 120000);
-	}).then(function(r) { return arr(r && r.nodes); }, function(e) {
+	return common.call('probe_source', { url: url }, { quiet: true }).then(function(r) {
+		if (r && r.code === 'already_running') throw new common.Error('probe_busy', 'probe_source', r);
+		var job = r && r.job;
+		return pollResult('probe_result', 120000).then(function(res) {
+			if (job != null && (!res || res.job !== job)) throw new common.Error('probe_busy', 'probe_result', res);
+			return res || {};
+		});
+	}).then(null, function(e) {
 		if (e instanceof common.Error && e.code === 'no_nodes') throw new common.Error('fetch_failed', 'probe_result', e.reply);
 		throw e;
 	});
+}
+function probeError(e) {
+	return (e instanceof common.Error && e.code === 'probe_busy')
+		? _('Another address is being checked right now. Try again when that check ends.') : common.errorText(e);
+}
+
+// Which nodes take part in the automatic choice — the ONE place that says it, the way the
+// engine config is built (generator.uc): the member list (1.x) counts only with ids of this
+// build, else every node; then the excluded ids leave (unless that would leave nothing); then
+// "favourites only" keeps the favourites (when one of them is left). Deferred nodes are not in
+// the config at all.
+function autoPool(st) {
+	var pool = arr(st && st.nodes).filter(function(n) { return n && n.id && !n.deferred; });
+	var ids = pool.map(function(n) { return n.id; });
+	var has = function(list, i) { return list.indexOf(i) >= 0; };
+	var members = arr(st && st.auto_member_ids).filter(function(i) { return has(ids, i); });
+	var base = members.length ? members : ids;
+	var excl = arr(st && st.auto_exclude_ids);
+	var after = base.filter(function(i) { return !has(excl, i); });
+	if (!after.length) after = base;
+	var favOnly = false;
+	if (((st && st.settings) || {}).favorites_only) {
+		var favs = pool.filter(function(n) { return n.favorite; }).map(function(n) { return n.id; });
+		var only = after.filter(function(i) { return has(favs, i); });
+		if (only.length) { after = only; favOnly = true; }
+	}
+	return {
+		ids: ids,
+		members: members,
+		participants: after,
+		favOnly: favOnly,
+		inAuto: function(id) { return has(after, id); },
+		// null (takes part) | 'excluded' | 'not_member' | 'favorites_only'
+		why: function(id) {
+			if (has(after, id) || !has(ids, id)) return null;
+			if (members.length && !has(members, id)) return 'not_member';
+			if (has(excl, id)) return 'excluded';
+			return favOnly ? 'favorites_only' : null;
+		}
+	};
 }
 
 // ---------------------------------------------------------------- groups and cards
@@ -331,10 +396,16 @@ function buildGroups(st) {
 		else mine.push(it);
 	});
 	arr(st.unreadable).forEach(function(u) { if (u && u.file) mine.push({ kind: 'unreadable', key: 'u:' + u.file, file: u }); });
-	var favOut = arr(st.favorites).filter(function(f) { return f && f.id && !f.in_pool; })
+	// a hidden node lives in "Hidden" only (a hidden favourite is out of the pool too, but its
+	// subscription may still have it: one fact, one card)
+	var hiddenIds = {};
+	arr(st.hidden).forEach(function(h) { if (h && h.id) hiddenIds[h.id] = true; });
+	var favOut = arr(st.favorites).filter(function(f) { return f && f.id && !f.in_pool && !hiddenIds[f.id]; })
 		.map(function(f) { return { kind: 'favout', key: 'f:' + f.id, fav: f }; });
+	var favIds = {};
+	arr(st.favorites).forEach(function(f) { if (f && f.id) favIds[f.id] = true; });
 	var hidden = arr(st.hidden).filter(function(h) { return h && h.id; })
-		.map(function(h) { return { kind: 'hidden', key: 'h:' + h.id, hid: h }; });
+		.map(function(h) { return { kind: 'hidden', key: 'h:' + h.id, hid: h, favorite: !!favIds[h.id] }; });
 	var out = [];
 	subs.forEach(function(s) {
 		if (s && s.id) out.push({ id: 'sub:' + s.id, kind: 'sub', sub: s, title: s.name || _('Subscription'), items: bySub[s.id] });
@@ -601,7 +672,8 @@ return view.extend({
 			var f = it.fav;
 			return {
 				title: f.tag || f.id, sub: typeName(f.type),
-				state: _('Not in any subscription now: it is kept in your favourites and connects with one button'), stateKind: '',
+				// (a subscription may still have it but be turned off: the words claim only "not among the nodes")
+				state: _('Not among the nodes now: it is kept in your favourites and connects with one button'), stateKind: '',
 				badges: [ { text: _('Favourite'), kind: 'info' } ],
 				primary: { label: _('Connect') },
 				menu: [
@@ -616,7 +688,7 @@ return view.extend({
 			return {
 				title: h.tag || _('A node its subscription no longer has'), sub: typeName(h.type),
 				state: h.in_source === false ? _('Hidden by you. The subscription does not have it any more.') : _('Hidden by you: it is not used.'),
-				stateKind: '', badges: [], dimmed: true,
+				stateKind: '', badges: it.favorite ? [ { text: _('Favourite'), kind: 'info' } ] : [], dimmed: true,
 				primary: { label: _('Return') }, menu: [],
 				search: [ h.tag, h.server ].join(' ')
 			};
@@ -635,8 +707,7 @@ return view.extend({
 	nodeSpec: function(n, st) {
 		var self = this;
 		var activeTag = (st.active === 'auto' || !st.active) ? st.auto_now : st.active;
-		var members = arr(st.auto_member_ids);
-		var excluded = members.length > 0 && members.indexOf(n.id) < 0;
+		var why = autoPool(st).why(n.id);   // the one place that knows who takes part
 		var inUse = !!(st.running && n.tag && n.tag === activeTag);
 		var busy = this.busyNode[n.id];
 		var state, kind = '';
@@ -645,9 +716,11 @@ return view.extend({
 		else if (busy === 'unlock') state = _('Checking the services…');
 		else if (inUse) { state = n.preferred ? _('In use: chosen by you') : _('In use: automatic choice'); kind = 'ok'; }
 		else if (n.preferred) { state = _('Chosen by you, but not in use now: the automatic choice works instead'); kind = 'warn'; }
-		else if (n.dead && !n.kept) { state = _('Does not open %s, so it is left out of the automatic choice').format(checkSite(st)); kind = 'error'; }
+		else if (n.dead && !n.kept) { state = deadText(st); kind = 'error'; }
+		else if (why === 'excluded') state = _('Excluded by you from the automatic choice');
+		else if (why === 'not_member') state = _('Not on the list of nodes for the automatic choice');
+		else if (why === 'favorites_only') state = _('Not in the automatic choice: "favourites only" is on');
 		else if (n.kept) state = _('In the automatic choice: kept by you, although the check fails');
-		else if (excluded) state = _('Excluded by you from the automatic choice');
 		else state = _('In the automatic choice');
 
 		var badges = [];
@@ -669,22 +742,22 @@ return view.extend({
 			: { label: _('Add to favourites'), handler: function() { self.doFav(key, name); } });
 		menu.push({ label: _('QR code and link'), handler: function() { self.showLink(key, name); } });
 		if (!n.deferred) {
-			menu.push({ label: _('Speed test'), disabled: !!busy, handler: function() { self.doSpeedtest(n); } });
-			menu.push({ label: _('Check services'), disabled: !!busy, handler: function() { self.doUnlock(n); } });
-			if (n.dead && !n.kept) menu.push({ label: _('Return to the automatic choice'), handler: function() { self.doKeep(key, name); } });
-			else if (n.kept) menu.push({ label: _('Check it automatically again'), handler: function() { self.doUnkeep(key, name); } });
-			else if (excluded) menu.push({ label: _('Return to the automatic choice'), handler: function() { self.doInclude(n); } });
-			else menu.push({ label: _('Exclude from the automatic choice'), handler: function() { self.doExclude(n); } });
+			menu.push({ label: _('Speed test'), disabled: !!busy, handler: function() { self.doSpeedtest(self.current(n)); } });
+			menu.push({ label: _('Check services'), disabled: !!busy, handler: function() { self.doUnlock(self.current(n)); } });
+			if (why === 'excluded' || why === 'not_member') menu.push({ label: _('Return to the automatic choice'), handler: function() { self.doInclude(self.current(n)); } });
+			else if (n.dead && !n.kept) menu.push({ label: _('Return to the automatic choice'), handler: function() { self.doKeep(key, name); } });
+			else if (why !== 'favorites_only') menu.push({ label: _('Exclude from the automatic choice'), handler: function() { self.doExclude(self.current(n)); } });
+			if (n.kept) menu.push({ label: _('Check it automatically again'), handler: function() { self.doUnkeep(key, name); } });
 			if (n.source !== 'favorite') menu.push({ label: _('Hide'), handler: function() { self.doHide(key, name); } });
 		}
-		if (n.source !== 'favorite') menu.push({ label: _('Delete'), danger: true, handler: function() { self.handleDelete([ n ]); } });
+		if (n.source !== 'favorite') menu.push({ label: _('Delete'), danger: true, handler: function() { self.handleDelete([ self.current(n) ]); } });
 
 		var sub = n.deferred ? typeName(n.proto) : [ typeName(n.proto), delayText(n.delay) ].filter(Boolean).join(' · ');
 		return {
 			title: name, sub: sub, state: state, stateKind: kind, badges: badges,
 			primary: n.deferred ? { label: _('Connect'), disabled: true }
 				: (n.preferred ? { label: _('Back to automatic choice') } : { label: _('Connect'), disabled: !key }),
-			menu: menu, active: inUse, dimmed: !!(n.deferred || (n.dead && !n.kept) || excluded),
+			menu: menu, active: inUse, dimmed: !!(n.deferred || (n.dead && !n.kept) || why),
 			search: [ n.tag, n.server ].join(' ')
 		};
 	},
@@ -790,24 +863,23 @@ return view.extend({
 	doUnkeep: function(id, name) {
 		return this.after(common.call('refilter_node', { id: id }, { success: _('%s is checked automatically again.').format(name) }));
 	},
-	poolIds: function() {
-		return arr((this.st || {}).nodes).filter(function(n) { return n && n.id && !n.deferred; }).map(function(n) { return n.id; });
+	// the node as the last status has it (a menu is built once; its node may have changed since)
+	current: function(n) {
+		var cur = arr((this.st || {}).nodes).filter(function(x) { return x && n && x.id && x.id === n.id; })[0];
+		return cur || n;
 	},
-	setMembers: function(ids, success) {
-		var all = this.poolIds();
-		var everyone = all.every(function(i) { return ids.indexOf(i) >= 0; });
-		return this.after(common.call('set_auto_members', { members: everyone ? [] : ids }, { success: everyone ? _('Every node takes part in the automatic choice, new ones too.') : success }));
-	},
+	// exclusions are a list of EXCLUDED nodes in the backend: every other node takes part, new
+	// ones too; the engine never empties the automatic choice, so excluding the last one is refused here
 	doExclude: function(n) {
-		var members = arr(this.st.auto_member_ids);
-		var ids = (members.length ? members : this.poolIds()).filter(function(i) { return i !== n.id; });
-		if (!ids.length) { common.toast(_('At least one node must stay in the automatic choice.'), 'warning', 'auto-pool'); return Promise.resolve(); }
-		return this.setMembers(ids, _('Excluded from the automatic choice: %s').format(n.tag));
+		var p = autoPool(this.st || {});
+		if (p.participants.length === 1 && p.participants[0] === n.id) {
+			common.toast(_('At least one node must stay in the automatic choice.'), 'warning', 'auto-pool');
+			return Promise.resolve();
+		}
+		return this.after(common.call('auto_exclude', { id: idOf(n) }, { success: _('Excluded from the automatic choice: %s').format(n.tag) }));
 	},
 	doInclude: function(n) {
-		var ids = arr(this.st.auto_member_ids).slice();
-		if (ids.indexOf(n.id) < 0) ids.push(n.id);
-		return this.setMembers(ids, _('Back in the automatic choice: %s').format(n.tag));
+		return this.after(common.call('auto_include', { id: idOf(n) }, { success: _('Back in the automatic choice: %s').format(n.tag) }));
 	},
 
 	runTest: function(n, kind) {
@@ -856,9 +928,11 @@ return view.extend({
 	consequencesOf: function(nodes) {
 		var c = [], subs = 0, mine = 0, awg = 0, fav = 0, pref = false;
 		nodes.forEach(function(n) {
-			if (n.source === 'subscription') subs++;
-			else if (n.proto === 'awg' || n.proto === 'wireguard' || n.source === 'awg') awg++;
-			else mine++;
+			// the same conditions as api.uc delete_one: a file of the awg source -> the file goes, a
+			// manual link -> the link goes, anything else of a build -> it is hidden
+			if (n.source === 'awg' && (n.proto === 'awg' || n.proto === 'wireguard')) awg++;
+			else if (n.source === 'manual') mine++;
+			else subs++;
 			if (n.favorite) fav++;
 			if (n.preferred) pref = true;
 		});
@@ -939,18 +1013,24 @@ return view.extend({
 		var self = this, st = this.st || {};
 		var nodes = arr(st.nodes).filter(function(n) { return n && n.id && !n.deferred; });
 		if (!nodes.length) { common.toast(common.codeText('no_nodes'), 'warning', 'auto-pool'); return; }
-		var members = arr(st.auto_member_ids), all = !members.length;
-		var list = pickList(nodes, function(n) { return all || members.indexOf(n.id) >= 0; });
+		var p = autoPool(st);
+		// checked = not left out by the user (excluded / off the 1.x member list); "favourites only" is said apart
+		var list = pickList({ nodes: nodes }, function(n) { var w = p.why(n.id); return !w || w === 'favorites_only'; });
 		ui.showModal(common.txt(_('Which nodes take part in the automatic choice')), [
-			E('p', {}, _('The automatic choice switches only between the checked nodes. The others stay in the list: you can still connect to them yourself.')),
+			E('p', {}, _('The automatic choice switches only between the checked nodes; new nodes of the subscriptions take part too. The others stay in the list: you can still connect to them yourself.')),
+			p.favOnly ? E('p', { 'class': 'vp-muted' }, _('"Favourites only" is on: of the checked nodes, only the favourites take part.')) : '',
 			list.el,
 			E('div', { 'class': 'button-row right' }, [
 				button(_('Cancel'), '', function() { ui.hideModal(); }),
 				button(_('Save'), 'cbi-button-positive important', function() {
 					var ids = list.ids();
 					if (!ids.length) { common.toast(_('At least one node must stay in the automatic choice.'), 'warning', 'auto-pool'); return; }
+					var excl = nodes.map(function(n) { return n.id; }).filter(function(i) { return ids.indexOf(i) < 0; });
 					ui.hideModal();
-					self.setMembers(ids, _('Saved: %d of %d nodes take part in the automatic choice.').format(ids.length, nodes.length));
+					// one save: the unchecked ones become exclusions, a 1.x member list goes
+					self.after(common.call('set_config', { settings: { auto_members: [], auto_excludes: excl } }, {
+						success: excl.length ? _('Saved: %d of %d nodes take part in the automatic choice.').format(ids.length, nodes.length)
+							: _('Every node takes part in the automatic choice, new ones too.') }));
 				})
 			])
 		], 'vp-pool-dialog');
@@ -1006,10 +1086,12 @@ return view.extend({
 		], 'vp-pick-dialog');
 		var inPool = {};
 		arr((this.st || {}).nodes).forEach(function(n) { if (n && n.sub === s.id && n.id) inPool[n.id] = true; });
-		return probe(s.key || s.id).then(function(nodes) {
+		return probe(s.key || s.id).then(function(res) {
 			var allBox = E('input', { 'type': 'checkbox' });
 			allBox.checked = s.mode !== 'pick';
-			var list = pickList(nodes, function(n) { return s.mode !== 'pick' || inPool[n.id] || n.in_pool; });
+			// picked = the nodes of THIS subscription in the pool (in_pool of the probe also counts
+			// another source's copy of the node)
+			var list = pickList(res, function(n) { return s.mode !== 'pick' || inPool[n.id]; });
 			list.disable(allBox.checked);
 			allBox.addEventListener('change', function() { list.disable(allBox.checked); });
 			dom.content(box, [
@@ -1028,7 +1110,7 @@ return view.extend({
 					.then(function() { ui.hideModal(); return self.refresh(); });
 			}));
 		}, function(e) {
-			dom.content(box, E('p', { 'class': 'vp-nodes-err' }, common.errorText(e)));
+			dom.content(box, E('p', { 'class': 'vp-nodes-err' }, probeError(e)));
 		});
 	},
 	handleSubEnable: function(s, on) {
@@ -1205,11 +1287,11 @@ return view.extend({
 		if (row.pick || row.probing) return Promise.resolve();
 		row.probing = true;
 		dom.content(row.pickBox, E('p', { 'class': 'spinning' }, _('Downloading the subscription and checking its nodes. On a slow router this takes up to a minute.')));
-		return probe(url).then(function(nodes) {
-			row.pick = pickList(nodes, function(n) { return n.delay != null && n.delay > 0; });
+		return probe(url).then(function(res) {
+			row.pick = pickList(res, function(n) { return n.delay != null && n.delay > 0; });
 			dom.content(row.pickBox, row.pick.el);
 		}, function(e) {
-			dom.content(row.pickBox, E('p', { 'class': 'vp-nodes-err' }, common.errorText(e)));
+			dom.content(row.pickBox, E('p', { 'class': 'vp-nodes-err' }, probeError(e)));
 		}).then(function() { row.probing = false; });
 	},
 
@@ -1239,6 +1321,11 @@ return view.extend({
 			arr(r && r.failed).forEach(function(f) { if (f && f.line != null) tot.failed.push(f); });
 		};
 		return sequence(calls, function(args) {
+			// the whole request counts (the text + the lines + hundreds of picked ids), not only the text
+			if (jsonBytes(args) > MAX_REQUEST) {
+				args.lines.forEach(function(l) { tot.failed.push({ line: l, text: common.codeText('too_large') }); });
+				return;
+			}
 			return common.call('add', args, { quiet: true }).then(take, function(e) {
 				if (e instanceof common.Error && e.code === 'nothing_added' && e.reply) return take(e.reply);
 				args.lines.forEach(function(l) { tot.failed.push({ line: l, text: common.errorText(e) }); });

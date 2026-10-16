@@ -47,7 +47,12 @@ sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.
 
 ## 📸 Screenshots
 
-| Dashboard | Sources |
+Tabs of 2.0: **Overview** (state, traffic per device), **Nodes** (one "+ Add" for links, subscription
+addresses, AmneziaWG settings, files and QR pictures; nodes grouped by subscription; Connect / back to
+automatic choice, favourites, hidden), **Routes**, **Settings**, **Diagnostics**. The pictures below are
+still of 1.x.
+
+| Dashboard (1.x) | Sources (1.x, now part of Nodes) |
 |---|---|
 | ![vpnpool Dashboard tab: live node pings, active node, traffic](docs/screenshots/dashboard.jpg) | ![vpnpool Sources tab: subscriptions, manual and AmneziaWG nodes](docs/screenshots/sources.jpg) |
 | **Routing** | **Settings** |
@@ -139,10 +144,10 @@ CI builds both formats for aarch64_cortex-a53, x86_64 and mipsel_24kc and attach
 
 ## ⚙️ Quick start
 
-1. **Sources** → paste your subscription URL → **Update now**.
+1. **Nodes** → **+ Add** → paste your subscription URL → **Check** → **Add**.
 2. **Settings → Node check** → list the services that must work (default `www.youtube.com`).
 3. **Routing** → choose the mode and the lists / domains to proxy.
-4. **Dashboard** → **Turn ON**. The green ★ is the active node.
+4. **Overview** → **Turn ON**. The **Nodes** tab shows which node is in use.
 5. **Diagnostics** → **Test exit via VPN** to see your exit IP and country.
 
 ```sh
@@ -306,8 +311,9 @@ Everything lives in `/etc/config/vpnpool`, section `config vpnpool 'main'`.
 | `tproxy_port` / `test_port` / `clash_api` | `1603` / `1605` / `127.0.0.1:9091` | Inbounds and control API |
 | `lan_if` / `coexist` / `log_level` | auto / `auto` / `warn` | LAN device, podkop yield, sing-box log level |
 
-Lists kept by the app: `manual_node` (your own links), `hidden`, `auto_member`, `keep_auto`
-(node ids), `client`, `client_dev`, `probe_ua`; `config routing 'routing'` holds `community`,
+Lists kept by the app: `manual_node` (your own links), `hidden`, `auto_exclude` (left out of the
+automatic choice; every other node takes part, new ones too), `auto_member` (1.x: only these take
+part), `keep_auto` (node ids), `client`, `client_dev`, `probe_ua`; `config routing 'routing'` holds `community`,
 `domain`, `auto_domain`. Every subscription is its own section `config subscription` with `url`,
 `name`, `enabled` and `mode` (`all` = every node, `pick` = only the node ids in `list pick`).
 Favourites: `/etc/vpnpool/favorites.map.json`; AmneziaWG nodes: `/etc/vpnpool/awg/<id>.conf`.
