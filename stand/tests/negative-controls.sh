@@ -52,6 +52,9 @@ ctl() {
 		fi
 		shift 3
 	done
+	# NC_DRY=1: only check that every needle is still found (no suite runs) — after a change to
+	# the code under the controls, before the long run
+	if [ "${NC_DRY:-0}" = 1 ]; then echo "DRY   $name"; OK=$((OK+1)); rm -rf "$d"; return 0; fi
 	NC_ORDER="$NC_ORDER $name"
 	_nc_throttle
 	(
@@ -110,8 +113,8 @@ ctl parser-id-skips-tls parser fail 'parser/id-covers-every-config-field ' \
 ctl parser-id-uses-name parser fail 'parser/id-stable-across-order-and-name ;parser/id-changes-with-port-and-credential ;parser/id-json-key-order-and-link-agree ;XPASS parser/id-unique-in-output ' \
 	"$LIBX/parser.uc" "if (k != 'tag' && k != 'id' && k != '_link')" "if (k != 'id' && k != '_link')"
 # id leaks into the default output -> sing-box check rejects the config
-ctl parser-id-always parser fail 'parser/id-not-in-default-output ;parser/corpus-accepted-by-sing-box-check ;parser/json-source-guards ' \
-	"$LIBX/parser.uc" 'let id = (is_awg || !(WITH_ID || REPORT)) ? null : node_id(ob);' 'let id = is_awg ? null : node_id(ob);' \
+ctl parser-id-always parser fail 'parser/id-not-in-default-output ;parser/corpus-accepted-by-sing-box-check ;parser/json-source-guards ;parser/awg-id-is-sha256-of-private-key ' \
+	"$LIBX/parser.uc" 'let id = !(WITH_ID || REPORT) ? null :' 'let id = false ? null :' \
 	"$LIBX/parser.uc" 'if (WITH_ID && id) ob.id = id;' 'if (id) ob.id = id;'
 # dedup without the name -> a user's copy of a subscription node vanishes
 ctl parser-dedup-without-name parser fail 'parser/dedup-keeps-differently-named-node ;parser/dedup-subscription-vs-imported-file ;XPASS parser/id-unique-in-output ' \
@@ -510,6 +513,87 @@ ctl review-m9-sched-false-failure rpcd fail 'rpcd/set_schedule/cron-failure-is-a
 # test gap: probe sources in status not masked
 ctl review-status-sources-unmasked status fail 'status/subscription-urls-masked ;status/source-urls-masked ' \
 	"$LIBX/status.uc" '	sources: map(as_list(M.source, true), mask_url),' '	sources: as_list(M.source, true),'
+# ================= stage 4b: AmneziaWG inside vpnpool (pack awg-b) =================
+# parser: the AWG 3.1 table and the own value checks
+ctl awgb-hpk-dropped parser fail 'parser/awg3-conf-fields ' \
+	"$LIBX/parser.uc" '		ep.header_protection_key = hk;' '		;'
+ctl awgb-range-not-normalised parser fail 'parser/awg-normalised-values ' \
+	"$LIBX/parser.uc" "	return (hi == lo && m[3] == null) ? ('' + lo) : (lo + '-' + hi);" '	return v;'
+ctl awgb-no-h-overlap-check parser fail 'parser/awg-check-h-overlap ' \
+	"$LIBX/parser.uc" 'if (hs[i][0] <= hs[j][1] && hs[j][0] <= hs[i][1]) return' 'if (false) return'
+ctl awgb-no-i-chain-check parser fail 'parser/awg-check-i-unknown-tag ;parser/awg-check-i-unclosed ;parser/awg-check-i-odd-hex ' \
+	"$LIBX/parser.uc" "		if (!obf_chain_ok(iface[k])) return { err: 'awg_bad_value', field: k };" '		;'
+ctl awgb-no-hpk-s12-check parser fail 'parser/awg-check-hpk-s4-below-12 ' \
+	"$LIBX/parser.uc" "if ((ep['s' + i] ?? 0) < 12) return" 'if (false) return'
+ctl awgb-key-any-length parser fail 'parser/awg-check-hpk-not-32-bytes ;parser/awg-check-private-key-bad ' \
+	"$LIBX/parser.uc" 'return match(s, /^[A-Za-z0-9+\/]{43}=$/) ? s : null;' 'return length(s) ? s : null;'
+ctl awgb-unknown-param-dropped parser fail 'parser/awg-check-unknown-param ' \
+	"$LIBX/parser.uc" '!AWG_BOOL[k]) { if (unknown == null) unknown = k; }' '!AWG_BOOL[k]) { ; }'
+ctl awgb-multi-peer-kept parser fail 'parser/awg-multi-peer-refused ;parser/awg-multi-peer-reason ' \
+	"$LIBX/parser.uc" "	if (npeer > 1) return { err: 'awg_multi_peer' };" '	;'
+ctl awgb-wireguard-as-awg parser fail 'parser/wireguard-plain-conf ' \
+	"$LIBX/parser.uc" "	ep.type = is_awg ? 'awg' : 'wireguard';" "	ep.type = 'awg';"
+ctl awgb-keepalive-range-not-awg parser fail 'parser/awg-keepalive-range-is-awg ' \
+	"$LIBX/parser.uc" "		if (index(ka, '-') >= 0) is_awg = true;            // a keepalive range is AWG 3.x" '		;'
+ctl awgb-id-not-of-the-key parser fail 'parser/awg-id-is-sha256-of-private-key ' \
+	"$LIBX/parser.uc" '	return substr(sha256_hex(k), 0, 12);' "	return substr(sha256_hex(k + 'x'), 0, 12);"
+ctl awgb-sha256-constant parser fail 'parser/awg-id-is-sha256-of-private-key ' \
+	"$LIBX/parser.uc" '	0x428a2f98, 0x71374491,' '	0x428a2f99, 0x71374491,'
+ctl awgb-dedup-by-name parser fail 'parser/awg-name-comment-and-identity ' \
+	"$LIBX/parser.uc" "			let r = add_node(pa.ob, 'awg:' + awg_id(pa.ob.private_key), null);" '			let r = add_node(pa.ob, null, null);'
+ctl awgb-name-comment-ignored parser fail 'parser/awg-name-comment-and-identity ' \
+	"$LIBX/parser.uc" '	ep.tag = name ?? hp_label(hp.host, port);' '	ep.tag = hp_label(hp.host, port);'
+# ucode regex: \s inside [...] is the letter s
+ctl awgb-looks-base64-bs-s parser fail 'parser/base64-blob-with-line-breaks ' \
+	"$LIBX/parser.uc" 'return match(s, /^[A-Za-z0-9+\/=_[:space:]-]+$/) ? true : false;' 'return match(s, /^[A-Za-z0-9+\/=_\s-]+$/) ? true : false;'
+ctl awgb-uuid-bs-s parser fail 'parser/vless-id-with-letter-s ' \
+	"$LIBX/parser.uc" 'if (!length(uuid) || match(uuid, /[[:space:]:]/)) return' 'if (!length(uuid) || match(uuid, /[\s:]/)) return'
+# engine choice + cache
+ctl awgb-engine-never-chosen awg fail 'awg/select-engine-awg-nodes ;awg/select-stock-path-configured-is-automatic ;awg/build-engine-awg-in-config ;awg/status-engine-block ;awg/chain-amnezia5-every-field ;awg/chain-amnezia5-runs ;awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-mark-ends-when-the-node-changes ;awg/guard-limit-two-repairs ;awg/add-with-engine-no-warning ' \
+	"$LIBX/common.uc" '			if (ac.present && ac.awg) cap = ac;' '			if (false) cap = ac;'
+ctl awgb-cap-not-cached awg fail 'awg/engine-cap-cached-by-mtime-size ' \
+	"$LIBX/common.uc" "	if (!force && type(c) == 'object' && c.sig == sig) return c;" '	;'
+# build: deferred nodes, the binary of the check
+ctl awgb-no-deferral awg fail 'awg/build-no-engine-awg-deferred ;awg/status-lists-deferred-node ;awg/build-only-deferred-clear-state ;awg/delete-deferred-by-tag ' \
+	"$LIBX/build.sh" '(if ($eng.reason // null) != null and $n.type == "awg" then {reason: $eng.reason}' '(if false then {reason: $eng.reason}'
+ctl awgb-check-with-stock awg fail 'awg/build-engine-awg-in-config ;awg/status-engine-block ;awg/chain-amnezia5-every-field ;awg/chain-amnezia5-runs ;awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-mark-ends-when-the-node-changes ;awg/guard-limit-two-repairs ' \
+	"$LIBX/build.sh" 'while ! "$SB_BIN" check -c "$SB_CONF.new"' 'while ! sing-box check -c "$SB_CONF.new"'
+ctl awgb-status-no-deferred awg fail 'awg/status-lists-deferred-node ;awg/guard-node-dies-at-start-set-aside ' \
+	"$LIBX/status.uc" 'for (let d in deferred) {' 'for (let d in []) {'
+# generator by version (checked by RUNNING both engines)
+ctl awgb-generator-no-version-gate awg fail 'awg/generator-1.14-form ;awg/generator-1.14-runs-on-engine ;awg/generator-1.14-form-refused-by-1.12 ' \
+	"$LIBX/generator.uc" 'let SB_GE_114 = sbv ? (int(sbv[1]) > 1 || (int(sbv[1]) == 1 && int(sbv[2]) >= 14)) : false;' 'let SB_GE_114 = false;'
+# (every config with rule-sets then dies at start: the chain and the guard cases go red too)
+ctl awgb-http-client-detour-direct awg fail 'awg/generator-1.14-form ;awg/generator-1.14-runs-on-engine ;awg/chain-amnezia5-runs ;awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ' \
+	"$LIBX/generator.uc" '	config.http_clients = [ { tag: HTTP_CLIENT_TAG } ];' "	config.http_clients = [ { tag: HTTP_CLIENT_TAG, detour: 'direct' } ];"
+# the daemon: the binary it runs, the process it finds, the start guard
+ctl awgb-daemon-runs-stock awg fail 'awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-limit-two-repairs ' \
+	"$LIBX/vpnpoold" '	"$(sb_bin)" run -c "$SB_CONF"' '	sing-box run -c "$SB_CONF"'
+ctl awgb-pids-stock-name-only awg fail 'awg/daemon-finds-the-engine-process ' \
+	"$LIBX/lib.sh" '{ pgrep -f "sing-box[^ ]* run -c $SB_CONF" 2>/dev/null;' '{ pgrep -f "sing-box run -c $SB_CONF" 2>/dev/null;'
+ctl awgb-guard-no-node-exclusion awg fail 'awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-limit-two-repairs ' \
+	"$LIBX/vpnpoold" '		if [ -n "$tag" ] && mark_bad "$tag" "$fatal"; then' '		if false; then'
+ctl awgb-guard-no-rollback awg fail 'awg/guard-rolls-back-to-previous-config ' \
+	"$LIBX/vpnpoold" '		if [ -s "$SB_CONF.prev" ] && ! cmp -s "$SB_CONF" "$SB_CONF.prev"; then' '		if false; then'
+ctl awgb-guard-no-limit awg fail 'awg/guard-limit-two-repairs ' \
+	"$LIBX/vpnpoold" '		if [ "$n" -gt "$GUARD_MAX" ]; then' '		if [ "$n" -gt 99 ]; then'
+ctl awgb-mark-ignores-node-config awg fail 'awg/guard-mark-ends-when-the-node-changes ' \
+	"$LIBX/build.sh" '$m.cfg == ($n | del(.tag, .id) | tojson)' 'true'
+# api / rpcd
+ctl awgb-analyze-no-dup awg fail 'awg/add-same-node-again-dup ' \
+	"$LIBX/api.uc" "	if (awg_known_ids()[r.id] || stat(AWG_DIR + '/' + r.id + '.conf')) {" '	if (false) {'
+ctl awgb-name-not-cleaned awg fail 'awg/add-name-cannot-inject-lines ' \
+	"$LIBX/api.uc" "	s = trim(replace(s, /[[:cntrl:]]+/g, ' '));" '	s = trim(s);'
+ctl awgb-add-no-warning awg fail 'awg/add-vpn-link-no-engine-deferred ;awg/import-nodes-vpn-link ' \
+	"$LIBX/api.uc" '	if (added > 0 && ADD_WARN[warning]) res.warning = ADD_WARN[warning].warning;' '	;'
+ctl awgb-no-wrapped-link awg fail 'awg/analyze-vpn-link-wrapped-with-caption ' \
+	"$LIBX/api.uc" '		if (tok && !nowrap && prev_len >= WRAP_MIN' '		if (false && tok && !nowrap && prev_len >= WRAP_MIN'
+ctl awgb-delete-by-id-off awg fail 'awg/delete-by-id ;awg/delete-unknown-id ;awg/delete-deferred-by-tag ' \
+	"$RPCD" '		if [ -n "$aid" ] && [ -z "$tag" ]; then' '		if false; then'
+# ui: every new reply code needs its text
+ctl awgb-ui-no-engine-text ui-unit fail 'every code the backend answers with has a human text' \
+	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "	engine_missing:     _('Saved." "	engine_missing_x:   _('Saved."
+
 wait
 for n in $NC_ORDER; do
 	o="$TMPBASE/$n.out"
