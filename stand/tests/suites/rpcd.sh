@@ -1082,6 +1082,7 @@ begin "rpcd/restore/1x-migration-failure-rolled-back"
 expect_jq "migration_failed, rolled back" "$R" '.ok==false and .code=="migration_failed" and .rolled_back==true'
 expect_eq "the config before is back" "$(uci -q get vpnpool.main.failover_interval)/$(uci -q get vpnpool.main.schema)" 71/2
 end
+cp "$FXR/pre-mig.cfg" /etc/config/vpnpool   # its own start: the restore case above must not decide this one
 rcall import "$(jq -nc --rawfile c "$T_DIR/fixtures/migrate/141/etc-config-vpnpool" '{config:$c}')"
 begin "rpcd/import/1x-migration-failure-rolled-back"
 expect_jq "migration_failed, rolled back" "$R" '.ok==false and .code=="migration_failed" and .rolled_back==true'

@@ -708,7 +708,7 @@ ctl s6-api-hide-keeps-preferred rpcd fail 'rpcd/hide/clears-the-preferred-node '
 	"$LIBX/api.uc" "		if (u.get('vpnpool', 'main', 'preferred_node') == r.id) u.delete('vpnpool', 'main', 'preferred_node');" '		;'
 ctl s6-api-delete-sub-node-not-hidden rpcd fail 'rpcd/delete_nodes/ok ;rpcd/delete_node/subscription-node-is-hidden ;rpcd/unhide/returns-it ' \
 	"$LIBX/api.uc" "		changed = list_add(u, 'hidden', r.id);" '		changed = true;'
-ctl s6-api-connect-not-live rpcd fail 'rpcd/connect/ok ;rpcd/select/ok ' \
+ctl s6-api-connect-not-live rpcd fail 'rpcd/connect/ok ;rpcd/select/ok ;rpcd/connect/automatic-favourite-becomes-the-users ' \
 	"$LIBX/api.uc" "		let c = clash_put('proxy', r.tag);" "		let c = '000';"
 ctl s6-api-connect-archive-inactive rpcd fail 'rpcd/connect/favourite-not-in-a-source-joins-the-pool ' \
 	"$LIBX/api.uc" '			fav[r.id].active = true;' '			;'
@@ -724,7 +724,7 @@ ctl s6-api-add-mode-ignored rpcd fail 'rpcd/add/url-in-pick-mode ' \
 	"$LIBX/api.uc" '			                         enabled: sub_on, mode: sub_mode, pick: sub_pick }))' "			                         enabled: sub_on, mode: 'all', pick: [] }))"
 ctl s6-api-repick-appends rpcd fail 'rpcd/import_select/re-pick-replaces ' \
 	"$LIBX/api.uc" '		ids = uniq_list(ids);' '		ids = uniq_list([ ...(sub_find(u, inp.url)?.pick ?? []), ...ids ]);'
-ctl s6-api-1x-tags-refused rpcd fail 'rpcd/restore/1x-backup-migrated ' \
+ctl s6-api-1x-tags-refused rpcd fail 'rpcd/restore/1x-backup-migrated ;rpcd/restore/1x-migration-failure-rolled-back ;rpcd/import/1x-migration-failure-rolled-back ' \
 	"$LIBX/api.uc" "		if (f == 'preferred_node') chk = v2 ? ((x) => is_id(x) ? [ x, null ] : [ null, 'bad_tag' ]) : chk_tag;" "		if (f == 'preferred_node') chk = (x) => is_id(x) ? [ x, null ] : [ null, 'bad_tag' ];"
 ctl s6-rpcd-restore-not-migrated rpcd fail 'rpcd/restore/1x-backup-migrated ;rpcd/restore/1x-migration-failure-rolled-back ' \
 	"$RPCD" '		if ! /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1   # a 1.x backup' '		if false   # a 1.x backup'
@@ -764,7 +764,7 @@ ctl s6-ui-no-bad-path-text ui-unit fail 'every code the backend answers with has
 ctl s6-parser-pick-no-id parser fail 'parser/pick-skips-a-node-without-id ' \
 	"$LIBX/parser.uc" '	if (hidden || (PICK && (!id || !PICK[id]))) {' '	if (hidden || (PICK && id && !PICK[id])) {'
 ctl s6-rpcd-restore-ignores-migration-failure rpcd fail 'rpcd/restore/1x-migration-failure-rolled-back ' \
-	"$RPCD" '		if ! /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1   # a 1.x backup' '		if ! ! /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1 && false   # a 1.x backup'
+	"$RPCD" '		if ! /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1   # a 1.x backup' '		if ! { /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1; true; }   # a 1.x backup'
 ctl s6-rpcd-import-ignores-migration-failure rpcd fail 'rpcd/import/1x-migration-failure-rolled-back ' \
 	"$RPCD" '		if ! /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1; then' '		if false; then'
 ctl s6-api-connect-auto-stays rpcd fail 'rpcd/connect/automatic-favourite-becomes-the-users ' \
