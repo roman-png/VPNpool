@@ -7,7 +7,7 @@
   <a href="https://github.com/roman-png/VPNpool/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/roman-png/VPNpool?label=release"></a>
   <img alt="OpenWrt 23.05 / 24.10 / 25.12 (opkg + apk)" src="https://img.shields.io/badge/OpenWrt-23.05%20%7C%2024.10%20%7C%2025.12-blue">
   <img alt="Engine: sing-box" src="https://img.shields.io/badge/engine-sing--box-success">
-  <img alt="Protocols: VLESS VMess Trojan Shadowsocks AmneziaWG" src="https://img.shields.io/badge/protocols-VLESS%20%C2%B7%20VMess%20%C2%B7%20Trojan%20%C2%B7%20SS%20%C2%B7%20AmneziaWG-informational">
+  <img alt="Protocols: VLESS VMess Trojan Shadowsocks Hysteria2 TUIC AmneziaWG" src="https://img.shields.io/badge/protocols-VLESS%20%C2%B7%20VMess%20%C2%B7%20Trojan%20%C2%B7%20SS%20%C2%B7%20Hysteria2%20%C2%B7%20TUIC%20%C2%B7%20AmneziaWG-informational">
   <img alt="License: GPL-3.0" src="https://img.shields.io/badge/License-GPL--3.0-blue.svg">
 </p>
 
@@ -36,7 +36,7 @@ sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.
 | 🔀 **Auto-failover** | urltest + end-to-end watchdog; the dead active node is replaced automatically |
 | 🚦 **Fail-safe** | The LAN is never routed into a dead tunnel — no working node, internet stays direct |
 | 📡 **Subscriptions** | Auto-update, several subscriptions in one pool, multi-client User-Agent probing |
-| 🧩 **Protocols** | VLESS (Reality + Vision), VMess, Trojan, Shadowsocks, sing-box JSON, **AmneziaWG** |
+| 🧩 **Protocols** | VLESS (Reality + Vision), VMess, Trojan, Shadowsocks, Hysteria2, TUIC, sing-box JSON, **AmneziaWG 1.x–3.1** |
 | 🧭 **Routing** | Only selected sites or everything-except, 26 community lists, per-device rules |
 | 🛡️ **Leak protection** | IPv6 guard, kill-switch, DNS-leak guard, TLS-fragment anti-DPI |
 | 🤖 **Telegram** | Alerts + two-way bot with a button menu, works where Telegram is blocked |
@@ -80,13 +80,13 @@ The same command **updates** an existing install; `/etc/config/vpnpool` is kept.
 
 | Variable | Effect |
 |---|---|
-| `VPNPOOL_AWG=1` | Replace sing-box with the [AmneziaWG fork](https://github.com/hoaxisr/amnezia-box) (aarch64 / mipsel prebuilds, sha256-checked) and pin it against upgrades: `opkg flag hold`, or the exact version in `/etc/apk/world` on apk |
+| `VPNPOOL_AWG=1` | Also install the AmneziaWG engine ([vpnpool-engine](https://github.com/roman-png/vpnpool-engine), sha256-pinned) as a separate file `/usr/bin/sing-box-awg`; the stock sing-box stays as it is. `VPNPOOL_AWG=update` updates it |
 | `VPNPOOL_RAM_SINGBOX=1` | 16 MB flash: sing-box in RAM, reinstalled on every boot |
-| `VPNPOOL_VERSION=v1.5.0` | A specific release instead of `latest` (`.apk` from v1.5.0 on) |
+| `VPNPOOL_VERSION=v2.0.0` | A specific release instead of `latest` (`.apk` from v1.5.0 on) |
 | `VPNPOOL_PKG_DIR=/tmp/vpnpool` | Install package files you already copied there — no GitHub download |
 
 Downloads are retried 4× and fall back to the [GitHub Pages mirror](https://roman-png.github.io/VPNpool).
-⚠ podkop shares `/usr/bin/sing-box`, so with the AWG variant it runs on the fork too.
+podkop keeps using the stock `/usr/bin/sing-box`: the AmneziaWG engine is a separate file.
 
 </details>
 
@@ -97,12 +97,13 @@ Each [release](https://github.com/roman-png/VPNpool/releases/latest) carries bot
 
 ```sh
 # OpenWrt 25.12+ (apk)
-apk update && apk add --allow-untrusted ./vpnpool-*.apk ./luci-app-vpnpool-*.apk
+apk update && apk add --allow-untrusted ./vpnpool-*.apk ./luci-app-vpnpool-*.apk ./luci-i18n-vpnpool-ru-*.apk
 # OpenWrt 23.05 / 24.10 (opkg)
-opkg update && opkg install ./vpnpool_*_all.ipk ./luci-app-vpnpool_*_all.ipk
+opkg update && opkg install ./vpnpool_*_all.ipk ./luci-app-vpnpool_*_all.ipk ./luci-i18n-vpnpool-ru_*_all.ipk
 ```
 
-`--allow-untrusted` is needed because a single file isn't covered by a feed signature.
+`--allow-untrusted` is needed because a single file isn't covered by a feed signature. The
+`luci-i18n-vpnpool-ru` package is the Russian interface (the language follows the LuCI setting).
 
 </details>
 
@@ -164,14 +165,18 @@ uci set vpnpool.main.enabled='1'; uci commit vpnpool
 **Subscriptions & nodes**
 - Auto-updating subscription (base64 or sing-box JSON); 9 client User-Agents tried until one returns nodes
 - Several subscriptions merged into one pool; offline cache if the panel is down
-- Manual nodes, bulk paste or `.txt` import, import from a link list with a pick-what-you-want dialog
-- ⭐ Saved nodes survive subscription expiry; optional auto-snapshot of reachable nodes
-- Share link + **offline QR**, export as a subscription; data quota and expiry bar
+- One **+ Add** for everything: links, subscription addresses, AmneziaWG `.conf` / `vpn://`, a file or a
+  QR picture (decoded in the browser); a preview says per line what will be added and why not
+- A subscription can bring all its nodes or only the ones you pick; each has its own expiry, quota and
+  last update; **Update** refreshes one subscription
+- ⭐ Favourites survive subscription expiry; nodes you hide go to **Hidden** and come back with one click
+- Share link + **offline QR**, export as a subscription
 - Search, filter and sort for subscriptions with hundreds of nodes
 
 **Health check & failover**
 - 🎯 One criterion for "working": opens **every** service you listed — drives urltest, failover and watchdog
-- 🔀 Automatic failover; 📌 preferred node with switch-back; ⚙ choose which nodes may be auto-picked
+- 🔀 Automatic failover; **Connect** prefers a node and **Back to automatic choice** releases it; exclude
+  nodes from the automatic choice (new subscription nodes join it by themselves)
 - 🩺 End-to-end watchdog restarts a stuck sing-box; dead hosts are pre-filtered out of the pool
 - 🚦 Fail-safe routing: rules go up only after a real probe succeeds, retried every 15 s
 - ⚡ Per-node speed test and 🎬 unlock test (YouTube / ChatGPT / Netflix / Instagram / Telegram / Google)
@@ -180,7 +185,9 @@ uci set vpnpool.main.enabled='1'; uci commit vpnpool
 - Import a `.conf` or an AmneziaVPN `vpn://` link — decoded on the router, nothing leaves it
 - All AWG fields (Jc/Jmin/Jmax, S1–S4, H1–H4 incl. ranges, I1–I5, PSK, MTU)
 - Same pool, same service check and failover as VLESS nodes
-- Needs the AWG sing-box fork (`VPNPOOL_AWG=1`); on stock sing-box the AWG UI is hidden
+- AmneziaWG 1.x, 2.0 and 3.1 (header protection, ranged timers, random trailers): the AmneziaWG engine
+  (`VPNPOOL_AWG=1`, see [below](#-amneziawg-engine)); without it AWG nodes are kept and wait for it — they
+  never break the build of the other nodes
 
 **Routing**
 - Proxy **only** selected lists/domains, or **everything except** them
@@ -194,7 +201,9 @@ uci set vpnpool.main.enabled='1'; uci commit vpnpool
 - Every config passes `sing-box check`; a broken node is dropped, a broken build rolls back
 - Live traffic per node and per device; scheduler for on/off and refresh
 - Telegram alerts + two-way bot (`/menu` buttons), tunnelled through the VPN
-- Diagnostics tab, backup / restore, auto RU/EN interface
+- Overview with the state in words, the exit IP and country, alerts that link to the fix
+- Diagnostics tab (checks, log with a filter and download, technical parameters, engine version),
+  backup / restore (also of 1.x backups), Russian / English by the LuCI language setting
 
 ---
 
@@ -246,8 +255,8 @@ chmod +x /etc/hotplug.d/iface/99-vpnpool-singbox-ram
 ```
 
 Keep **one** such hook: two hooks racing on a 128 MB router corrupt the binary
-(`sing-box: Bus error`). With `VPNPOOL_AWG=1` the hook fetches the AWG fork and falls back
-to stock sing-box if that fails. Tested on Xiaomi Mi Router 4A Gigabit (16 MB / 128 MB,
+(`sing-box: Bus error`). With `VPNPOOL_AWG=1` the hook also puts the AmneziaWG engine into RAM
+(only on routers with ≥ 256 MB RAM) and keeps stock sing-box if that fails. Tested on Xiaomi Mi Router 4A Gigabit (16 MB / 128 MB,
 OpenWrt 24.10); the apk path on the official OpenWrt 25.12.4 image.
 
 </details>
@@ -332,7 +341,7 @@ A 1.x configuration is moved to this layout at install (a copy of the old one go
 | Fail-safe routing | ✅ | — | — | — |
 | Preferred node + switch-back | ✅ | — | — | — |
 | AmneziaWG in the same pool | ✅ `.conf` + `vpn://` | — | — | — |
-| Data quota, saved nodes, speed / unlock tests | ✅ | — | — | — |
+| Data quota, favourites, speed / unlock tests | ✅ | — | — | — |
 | Two-way Telegram bot | ✅ | — | — | — |
 | Adaptive routing, anti-DPI | ✅ | — | — | — |
 | Community SRS lists | ✅ 26 | ✅ | own | own |
@@ -346,7 +355,7 @@ A 1.x configuration is moved to this layout at install (a copy of the old one go
 
 - **Is this a VPN provider?** No — bring your own subscription, server or AmneziaWG config.
 - **vs podkop?** podkop routes selectively but you pick the node; vpnpool picks and switches nodes itself. They run side by side.
-- **Do I need another sing-box?** Only for AmneziaWG (`VPNPOOL_AWG=1`).
+- **Do I need another sing-box?** Only for AmneziaWG (`VPNPOOL_AWG=1` adds the AmneziaWG engine next to the stock one).
 - **200 nodes on a cheap router?** Fine: dead hosts are pre-filtered, probes run sequentially, heavy tests check free memory.
 - **Subscription expired / all nodes dead?** The LAN stays on a direct connection; routing returns within 15 s of a node answering.
 - **Without LuCI?** Yes — `uci` plus the Telegram bot.
@@ -361,7 +370,7 @@ A 1.x configuration is moved to this layout at install (a copy of the old one go
 |---|---|
 | *"keeping LAN on DIRECT"* in the log | No node passed the service check — check the subscription and *Settings → Node check* |
 | Everything pings, sites don't open | The node reaches a CDN but not your services — see **"Out of the auto-pool"** |
-| No AmneziaWG section | Stock sing-box — reinstall with `VPNPOOL_AWG=1` |
+| AmneziaWG node "waits for the engine" | The AmneziaWG engine isn't installed — run the installer with `VPNPOOL_AWG=1` (Diagnostics shows the engine) |
 | `sing-box: Bus error` after reboot (16 MB) | Two boot hooks raced — keep exactly one |
 | Community lists don't download | They come from GitHub Releases — route GitHub through the proxy first |
 | Bot answers every other message | Two pollers running — stop any manual `tgbot.sh` |
@@ -380,6 +389,22 @@ Limitations: ECH (encrypted SNI) can't be sniffed; anti-DPI is TLS fragmentation
 </details>
 
 ---
+
+## 🧬 AmneziaWG engine
+
+Stock sing-box can't speak AmneziaWG, so vpnpool has its own build: [vpnpool-engine](https://github.com/roman-png/vpnpool-engine)
+— upstream sing-box with an AmneziaWG patch (amneziawg-go 3.1), published as immutable releases with
+sha256 sums.
+
+- **Install / update:** `VPNPOOL_AWG=1` (or `=update`) with the installer, or
+  `/usr/libexec/vpnpool/engine.sh install|update|status|restore-stock`. Every install checks sha256,
+  the version and a real AmneziaWG config before it replaces anything; on any failure the working
+  binary stays.
+- **Where:** `/usr/bin/sing-box-awg`, a separate file. vpnpool runs it only when the pool has
+  AmneziaWG nodes; podkop and everything else keep the stock `/usr/bin/sing-box`.
+- **Architectures:** aarch64, arm_cortex-a7, mipsel_24kc, mips_24kc, x86_64.
+- **Memory:** the binary is ~45 MB. Routers with 16 MB flash keep it in RAM (needs ≥ 256 MB RAM;
+  re-fetched at boot), the installer checks free space and memory first.
 
 ## 🗺️ Roadmap
 
