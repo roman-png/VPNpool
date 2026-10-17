@@ -59,11 +59,13 @@ if grep -q '"nodes"' "$TMPD/menu" && grep -q '"Nodes"' "$TMPD/menu" && ! grep -q
 else bad "menu: Nodes tab / no Sources tab: $(head -c 300 "$TMPD/menu")"; fi
 CODE=$(curl -s -o "$TMPD/npage" -w '%{http_code}' -b "sysauth_http=$SID; sysauth=$SID" "$B/cgi-bin/luci/admin/services/vpnpool/nodes")
 [ "$CODE" = 200 ] && grep -q 'vpnpool/nodes' "$TMPD/npage" && ok "Nodes page -> HTTP 200, loads view vpnpool/nodes" || bad "Nodes page -> HTTP $CODE"
+CODE=$(curl -s -o "$TMPD/dpage" -w '%{http_code}' -b "sysauth_http=$SID; sysauth=$SID" "$B/cgi-bin/luci/admin/services/vpnpool/diagnostics")
+[ "$CODE" = 200 ] && grep -q 'vpnpool/diagnostics' "$TMPD/dpage" && ok "Diagnostics page -> HTTP 200, loads view vpnpool/diagnostics" || bad "Diagnostics page -> HTTP $CODE"
 
 # the view JS itself is served
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$B/luci-static/resources/view/vpnpool/dashboard.js")
 [ "$CODE" = 200 ] && ok "dashboard.js served" || bad "dashboard.js served (HTTP $CODE)"
-for f in view/vpnpool/nodes.js vpnpool/jsqr.min.js vpnpool/qrcode.min.js; do
+for f in view/vpnpool/nodes.js view/vpnpool/diagnostics.js vpnpool/jsqr.min.js vpnpool/qrcode.min.js; do
 	CODE=$(curl -s -o /dev/null -w '%{http_code}' "$B/luci-static/resources/$f")
 	[ "$CODE" = 200 ] && ok "$f served" || bad "$f served (HTTP $CODE)"
 done

@@ -132,7 +132,7 @@ check_tr "$(printf '%%d node\002%s' 1)" '%d узла'
 check_tr 'Connected to %s: chosen by you. If it stops working, the automatic choice takes over until it is back.' 'Подключён к %s — выбран вами. Если он перестанет работать, автовыбор подменит его, пока он не вернётся.'
 check_tr 'More actions' 'Ещё действия'
 check_tr 'The service is off. Turn it on and try again.' 'Служба выключена. Включите её и попробуйте ещё раз.'
-check_tr 'VPN exit: %s (IP %s)' 'Выход через VPN: %s  (IP %s)'
+check_tr 'Check the exit through the VPN' 'Проверить выход через VPN'
 check_tr 'vpnpool stand: this msgid is not in the catalog' ''
 
 curl -s -o "$TMPD/menu" -b "$CK" "$B/cgi-bin/luci/admin/menu"
@@ -196,6 +196,35 @@ grep -q '"mode":"exclude"' "$TMPD/st2" && grep -q '"log_level":"info"' "$TMPD/st
 ubusj set_config '{"settings":{"killswitch":"maybe","domains":["ok.example","bad domain!"]}}' > "$TMPD/sc0"
 grep -q '"ok":false' "$TMPD/sc0" && grep -q '"killswitch":"bad_value"' "$TMPD/sc0" && grep -q '"domains\[1\]":"bad_domain"' "$TMPD/sc0" \
 	&& ok "a wrong payload is refused with the field codes (negative control)" || bad "wrong payload: $(head -c 300 "$TMPD/sc0")"
+
+
+# --- ui4: the Diagnostics page (checks, log, engine, technical parameters) + the backend it uses
+if command -v node >/dev/null 2>&1; then
+	node --check "$(hostpath "$RES/view/vpnpool/diagnostics.js")" 2>"$TMPD/err" && ok "syntax view/vpnpool/diagnostics.js" || bad "syntax view/vpnpool/diagnostics.js: $(head -c 300 "$TMPD/err")"
+	node "$(hostpath "$HERE/ui-diag.test.js")" > "$TMPD/diag" 2>&1
+	U=$(grep -E '^DIAG: passed=[0-9]+ failed=[0-9]+ checked=[0-9]+$' "$TMPD/diag")
+	case "$U" in "DIAG: passed="[1-9]*" failed=0 checked="[1-9]*) ok "tests of the Diagnostics page ($U)" ;; *) bad "tests of the Diagnostics page: ${U:-no summary line}"; grep '^FAIL' "$TMPD/diag" ;; esac
+	node "$(hostpath "$HERE/ui-diag.test.js")" --negative > "$TMPD/dneg" 2>&1
+	N=$(grep -E '^DIAG-NEG: passed=[0-9]+ failed=[0-9]+$' "$TMPD/dneg")
+	case "$N" in "DIAG-NEG: passed="[1-9]*" failed=0") ok "negative controls of the Diagnostics tests ($N)" ;; *) bad "negative controls of the Diagnostics tests: ${N:-no summary line}"; grep '^FAIL' "$TMPD/dneg" ;; esac
+fi
+CODE=$(curl -s -o "$TMPD/dg" -w '%{http_code}' -b "$CK" "$B/cgi-bin/luci/admin/services/vpnpool/diagnostics")
+[ "$CODE" = 200 ] && grep -q "vpnpool/diagnostics" "$TMPD/dg" && ok "page diagnostics -> 200, loads view vpnpool/diagnostics" || bad "page diagnostics -> HTTP $CODE"
+curl -s -o "$TMPD/served" "$B/luci-static/resources/view/vpnpool/diagnostics.js"
+cmp -s "$TMPD/served" "$RES/view/vpnpool/diagnostics.js" && ok "LuCI serves view/vpnpool/diagnostics.js (byte-identical)" || bad "LuCI serves view/vpnpool/diagnostics.js"
+check_tr 'Diagnostics' 'Диагностика'
+check_tr 'Technical parameters' 'Технические параметры'
+# the methods of the page through the session's ACL: diag (parameters + engine), logs (read),
+# sub_refresh (write; an unknown subscription is not found, nothing is queued)
+ubus diag > "$TMPD/dj"
+grep -q '"result":\[0,{' "$TMPD/dj" && grep -q '"tproxy_port"' "$TMPD/dj" && grep -q '"target_version"' "$TMPD/dj" \
+	&& ok "vpnpool.diag gives the technical parameters and the engine" || bad "vpnpool.diag: $(head -c 300 "$TMPD/dj")"
+ubusj logs '{"lines":50,"source":"service"}' > "$TMPD/lg"
+grep -q '"result":\[0,{' "$TMPD/lg" && grep -q '"lines":\[' "$TMPD/lg" && grep -q '"ok":true' "$TMPD/lg" && ok "vpnpool.logs answers with the lines" || bad "vpnpool.logs: $(head -c 300 "$TMPD/lg")"
+ubusj logs '{"lines":9999}' > "$TMPD/lg0"
+grep -q '"ok":false' "$TMPD/lg0" && grep -q '"lines":"too_large"' "$TMPD/lg0" && ok "vpnpool.logs refuses more than 500 lines (negative control)" || bad "vpnpool.logs 9999: $(head -c 300 "$TMPD/lg0")"
+ubusj sub_refresh '{"id":"no_such_sub"}' > "$TMPD/sr"
+grep -q '"result":\[0,{' "$TMPD/sr" && grep -q '"code":"not_found"' "$TMPD/sr" && ok "vpnpool.sub_refresh is allowed and says not_found for an unknown subscription" || bad "vpnpool.sub_refresh: $(head -c 300 "$TMPD/sr")"
 
 echo "UI-COMPONENTS: passed=$P failed=$F"
 [ "$KEEP" = 1 ] && echo "# kept: $B/cgi-bin/luci/admin/services/vpnpool/_demo  (docker rm -f $NAME)"

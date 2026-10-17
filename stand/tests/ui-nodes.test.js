@@ -403,6 +403,26 @@ test('subscription group: pick nodes, turn off, delete', async (t) => {
 	eq(t.calls('sub_set')[1], { id: 'sub_main', mode: 'pick', pick: [ ID.A, ID.C ] }, 'picked ids');
 });
 
+test('subscription "Update": only that subscription (sub_refresh by its id), the toolbar still updates all', async (t) => {
+	const root = await open(t, fixture());
+	t.env.handlers.sub_refresh = () => ({ ok: true, code: 'started', daemon: 'signalled' });
+	t.env.handlers.refresh = () => ({ ok: true, code: 'started', daemon: 'signalled' });
+	const upd = (title) => group(root, title).querySelector('.vp-sub-update');
+	ok(upd('Main provider') && upd('Picked list'), 'positive control: an "Update" in the head of each subscription');
+	click(t, upd('Main provider')); await settle(t);
+	eq(t.calls('sub_refresh'), [ { id: 'sub_main' } ], 'this subscription by its id');
+	eq(t.calls('refresh').length, 0, 'not every subscription');
+	ok(toasts(t, 'info').some(x => x.includes('Main provider')), 'the toast names the subscription: ' + JSON.stringify(toasts(t, 'info')));
+	click(t, upd('Picked list')); await settle(t);
+	eq(t.calls('sub_refresh')[1], { id: 'sub_pick' }, 'the other group: its own id');
+	t.env.handlers.sub_refresh = () => ({ ok: false, code: 'disabled', daemon: 'n/a', error: 'disabled' });
+	click(t, upd('Main provider')); await settle(t);
+	ok(toasts(t, 'warning').some(x => x.includes('turned off')), 'a turned-off subscription is said: ' + JSON.stringify(toasts(t, 'warning')));
+	eq(toasts(t, 'danger').length, 0, 'not as a general error');
+	click(t, root.querySelector('.vp-refresh-btn')); await settle(t);
+	eq(t.calls('refresh').length, 1, 'the toolbar "Update subscriptions" updates all (positive control)');
+});
+
 test('the Overview "+ Add" (#add) opens the dialog once and clears the address', async (t) => {
 	let replaced = null;
 	t.env.win.location = { hash: '#add', pathname: '/cgi-bin/luci/admin/services/vpnpool/nodes', search: '' };
@@ -585,6 +605,8 @@ async function run(viewSrc, commonSrc, quiet) {
 }
 
 const MUTATIONS = [
+	{ name: 'the group "Update" updates every subscription', from: "return this.handleSubRefresh(G.g.sub);", to: "return this.handleRefresh();", expect: [ 'subscription "Update": only that subscription (sub_refresh by its id), the toolbar still updates all' ] },
+	{ name: 'a turned-off subscription not said', from: "if (e && e.code === 'disabled') common.toast(", to: "if (false) common.toast(", expect: [ 'subscription "Update": only that subscription (sub_refresh by its id), the toolbar still updates all' ] },
 	{ name: 'cards rebuilt on every poll', from: "if (C) self.updateCard(C, it); else C = self.cards[it.key] = self.makeCard(it);", to: "C = self.cards[it.key] = self.makeCard(it);", expect: [ 'a poll updates cell by cell: same elements, focus kept, no reordering; gone and new cards' ] },
 	{ name: 'cards moved even when in place', from: "if (cur === el) return;\n", to: "if (cur === el) parent.removeChild(el);\n", expect: [ 'a poll updates cell by cell: same elements, focus kept, no reordering; gone and new cards' ] },
 	{ name: 'raw LuCI E (strings into innerHTML)', from: "var E = common.E;", to: "var E0 = common.E;", expect: [ 'groups by source, state words of every kind of card, no innerHTML' ] },

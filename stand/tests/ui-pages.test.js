@@ -641,6 +641,7 @@ test('settings: backup download and restore (the router checks first, replacing 
 	ok(toastTexts(P, 'danger').some(t => t.includes('too large') && t.includes('43 KB')), 'a too large file: said so: ' + JSON.stringify(toastTexts(P, 'danger')));
 	P.common.clearToast();
 	const fits = Buffer.alloc(45000, 7);
+	fits[0] = 0x1f; fits[1] = 0x8b;   // an archive (a text file goes to the text import, see below)
 	const pf = P.V.restoreFile({ size: fits.length, buf: fits.buffer.slice(fits.byteOffset, fits.byteOffset + fits.length) });
 	await P.env.tick(10);
 	eq(restores.length, 1, 'a file at the limit is sent for the check');
@@ -670,6 +671,84 @@ test('settings: backup download and restore (the router checks first, replacing 
 	await runRestore(true);
 	const last = toastTexts(P).filter(t => !t.includes('Nodes:'));
 	ok(last.length === 1 && last[0].startsWith(P.common.CODE_TEXT.restored) && !last[0].includes('starts again'), 'service off: ' + JSON.stringify(last));
+});
+
+// review ui3 Ж1: the automatic search may add a site while the page is open; saving the edited
+// "Found automatically" applies the user's edit to the list as it is NOW (not to the loaded one)
+test('routing: a site found automatically while the page was open survives saving the edited list', async (S) => {
+	let reads = 0;
+	const later = () => Object.assign(routingStatus(), { auto_domains: [ 'found1.example', 'found2.example', 'found3.example' ] });
+	const P = await open('routing', S, { status: () => (++reads === 1 ? routingStatus() : later()) });
+	eq(reads, 1, 'positive control: the page loaded the list once (found1, found2)');
+	setv(P, 'sites.auto_domains', 'found2.example\nmine.example');   // found1 deleted, mine added
+	await clickSave(P);
+	const sc = calls(P, 'set_config');
+	eq(sc.length, 1, 'one set_config');
+	const st = P.env.rpcLog.map(x => x[0]);
+	ok(st.indexOf('status', 1) >= 0 && st.indexOf('status', 1) < st.indexOf('set_config'), 'the list is read again before the save: ' + st.join(','));
+	eq(sc[0][1].settings.auto_domains, [ 'found2.example', 'found3.example', 'mine.example' ], 'sent: the user\'s edit on the current list (found3 kept, found1 gone)');
+	// another field only: nothing is read before the save, the list is not sent
+	const P2 = await open('routing', S);
+	setv(P2, 'mode.mode', 'exclude');
+	await clickSave(P2);
+	eq(P2.env.rpcLog.map(x => x[0]).slice(0, 3), [ 'status', 'leases', 'set_config' ], 'no extra read when the list is not edited');
+	eq(Object.keys(calls(P2, 'set_config')[0][1].settings), [ 'mode' ], 'only the changed field');
+	// the read fails: the edit goes as it is (the save is not blocked)
+	const P3 = await open('routing', S);
+	P3.env.handlers.status = () => new Error('connection');
+	setv(P3, 'sites.auto_domains', 'found2.example');
+	await clickSave(P3);
+	eq(calls(P3, 'set_config').map(c => c[1].settings.auto_domains), [ [ 'found2.example' ] ], 'sent as edited when the list cannot be read again');
+});
+
+// review ui3 Н7: "Restore from a file" takes the text copy of the settings an older version saved
+test('settings: a text copy of an older version is restored through import, after a yes', async (S) => {
+	const conf = "package vpnpool\n\nconfig vpnpool 'main'\n\toption enabled '1'\n\toption subscription_url 'https://p.example/sub/Токен'\n\nconfig routing 'routing'\n";
+	let imports = [], restores = [];
+	const P = await open('settings', S, {
+		'import': (p) => { imports.push(p); return { ok: true, code: 'imported', daemon: 'signalled' }; },
+		restore: (p) => { restores.push(p); return { ok: false, code: 'invalid_archive', daemon: 'n/a', error: 'invalid_archive' }; }
+	});
+	const file = (text) => { const b = Buffer.from(text, 'utf8'); return { size: b.length, buf: b.buffer.slice(b.byteOffset, b.byteOffset + b.length) }; };
+	const dialog = () => P.env.doc.getElementById('modal_overlay').firstElementChild;
+	const run = async (text, yes) => {
+		const p = P.V.restoreFile(file(text));
+		await P.env.tick(10);
+		if (yes != null) {
+			ok(P.env.ui.modalOpen, 'a dialog is shown before anything is replaced');
+			ok(dialog().textContent.includes('older version'), 'the dialog says it is the copy of an older version: ' + dialog().textContent);
+			P.env.D.fire(dialog().querySelector(yes ? '.vp-confirm-ok' : '.vp-confirm-cancel'), 'click', {});
+			await P.env.tick(10);
+		}
+		return p;
+	};
+	await run(conf, false);
+	eq(imports.length + restores.length, 0, 'cancel: nothing sent');
+	const st0 = calls(P, 'status').length;
+	await run(conf, true);
+	eq(restores.length, 0, 'a text file is not sent as an archive');
+	eq(imports, [ { config: conf } ], 'yes: import with the text of the file (UTF-8 kept)');
+	ok(calls(P, 'status').length > st0, 'the page is loaded again after the import');
+	ok(toastTexts(P).some(t => t.includes('starts again')), 'says the service starts again');
+	// not a configuration: refused here, no dialog, nothing sent
+	P.common.clearToast(); imports = []; P.env.ui.modalOpen = false;
+	await run('hello, this is not a config\n', null);
+	ok(!P.env.ui.modalOpen, 'no dialog for a text that is not a configuration');
+	eq(imports.length + restores.length, 0, 'nothing sent for it');
+	ok(toastTexts(P, 'danger').includes(P.common.codeText('invalid_archive')), 'said: not a backup: ' + JSON.stringify(toastTexts(P, 'danger')));
+	// the router refuses the copy (masked values of an export): its text, the page not reloaded
+	P.common.clearToast();
+	P.env.handlers['import'] = () => ({ ok: false, code: 'masked_values', daemon: 'n/a', error: 'masked_values' });
+	const st1 = calls(P, 'status').length;
+	await run(conf, true);
+	ok(toastTexts(P, 'danger').includes(P.common.codeText('masked_values')), 'the refusal is said: ' + JSON.stringify(toastTexts(P, 'danger')));
+	eq(calls(P, 'status').length, st1, 'not reloaded after a refusal');
+	// an archive still goes the archive way (positive control of the split)
+	restores = [];
+	const gz = Buffer.from([ 0x1f, 0x8b, 8, 0, 1, 2, 3 ]);
+	await P.V.restoreFile({ size: gz.length, buf: gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.length) });
+	await P.env.tick(10);
+	eq(restores.length, 1, 'an archive is checked by restore');
 });
 
 test('routing and settings: Revert brings back the loaded values and the panel says so', async (S) => {
@@ -722,6 +801,21 @@ async function run(srcs, quiet) {
 
 // mutations: [ name, file (common|routing|settings), from, to, tests that must go red ]
 const MUTATIONS = [
+	// ui4 (review ui3 Ж1, Н7)
+	[ 'the found list not read again before the save', 'routing', 'prepare: function(ch) { return self.mergeFound(ch); } });', 'prepare: null });',
+		[ 'routing: a site found automatically while the page was open survives saving the edited list' ] ],
+	[ 'the form ignores a page\'s prepare', 'common', 'return Promise.resolve(self.prepare ? self.prepare(ch) : ch)', 'return Promise.resolve(ch)',
+		[ 'routing: a site found automatically while the page was open survives saving the edited list' ] ],
+	[ 'the user\'s deletion lost in the merge', 'routing', 'if (base.indexOf(d) < 0 || cur.indexOf(d) >= 0) put(d);', 'put(d);',
+		[ 'routing: a site found automatically while the page was open survives saving the edited list' ] ],
+	[ 'a failed read blocks the save', 'common', '.then(null, function() { return ch; }).then(function(pc) {', '.then(function(pc) {',
+		[ 'routing: a site found automatically while the page was open survives saving the edited list' ] ],
+	[ 'a text file sent as an archive', 'settings', 'if (!isGzip(bytes)) return self.importText(textOf(bytes), tooBig);', '',
+		[ 'settings: a text copy of an older version is restored through import, after a yes' ] ],
+	[ 'a text that is not a configuration imported', 'settings', 'if (!looksLikeConfig(text)) {', 'if (false) {',
+		[ 'settings: a text copy of an older version is restored through import, after a yes' ] ],
+	[ 'the text copy imported without asking', 'settings', "\t\t\tif (!yes) return null;\n\t\t\treturn common.call('import'", "\t\t\treturn common.call('import'",
+		[ 'settings: a text copy of an older version is restored through import, after a yes' ] ],
 	[ 'one set_config per changed field', 'common', "return C.call(self.method, { settings: ch }, { handle: [ 'invalid' ], success: CODE_TEXT.saved }).then(function(r) {",
 		"Object.keys(ch).forEach(function(k) { var x = {}; x[k] = ch[k]; C.call(self.method, { settings: x }, { quiet: true }).catch(function() {}); }); return C.call(self.method, { settings: ch }, { handle: [ 'invalid' ], success: CODE_TEXT.saved }).then(function(r) {",
 		[ 'routing: one Save = one set_config with the changed fields only; nothing changed = no call', 'settings: one Save = one set_config with the changed fields only; nothing changed = no call', 'routing: the form sends exactly the set_config schema (keys and types), every field reachable', 'settings: the form sends exactly the set_config schema (keys and types), every field reachable' ] ],

@@ -71,6 +71,8 @@ ctl() {
 		            line=$(grep '^UNIT: ' "$d.log" | tail -1) ;;
 		ui-pages)   REPO_DIR="$d" node "$HERE/ui-pages.test.js" > "$d.log" 2>&1
 		            line=$(grep '^PAGES: ' "$d.log" | tail -1) ;;
+		ui-diag)    REPO_DIR="$d" node "$HERE/ui-diag.test.js" > "$d.log" 2>&1
+		            line=$(grep '^DIAG: ' "$d.log" | tail -1) ;;
 		ui-nodes)   REPO_DIR="$d" node "$HERE/ui-nodes.test.js" > "$d.log" 2>&1
 		            line=$(grep '^NODES: ' "$d.log" | tail -1) ;;
 		ui-overview) REPO_DIR="$d" node "$HERE/ui-overview.test.js" > "$d.log" 2>&1
@@ -353,22 +355,22 @@ ctl ui-backend-code-without-text ui-unit fail 'FAIL - every code the backend ans
 	"$RPCD" '|| { rep false no_nodes; exit 0; }' '|| { rep false brand_new_code; exit 0; }'
 # ui3: the settings pages send only the changed fields (one set_config); the Telegram test uses
 # what is typed (rpcd tg_test {token, chat, via_proxy}), the masked token = the saved one
-ctl ui3-pages-every-field-sent ui-pages fail 'FAIL - routing: every field of the page;FAIL - settings: every field of the page;FAIL - routing: one Save;FAIL - settings: one Save;FAIL - routing: leaving the page;FAIL - settings: leaving the page;FAIL - settings: after a save;FAIL - routing and settings: Revert;FAIL - routing: Save with nothing changed;FAIL - settings: Save with nothing changed;FAIL - routing: after a refused save' \
+ctl ui3-pages-every-field-sent ui-pages fail 'FAIL - routing: every field of the page;FAIL - settings: every field of the page;FAIL - routing: one Save;FAIL - settings: one Save;FAIL - routing: leaving the page;FAIL - settings: leaving the page;FAIL - settings: after a save;FAIL - routing and settings: Revert;FAIL - routing: Save with nothing changed;FAIL - settings: Save with nothing changed;FAIL - routing: after a refused save;FAIL - routing: a site found automatically while the page was open' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js 'if (has(cur, f) && cur[f] !== undefined && !same(cur[f], this.base[f])) out[f] = cur[f];' 'if (has(cur, f) && cur[f] !== undefined) out[f] = cur[f];'
-ctl ui3-tg-test-ignores-typed rpcd fail 'rpcd/tg_test/typed-values-used ;rpcd/tg_test/empty-typed-token-is-none ;rpcd/tg_test/bad-typed-values-refused ;rpcd/tg_test/token-with-a-line-break-refused ;rpcd/tg_test/overlong-token-refused ' \
+ctl ui3-tg-test-ignores-typed rpcd fail 'rpcd/tg_test/typed-values-used ;rpcd/tg_test/empty-typed-token-is-none ;rpcd/tg_test/bad-typed-values-refused ;rpcd/tg_test/token-with-a-line-break-refused ;rpcd/tg_test/overlong-token-refused ;rpcd/tg_test/longest-token-accepted ;rpcd/tg_test/21-digit-bot-number-refused ' \
 	"$RPCD" "*) tok=\$v ;; esac; fi" '*) : ;; esac; fi'
 ctl ui3-tg-test-mask-as-token rpcd fail 'rpcd/tg_test/masked-token-means-the-saved-one ' \
 	"$RPCD" "case \"\$v\" in *'***'*) ;; *) tok=\$v ;; esac" 'tok=$v'
 ctl ui3-tg-test-multiline-token rpcd fail 'rpcd/tg_test/token-with-a-line-break-refused ' \
 	"$RPCD" "{ [ \"\$(printf '%s' \"\$tok\" | wc -l)\" -eq 0 ] && printf" '{ printf'
-ctl ui3-tg-send-ignores-override rpcd fail 'rpcd/tg_test/typed-values-used ' \
+ctl ui3-tg-send-ignores-override rpcd fail 'rpcd/tg_test/typed-values-used ;rpcd/tg_test/longest-token-accepted ' \
 	"$LIBX/lib.sh" 'tok=${2:-$(uci -q get vpnpool.main.telegram_token)}' 'tok=$(uci -q get vpnpool.main.telegram_token)'
 # review ui3: Revert puts the loaded data back (LuCI's parse rewrites it); a token is bounded
 ctl ui3-pages-revert-from-rewritten-data ui-pages fail 'FAIL - routing: Save with nothing changed;FAIL - settings: Save with nothing changed;FAIL - routing: after a refused save;FAIL - routing and settings: Revert' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js '			restoreSnap(m, self.snaps[i]);' ''
-ctl ui3-token-unbounded-api rpcd fail 'rpcd/set_config/overlong-token-refused ' \
+ctl ui3-token-unbounded-api rpcd fail 'rpcd/set_config/overlong-token-refused ;rpcd/set_config/21-digit-bot-number-refused ' \
 	"$LIBX/api.uc" 'chk_re(v, /^[0-9]{1,20}:[A-Za-z0-9_-]{1,100}$/, ' 'chk_re(v, /^[0-9]+:[A-Za-z0-9_-]+$/, '
-ctl ui3-token-unbounded-tg-test rpcd fail 'rpcd/tg_test/overlong-token-refused ' \
+ctl ui3-token-unbounded-tg-test rpcd fail 'rpcd/tg_test/overlong-token-refused ;rpcd/tg_test/21-digit-bot-number-refused ' \
 	"$RPCD" "grep -Eqx '[0-9]{1,20}:[A-Za-z0-9_-]{1,100}'" "grep -Eqx '[0-9]+:[A-Za-z0-9_-]+'"
 ctl ui-pages-feed-no-i18n ui-unit fail 'FAIL - packaging' \
 	.github/workflows/pages.yml 'expected 3 .ipk' 'expected 2 .ipk'
@@ -925,6 +927,55 @@ ctl s6-status-migration-failure-hidden migrate fail 'migrate/failure-visible-in-
 	"$LIBX/status.uc" "let migration = (o('schema', '') != '2' && type(migfail) == 'object')" 'let migration = (false)'
 ctl s6-upgrade-never-migrates upgrade fail 'migrated (schema 2) ;the service is started again after the migration ;the call right before the first one on the migrated config ' \
 	package/vpnpool/files/etc/uci-defaults/90-vpnpool-2.0 '[ -x /usr/libexec/vpnpool/migrate.sh ] || exit 0' 'exit 0'
+# ---- ui4: "Update" of one subscription (fetch.sh --only, the daemon's queue, rpcd sub_refresh)
+ctl ui4-fetch-only-ignored fetch fail 'fetch/only-one-subscription ;fetch/only-the-others-from-their-own-cache ' \
+	"$LIBX/fetch.sh" 'if [ "${1:-}" = --only ]; then' 'if false; then'
+ctl ui4-fetch-only-others-not-from-cache fetch fail 'fetch/only-the-others-from-their-own-cache ' \
+	"$LIBX/fetch.sh" '[ -f "$SRCDIR/s-$k.raw" ] || { [ -s "$CACHEDIR/s-$k.raw" ] && cp "$CACHEDIR/s-$k.raw" "$SRCDIR/s-$k.raw"; }' ':'
+ctl ui4-fetch-only-status-replaced fetch fail 'fetch/only-one-subscription ' \
+	"$LIBX/fetch.sh" '(if $keep then $p else {} end;' '({};'
+ctl ui4-fetch-only-stamp-written fetch fail 'fetch/only-one-subscription ' \
+	"$LIBX/fetch.sh" '[ -z "$ONLY" ] && echo "$(date +%s) $(sources_sig)" | write_atomic "$FETCH_STAMP"' 'echo "$(date +%s) $(sources_sig)" | write_atomic "$FETCH_STAMP"'
+ctl ui4-daemon-queue-ignored daemon fail 'daemon/reload-fetches-only-the-queued-subscriptions ' \
+	"$LIBX/vpnpoold" 'elif [ -s "$FETCH_ONLY" ]; then' 'elif false; then'
+ctl ui4-daemon-refetch-keeps-queue daemon fail 'daemon/full-refetch-takes-the-queue-along ' \
+	"$LIBX/vpnpoold" 'rm -f "$FETCH_ONLY"   # every subscription is fetched now' ':'
+ctl ui4-rpcd-sub-refresh-not-queued rpcd fail 'rpcd/sub_refresh/ok ' \
+	"$RPCD" 'echo "$sid" >> "$FETCH_ONLY"' ':'
+ctl ui4-rpcd-sub-refresh-turned-off rpcd fail 'rpcd/sub_refresh/turned-off-subscription-refused ' \
+	"$RPCD" '[ "$en" = 1 ] || { rep false disabled; exit 0; }' ':'
+ctl ui4-rpcd-sub-refresh-unknown rpcd fail 'rpcd/sub_refresh/unknown-is-not-found-nothing-queued ' \
+	"$RPCD" '[ -n "$en" ] || { rep false not_found; exit 0; }' ':'
+# ---- ui4: the log and the parameters of the Diagnostics page
+ctl ui4-logs-token-unmasked rpcd fail 'rpcd/logs/ok ' \
+	"$LIBX/lib.sh" "sed -E 's#(bot[0-9]{1,20}):[A-Za-z0-9_-]+#\\1:***#g'" 'cat'
+ctl ui4-logs-other-programs rpcd fail 'rpcd/logs/ok ;rpcd/logs/default-200-lines-at-most ' \
+	"$LIBX/lib.sh" 'grep -E "$NAME(\[[0-9]+\])?: "' 'grep -E "."'
+ctl ui4-logs-unbounded rpcd fail 'rpcd/logs/long-lines-cut-and-bounded ' \
+	"$LIBX/lib.sh" 'if (t > 160000) break;' 'if (t > 1600000) break;'
+ctl ui4-diag-no-params rpcd fail 'rpcd/diag/technical-parameters-and-engine ' \
+	"$LIBX/diag.sh" '		params: $params,' ''
+# ---- ui4 (review ui3 Ж2): the bot number of a token is bounded too; the longest token passes tg_test
+ctl ui4-tg-test-bot-number-unbounded rpcd fail 'rpcd/tg_test/21-digit-bot-number-refused ' \
+	"$RPCD" "grep -Eqx '[0-9]{1,20}:[A-Za-z0-9_-]{1,100}'" "grep -Eqx '[0-9]{1,21}:[A-Za-z0-9_-]{1,100}'"
+ctl ui4-api-bot-number-unbounded rpcd fail 'rpcd/set_config/21-digit-bot-number-refused ' \
+	"$LIBX/api.uc" 'chk_re(v, /^[0-9]{1,20}:[A-Za-z0-9_-]{1,100}$/, ' 'chk_re(v, /^[0-9]{1,21}:[A-Za-z0-9_-]{1,100}$/, '
+ctl ui4-tg-test-longest-refused rpcd fail 'rpcd/tg_test/longest-token-accepted ' \
+	"$RPCD" "grep -Eqx '[0-9]{1,20}:[A-Za-z0-9_-]{1,100}'" "grep -Eqx '[0-9]{1,20}:[A-Za-z0-9_-]{1,99}'"
+# ---- ui4: the screens
+ctl ui4-diag-param-dropped ui-diag fail 'FAIL - checks, the engine and every technical parameter from diag' \
+	"$VIEW/diagnostics.js" "row(_('Mark of the routed traffic'), p.fwmark, 'fwmark')," ''
+ctl ui4-diag-polls-diag ui-diag fail 'FAIL - log: more than 40 lines' \
+	"$VIEW/diagnostics.js" 'poll.add(L.bind(this.loadLog, this), 10);' "poll.add(L.bind(function() { this.loadLog(); return common.call('diag', {}); }, this), 10);"
+ctl ui4-nodes-group-update-all ui-nodes fail 'FAIL - subscription "Update": only that subscription' \
+	"$VIEW/nodes.js" 'return this.handleSubRefresh(G.g.sub);' 'return this.handleRefresh();'
+ctl ui4-pages-found-not-merged ui-pages fail 'FAIL - routing: a site found automatically while the page was open' \
+	"$VIEW/routing.js" 'prepare: function(ch) { return self.mergeFound(ch); } });' 'prepare: null });'
+ctl ui4-pages-text-as-archive ui-pages fail 'FAIL - settings: a text copy of an older version' \
+	"$VIEW/settings.js" 'if (!isGzip(bytes)) return self.importText(textOf(bytes), tooBig);' ''
+# the guard has no exception for the Diagnostics page: a technical word in its text is caught
+ctl ui4-diag-technical-label uitext fail 'uitext/real-app-no-new-violations ;uitext/baseline-gates-new-violations ;uitext/stale-baseline-line-fails ' \
+	"$VIEW/diagnostics.js" "_('Port that receives the routed traffic')" "_('tproxy port that receives the routed traffic')"
 wait
 for n in $NC_ORDER; do
 	o="$TMPBASE/$n.out"
