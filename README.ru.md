@@ -16,12 +16,29 @@ Reality как пул, проверяет каждый узел по тем се
 переключается на рабочий. Узлы AmneziaWG живут в том же пуле. Управление — из LuCI,
 Telegram-бота или обычным `uci`.
 
+<p align="center">
+  <img alt="Вкладка «Обзор» vpnpool: VPN работает, узел, страна выхода, задержка, скорость, тревоги, подписки, устройства" src="docs/screenshots/overview.jpg" width="820">
+</p>
 
 ```sh
 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
 ```
 
 <sub>Одна команда для любой OpenWrt: `.apk` на 25.12+, `.ipk` на 23.05 / 24.10 — формат установщик выбирает сам. Другие варианты — в разделе [Установка](#-установка).</sub>
+
+---
+
+## 📸 Скриншоты
+
+Демо-данные на тестовом стенде (выдуманные узлы, адреса скрыты). Язык и тема — как в настройках LuCI.
+
+| **Обзор** | **Узлы** |
+|---|---|
+| ![Вкладка «Обзор» vpnpool](docs/screenshots/overview.jpg) | ![Вкладка «Узлы» vpnpool](docs/screenshots/nodes.jpg) |
+| **Маршруты** | **Настройки** |
+| ![Вкладка «Маршруты» vpnpool](docs/screenshots/routes.jpg) | ![Вкладка «Настройки» vpnpool](docs/screenshots/settings.jpg) |
+| **Диагностика** | **На телефоне** |
+| ![Вкладка «Диагностика» vpnpool](docs/screenshots/diagnostics.jpg) | ![«Обзор» на телефоне](docs/screenshots/overview-mobile.jpg) ![«Узлы» на телефоне](docs/screenshots/nodes-mobile.jpg) ![«Настройки» на телефоне](docs/screenshots/settings-mobile.jpg) |
 
 ---
 

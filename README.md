@@ -16,12 +16,29 @@ subscription as a pool, checks every node against the services *you* need, and s
 to a working one by itself. AmneziaWG nodes join the same pool. Managed from LuCI, a
 Telegram bot or plain `uci`.
 
+<p align="center">
+  <img alt="vpnpool Overview tab: the VPN works, node, exit country, delay, speed, alerts, subscriptions, devices" src="docs/screenshots/overview.jpg" width="820">
+</p>
 
 ```sh
 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
 ```
 
 <sub>One command for every OpenWrt: `.apk` on 25.12+, `.ipk` on 23.05 / 24.10 — the installer picks the format itself. More options in [Install](#-install).</sub>
+
+---
+
+## 📸 Screenshots
+
+Demo data on the test stand (made-up nodes; addresses hidden). The interface follows the LuCI language and theme.
+
+| **Overview** | **Nodes** |
+|---|---|
+| ![vpnpool Overview tab](docs/screenshots/overview.jpg) | ![vpnpool Nodes tab](docs/screenshots/nodes.jpg) |
+| **Routes** | **Settings** |
+| ![vpnpool Routes tab](docs/screenshots/routes.jpg) | ![vpnpool Settings tab](docs/screenshots/settings.jpg) |
+| **Diagnostics** | **On a phone** |
+| ![vpnpool Diagnostics tab](docs/screenshots/diagnostics.jpg) | ![Overview on a phone](docs/screenshots/overview-mobile.jpg) ![Nodes on a phone](docs/screenshots/nodes-mobile.jpg) ![Settings on a phone](docs/screenshots/settings-mobile.jpg) |
 
 ---
 
