@@ -1287,17 +1287,21 @@ s_logs() {
 		i=1; while [ $i -le 8 ]; do echo "echo 'Fri Oct 17 10:00:0$i 2026 user.notice vpnpool: line $i'"; i=$((i + 1)); done
 		echo "echo 'Fri Oct 17 10:00:09 2026 user.notice vpnpool[42]: telegram https://api.telegram.org/bot123456:AAsecretTOKEN_x/sendMessage failed'"
 		echo "echo 'Fri Oct 17 10:00:10 2026 kern.info kernel: not ours either'"
+		echo "echo 'Fri Oct 17 10:00:11 2026 user.notice vpnpool: fetch: http://198.51.100.20:2096/sub/8q79SECRETpath?token=SECRETq -> 1 nodes'"
+		echo "echo 'Fri Oct 17 10:00:12 2026 user.notice vpnpool: node vless://9c5b7d60-SECRET-uuid@198.51.100.21:443?pbk=SECRETkey&sid=SECRETsid failed'"
 	} > "$LOGREAD"; chmod +x "$LOGREAD"
 }
 c_logs() {
-	expect_jq "the last 5 lines of the service, oldest first" "$R" '.source=="service" and (.lines|length)==5 and .lines[0]=="Fri Oct 17 10:00:05 2026 line 5" and .lines[3]=="Fri Oct 17 10:00:08 2026 line 8"'
+	expect_jq "the last 5 lines of the service, oldest first" "$R" '.source=="service" and (.lines|length)==5 and .lines[0]=="Fri Oct 17 10:00:07 2026 line 7" and .lines[1]=="Fri Oct 17 10:00:08 2026 line 8"'
 	expect_jq "other programs' lines are not in it" "$R" '[.lines[] | select(contains("not ours"))] | length == 0'
-	expect_jq "a bot token is masked" "$R" '.lines[4] | (contains("bot123456:***") and (contains("AAsecretTOKEN") | not))'
+	expect_jq "a bot token is masked" "$R" '.lines[2] | (contains("https://api.telegram.org/***") and (contains("AAsecretTOKEN") | not))'
+	expect_jq "a subscription address keeps its host, not its path or query" "$R" '.lines[3] | (contains("fetch: http://198.51.100.20:2096/*** -> 1 nodes") and (contains("SECRET") | not))'
+	expect_jq "a node link keeps its server, not its user id or keys" "$R" '.lines[4] | (contains("vless://***@198.51.100.21:443/*** failed") and (contains("SECRET") | not))'
 }
 M logs '{"lines":5}' - - c_logs '{"lines":0}' -
 s_logs; rcall logs '{}'
 begin "rpcd/logs/default-200-lines-at-most"
-expect_jq "every line of the service (9 < 200)" "$R" '.ok==true and (.lines|length)==9'
+expect_jq "every line of the service (11 < 200)" "$R" '.ok==true and (.lines|length)==11'
 end
 rcall logs '{"lines":501}'
 begin "rpcd/logs/more-than-500-refused"

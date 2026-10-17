@@ -936,6 +936,11 @@ ctl s6-status-migration-failure-hidden migrate fail 'migrate/failure-visible-in-
 	"$LIBX/status.uc" "let migration = (o('schema', '') != '2' && type(migfail) == 'object')" 'let migration = (false)'
 ctl s6-upgrade-never-migrates upgrade fail 'FAIL - migrated (schema 2);FAIL - the service is started again after the migration;FAIL - the call right before the first one on the migrated config' \
 	package/vpnpool/files/etc/uci-defaults/90-vpnpool-2.0 '[ -x /usr/libexec/vpnpool/migrate.sh ] || exit 0' 'exit 0'
+# the Diagnostics log: the path / query of an address and the user part of a node link are masked
+ctl lib-log-path-shown rpcd fail 'rpcd/logs/ok ' \
+	"$LIBX/lib.sh" "; s#([A-Za-z][A-Za-z0-9+.-]*://[^/?\# ]+)[/?\#][^ ]*#\1/***#g'" "'"
+ctl lib-log-link-user-shown rpcd fail 'rpcd/logs/ok ' \
+	"$LIBX/lib.sh" '; s#([A-Za-z][A-Za-z0-9+.-]*://)[^@/ ]+@#\1***@#g' ''
 # traffic per device: a public source is no device; the router's own connections are one entry
 ctl status-public-source-a-device status fail 'status/devices-are-lan-sources ' \
 	"$LIBX/status.uc" '	if (!kind) continue;' '	if (!kind) kind = "lan";'
