@@ -300,6 +300,10 @@ msgstr[0] "%d узел в работе"
 msgstr[1] "%d узла в работе"
 msgstr[2] "%d узлов в работе"
 
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:384
+msgid "This router"
+msgstr "Этот роутер"
+
 #: files/www/luci-static/resources/view/vpnpool/dashboard.js:387
 msgid "The VPN is not running: there is no traffic to show."
 msgstr "VPN не работает: трафика нет."

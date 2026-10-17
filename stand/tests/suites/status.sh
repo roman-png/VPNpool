@@ -70,6 +70,26 @@ begin "status/telegram-token-masked"
 expect_eq "token occurrences in status" "$(printf '%s' "$SOUT" | gcount 'SECRET-BOT-TOKEN')" 0
 expect_jq "masked form + a set flag" "$SOUT" '.settings.telegram_token=="123456:***" and .settings.telegram_token_set==true'
 end
+# traffic per device: LAN sources only (a lease named "*" has no name); the router's own
+# connections are one entry; a public source address is no device of this network
+c() { printf '{"metadata":{"sourceIP":"%s"},"chains":["Node001"],"upload":%s,"download":%s}' "$1" "$2" "$3"; }
+printf '{"connections":[%s,%s,%s,%s,%s,%s,%s]}' "$(c 192.168.1.5 1 100)" "$(c 127.0.0.1 2 50)" "$(c ::1 3 40)" 	"$(c 57.144.244.196 0 53)" "$(c 100.70.0.9 4 30)" "$(c fd00::5 5 20)" "$(c 192.168.1.6 6 10)" > "$FXS/conns-dev.json"
+printf '1 aa:bb:cc:00:00:05 192.168.1.5 * 01:aa
+1 aa:bb:cc:00:00:06 192.168.1.6 laptop 01:bb
+' > /tmp/dhcp.leases
+mock_on; mock_rule 'GET http://127.0.0.1:9091/proxies' 200 "$FXS/proxies.json"   # the first matching rule wins
+mock_rule 'GET http://127.0.0.1:9091/connections' 200 "$FXS/conns-dev.json"
+measure_status
+begin "status/devices-are-lan-sources"
+expect_jq "positive control: devices listed" "$SOUT" '(.client_traffic|length) >= 1'
+expect_jq "the router: one entry for 127.0.0.1 and ::1" "$SOUT" '[.client_traffic[]|select(.self==true)] | length==1 and .[0].conns==2 and .[0].down==90'
+expect_jq "no public source" "$SOUT" '[.client_traffic[]|select(.ip=="57.144.244.196")]|length==0'
+expect_jq "a lease named * has no name" "$SOUT" '(.client_traffic[]|select(.ip=="192.168.1.5")|.host)==""'
+expect_jq "a named lease" "$SOUT" '(.client_traffic[]|select(.ip=="192.168.1.6")|.host)=="laptop"'
+expect_jq "CGNAT and ULA sources are devices" "$SOUT" '([.client_traffic[]|select(.ip=="100.70.0.9" or .ip=="fd00::5")]|length)==2'
+expect_jq "exactly five entries" "$SOUT" '(.client_traffic|length)==5'
+end
+rm -f /tmp/dhcp.leases
 daemon_stop
 
 # ---- stage 3 + 6: subscriptions (sections, ROADMAP 9.1) masked, each with its own fetch result,

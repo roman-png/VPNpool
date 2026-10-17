@@ -177,7 +177,7 @@ cmd_clients() {
 		(.client_traffic // []) as $c |
 		if ($c|length)==0 then "no active client connections"
 		else "top clients:\n" + ($c | .[:15] | map(
-			((.host // "") | if .=="" then .ip else . end)
+			(if .self then "this router" else ((.host // "") as $h | if $h=="" then .ip else $h end) end)
 			+ " ↓" + hb(.down) + " ↑" + hb(.up)) | join("\n")) end
 	' 2>/dev/null
 }
