@@ -34,7 +34,7 @@ sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.
 | 🚦 **Fail-safe** | The LAN is never routed into a dead tunnel — no working node, internet stays direct |
 | 📡 **Subscriptions** | Auto-update, several subscriptions in one pool, multi-client User-Agent probing |
 | 🧩 **Protocols** | VLESS (Reality + Vision), VMess, Trojan, Shadowsocks, Hysteria2, TUIC, sing-box JSON, **AmneziaWG 1.x–3.1** |
-| 🧭 **Routing** | Only selected sites or everything-except, 26 community lists, per-device rules |
+| 🧭 **Routing** | Only selected sites or everything-except, 24 community lists, per-device rules |
 | 🛡️ **Leak protection** | IPv6 guard, kill-switch, DNS-leak guard, TLS-fragment anti-DPI |
 | 🤖 **Telegram** | Alerts + two-way bot with a button menu, works where Telegram is blocked |
 | 📟 **Small routers** | Runs on 16 MB flash — sing-box lives in RAM |
@@ -176,7 +176,7 @@ uci set vpnpool.main.enabled='1'; uci commit vpnpool
 
 **Routing**
 - Proxy **only** selected lists/domains, or **everything except** them
-- 26 auto-updating community lists ([itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains)) + your domains
+- 24 auto-updating community lists ([itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains)) + your domains
 - Per-device rules picked from DHCP names, matched by MAC
 - Adaptive routing: finds sites blocked for direct access and routes them itself
 - Anti-DPI: TLS ClientHello fragmentation, off / on / aggressive
@@ -331,7 +331,7 @@ A 1.x configuration is moved to this layout at install (a copy of the old one go
 | Data quota, favourites, speed / unlock tests | ✅ | — | — | — |
 | Two-way Telegram bot | ✅ | — | — | — |
 | Adaptive routing, anti-DPI | ✅ | — | — | — |
-| Community SRS lists | ✅ 26 | ✅ | own | own |
+| Community SRS lists | ✅ 24 | ✅ | own | own |
 | Per-device routing | ✅ DHCP name / MAC | — | ✅ | partial |
 | Coexists with podkop | ✅ | n/a | — | — |
 

@@ -80,12 +80,12 @@ msgid "VPN works"
 msgstr "VPN работает"
 
 #: files/www/luci-static/resources/view/vpnpool/dashboard.js:140
-#: files/www/luci-static/resources/view/vpnpool/routing.js:204
+#: files/www/luci-static/resources/view/vpnpool/routing.js:203
 msgid "Everything except the chosen sites"
 msgstr "Всё, кроме выбранных сайтов"
 
 #: files/www/luci-static/resources/view/vpnpool/dashboard.js:140
-#: files/www/luci-static/resources/view/vpnpool/routing.js:202
+#: files/www/luci-static/resources/view/vpnpool/routing.js:201
 msgid "Only the chosen sites"
 msgstr "Только выбранные сайты"
 
@@ -1491,232 +1491,232 @@ msgstr "Российские сайты из-за границы"
 msgid "Russian sites that open only from a Russian address. For a router outside Russia with a node in Russia."
 msgstr "Российские сайты, которые открываются только с российского адреса. Для роутера за границей, когда есть узел в России."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:26
+#: files/www/luci-static/resources/view/vpnpool/routing.js:25
 msgid "Ready-made lists: by kind"
 msgstr "Готовые списки: по видам"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:27
+#: files/www/luci-static/resources/view/vpnpool/routing.js:26
 msgid "Blocked sites"
 msgstr "Заблокированные сайты"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:27
+#: files/www/luci-static/resources/view/vpnpool/routing.js:26
 msgid "Sites the providers block on the authorities' demand."
 msgstr "Сайты, которые провайдеры блокируют по требованию властей."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:28
+#: files/www/luci-static/resources/view/vpnpool/routing.js:27
 msgid "Services closed to Russia"
 msgstr "Сервисы, закрытые для России"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:28
+#: files/www/luci-static/resources/view/vpnpool/routing.js:27
 msgid "Foreign services that do not open from Russian addresses themselves."
 msgstr "Зарубежные сервисы, которые сами не открываются с российских адресов."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:29
+#: files/www/luci-static/resources/view/vpnpool/routing.js:28
 msgid "News"
 msgstr "Новости"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:29
+#: files/www/luci-static/resources/view/vpnpool/routing.js:28
 msgid "News sites and media."
 msgstr "Новостные сайты и СМИ."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:30
+#: files/www/luci-static/resources/view/vpnpool/routing.js:29
 msgid "Anime"
 msgstr "Аниме"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:30
+#: files/www/luci-static/resources/view/vpnpool/routing.js:29
 msgid "Anime sites."
 msgstr "Сайты с аниме."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:31
+#: files/www/luci-static/resources/view/vpnpool/routing.js:30
 msgid "Adult sites"
 msgstr "Сайты для взрослых"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:32
+#: files/www/luci-static/resources/view/vpnpool/routing.js:31
 msgid "Online cinema."
 msgstr "Онлайн-кинотеатр."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:34
+#: files/www/luci-static/resources/view/vpnpool/routing.js:33
 msgid "Ready-made lists: services"
 msgstr "Готовые списки: сервисы"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:41
+#: files/www/luci-static/resources/view/vpnpool/routing.js:40
 msgid "Google AI (Gemini)"
 msgstr "ИИ Google (Gemini)"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:41
+#: files/www/luci-static/resources/view/vpnpool/routing.js:40
 msgid "Google AI services, which Google closes to Russia."
 msgstr "ИИ-сервисы Google, которые Google закрывает для России."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:46
+#: files/www/luci-static/resources/view/vpnpool/routing.js:45
 msgid "Ready-made lists: hosting providers"
 msgstr "Готовые списки: хостинги"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:47
+#: files/www/luci-static/resources/view/vpnpool/routing.js:46
 msgid "Addresses of large hosting providers. Turn them on only if sites hosted there do not open: these lists are big."
 msgstr "Адреса крупных хостингов. Включайте, только если сайты на них не открываются: эти списки большие."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:48
+#: files/www/luci-static/resources/view/vpnpool/routing.js:47
 msgid "All large hosting providers"
 msgstr "Все крупные хостинги"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:48
+#: files/www/luci-static/resources/view/vpnpool/routing.js:47
 msgid "Hetzner, OVH, DigitalOcean, Cloudflare, Amazon and Akamai together."
 msgstr "Hetzner, OVH, DigitalOcean, Cloudflare, Amazon и Akamai вместе."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:68
+#: files/www/luci-static/resources/view/vpnpool/routing.js:67
 msgid "Ready-made lists"
 msgstr "Готовые списки"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:119
+#: files/www/luci-static/resources/view/vpnpool/routing.js:118
 msgid "not on the network now"
 msgstr "сейчас не в сети"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:127
+#: files/www/luci-static/resources/view/vpnpool/routing.js:126
 msgid "No devices have been seen on the network yet. Add them by address below."
 msgstr "В сети пока не видно ни одного устройства. Добавьте их по адресу ниже."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:180
+#: files/www/luci-static/resources/view/vpnpool/routing.js:179
 msgid "This site is already in the list."
 msgstr "Этот сайт уже есть в списке."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:184
+#: files/www/luci-static/resources/view/vpnpool/routing.js:183
 msgid "Added to your sites. Press \"Save\" to apply."
 msgstr "Добавлено в ваши сайты. Нажмите «Сохранить», чтобы применить."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:198
+#: files/www/luci-static/resources/view/vpnpool/routing.js:197
 msgid "What goes through the VPN"
 msgstr "Что идёт через VPN"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:203
+#: files/www/luci-static/resources/view/vpnpool/routing.js:202
 msgid "The ready-made lists and your sites go through the VPN, everything else goes directly. Faster, and saves the VPN traffic."
 msgstr "Готовые списки и ваши сайты идут через VPN, всё остальное — напрямую. Быстрее и экономит трафик VPN."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:205
+#: files/www/luci-static/resources/view/vpnpool/routing.js:204
 msgid "All traffic goes through the VPN; the ready-made lists and your sites go directly."
 msgstr "Весь трафик идёт через VPN, а готовые списки и ваши сайты — напрямую."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:212
+#: files/www/luci-static/resources/view/vpnpool/routing.js:211
 msgid "The chosen lists go through the VPN. They are kept up to date automatically."
 msgstr "Выбранные списки идут через VPN. Они обновляются автоматически."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:215
+#: files/www/luci-static/resources/view/vpnpool/routing.js:214
 msgid "The chosen lists go directly, past the VPN. They are kept up to date automatically."
 msgstr "Выбранные списки идут напрямую, мимо VPN. Они обновляются автоматически."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:225
+#: files/www/luci-static/resources/view/vpnpool/routing.js:224
 msgid "Your sites"
 msgstr "Ваши сайты"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:227
+#: files/www/luci-static/resources/view/vpnpool/routing.js:226
 msgid "Your sites go through the VPN."
 msgstr "Ваши сайты идут через VPN."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:230
+#: files/www/luci-static/resources/view/vpnpool/routing.js:229
 msgid "Your sites go directly, past the VPN."
 msgstr "Ваши сайты идут напрямую, мимо VPN."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:232
+#: files/www/luci-static/resources/view/vpnpool/routing.js:231
 msgid "Sites"
 msgstr "Сайты"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:232
+#: files/www/luci-static/resources/view/vpnpool/routing.js:231
 msgid "One per line, for example example.com. Subdomains are included too."
 msgstr "По одному в строке, например example.com. Поддомены тоже входят."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:235
+#: files/www/luci-static/resources/view/vpnpool/routing.js:234
 msgid "A site does not open?"
 msgstr "Сайт не открывается?"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:237
+#: files/www/luci-static/resources/view/vpnpool/routing.js:236
 msgid "Site address"
 msgstr "Адрес сайта"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:243
+#: files/www/luci-static/resources/view/vpnpool/routing.js:242
 msgid "Add to your sites"
 msgstr "Добавить в ваши сайты"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:248
+#: files/www/luci-static/resources/view/vpnpool/routing.js:247
 msgid "Enter its address: it will go through the VPN. If it still does not open, check the nodes: the site may be closed for the current node."
 msgstr "Введите его адрес — он пойдёт через VPN. Если всё равно не открывается, проверьте узлы: сайт может быть закрыт для текущего узла."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:251
+#: files/www/luci-static/resources/view/vpnpool/routing.js:250
 msgid "Enter its address: it will go directly, past the VPN. This helps with sites that do not open from abroad."
 msgstr "Введите его адрес — он пойдёт напрямую, мимо VPN. Это помогает с сайтами, которые не открываются из-за границы."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:253
+#: files/www/luci-static/resources/view/vpnpool/routing.js:252
 msgid "Find blocked sites automatically"
 msgstr "Находить заблокированные сайты автоматически"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:254
+#: files/www/luci-static/resources/view/vpnpool/routing.js:253
 msgid "The router checks which sites do not open directly and sends them through the VPN, in any mode. They appear in the list below."
 msgstr "Роутер проверяет, какие сайты не открываются напрямую, и пускает их через VPN в любом режиме. Они появляются в списке ниже."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:260
+#: files/www/luci-static/resources/view/vpnpool/routing.js:259
 msgid "Save the page first: then the search can be started right away."
 msgstr "Сначала сохраните страницу — тогда поиск можно будет запустить сразу."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:263
+#: files/www/luci-static/resources/view/vpnpool/routing.js:262
 msgid "The search has started. Found sites appear in the list when the page is opened again."
 msgstr "Поиск начался. Найденные сайты появятся в списке, когда страница будет открыта заново."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:264
+#: files/www/luci-static/resources/view/vpnpool/routing.js:263
 msgid "Search now"
 msgstr "Искать сейчас"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:268
+#: files/www/luci-static/resources/view/vpnpool/routing.js:267
 msgid "Found automatically"
 msgstr "Найдены автоматически"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:269
+#: files/www/luci-static/resources/view/vpnpool/routing.js:268
 msgid "While the automatic search is on, these sites go through the VPN in any mode. Delete a line to remove a site."
 msgstr "Пока включён автоматический поиск, эти сайты идут через VPN в любом режиме. Удалите строку, чтобы убрать сайт."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:273
+#: files/www/luci-static/resources/view/vpnpool/routing.js:272
 msgid "Devices"
 msgstr "Устройства"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:277
+#: files/www/luci-static/resources/view/vpnpool/routing.js:276
 msgid "All devices of the network"
 msgstr "Все устройства сети"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:277
+#: files/www/luci-static/resources/view/vpnpool/routing.js:276
 msgid "Every device uses the routes above."
 msgstr "Все устройства идут по маршрутам выше."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:278
+#: files/www/luci-static/resources/view/vpnpool/routing.js:277
 msgid "Only the chosen devices"
 msgstr "Только выбранные устройства"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:278
+#: files/www/luci-static/resources/view/vpnpool/routing.js:277
 msgid "The chosen devices use the routes above; the others go directly, past the VPN."
 msgstr "Выбранные устройства идут по маршрутам выше, остальные — напрямую, мимо VPN."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:279
+#: files/www/luci-static/resources/view/vpnpool/routing.js:278
 msgid "All except the chosen devices"
 msgstr "Все, кроме выбранных устройств"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:279
+#: files/www/luci-static/resources/view/vpnpool/routing.js:278
 msgid "The chosen devices go directly, past the VPN; the others use the routes above."
 msgstr "Выбранные устройства идут напрямую, мимо VPN, остальные — по маршрутам выше."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:280
+#: files/www/luci-static/resources/view/vpnpool/routing.js:279
 msgid "Chosen devices"
 msgstr "Выбранные устройства"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:284
+#: files/www/luci-static/resources/view/vpnpool/routing.js:283
 msgid "Other addresses"
 msgstr "Другие адреса"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:285
+#: files/www/luci-static/resources/view/vpnpool/routing.js:284
 msgid "Addresses like 192.168.1.50, one per line: for devices with a fixed address that are not in the list above."
 msgstr "Адреса вида 192.168.1.50, по одному в строке: для устройств с постоянным адресом, которых нет в списке выше."
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:297
+#: files/www/luci-static/resources/view/vpnpool/routing.js:296
 #: files/usr/share/luci/menu.d/luci-app-vpnpool.json
 msgid "Routes"
 msgstr "Маршруты"
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:298
+#: files/www/luci-static/resources/view/vpnpool/routing.js:297
 msgid "Choose what goes through the VPN. Changes apply after \"Save\"."
 msgstr "Выберите, что идёт через VPN. Изменения применяются после «Сохранить»."
 
