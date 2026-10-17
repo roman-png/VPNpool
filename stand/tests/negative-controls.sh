@@ -330,7 +330,9 @@ ctl uitext-new-technical-string uitext fail 'uitext/real-app-no-new-violations ;
 # ui0: the guard reads the shared modules (vpnpool/common.js) and po, counts a po msgid once
 ctl uitext-views-only uitext fail 'uitext/positive-control-bad-fixture-caught ' \
 	stand/tests/ui-text-guard.uc "walk(ROOT + '/files/www/luci-static/resources', '.js', [])" "walk(ROOT + '/files/www/luci-static/resources/view', '.js', [])"
-ctl uitext-po-counted-twice uitext fail 'uitext/positive-control-bad-fixture-caught ;uitext/real-app-no-new-violations ;uitext/baseline-gates-new-violations ;uitext/stale-baseline-line-fails ' \
+# (ui4: the app's po has no technical word any more — the old Diagnostics labels are gone — so
+#  counting a po msgid twice now shows only on the fixture)
+ctl uitext-po-counted-twice uitext fail 'uitext/positive-control-bad-fixture-caught ' \
 	stand/tests/ui-text-guard.uc '(catalog && seen_text[text])' '(false)'
 ctl uitext-po-header-scanned uitext fail 'uitext/positive-control-bad-fixture-caught ' \
 	stand/tests/ui-text-guard.uc "if (!(substr(cur, 0, 6) == 'msgstr' && id == ''))" 'if (true)'
