@@ -365,6 +365,20 @@ begin "build/model-excluding-every-node-is-ignored"
 expect_jq "every node excluded: all of them in the automatic choice" "$MBC" '(.outbounds[] | select(.tag=="auto") | .outbounds | length) == 3'
 end
 uci -q delete vpnpool.main.auto_exclude; uci commit vpnpool
+# ui1 review 2: the order "excluded -> favourites only" (the Nodes tab computes it the same way)
+echo "{\"$GID\":{\"tag\":\"Good1\",\"link\":null,\"active\":false,\"auto\":false}}" > /etc/vpnpool/favorites.map.json
+uci set vpnpool.main.favorites_only=1; uci add_list vpnpool.main.auto_exclude="$GID"; uci commit vpnpool
+mb_run
+begin "build/model-excluded-only-favourite-then-the-others"
+expect_jq "the only favourite excluded: favourites only steps back, the others take part" "$MBC" '(.outbounds[] | select(.tag=="auto") | .outbounds | sort) == ["Mine","PickMe"]'
+end
+rm -f /etc/vpnpool/favorites.map.json; uci -q delete vpnpool.main.favorites_only; uci -q delete vpnpool.main.auto_exclude
+uci add_list vpnpool.main.auto_member="$GID"; uci add_list vpnpool.main.auto_member="$MID"; uci add_list vpnpool.main.auto_exclude="$MID"; uci commit vpnpool
+mb_run
+begin "build/model-excluded-member-leaves-the-member-list"
+expect_jq "members Good1 + Mine, Mine excluded: urltest = Good1" "$MBC" '(.outbounds[] | select(.tag=="auto") | .outbounds) == ["Good1"]'
+end
+uci -q delete vpnpool.main.auto_member; uci -q delete vpnpool.main.auto_exclude; uci commit vpnpool
 echo "{\"$PID\":{\"tag\":\"PickMe\",\"link\":null,\"active\":false,\"auto\":false}}" > /etc/vpnpool/favorites.map.json
 uci set vpnpool.main.favorites_only=1; uci set vpnpool.main.auto_switch=0; uci set vpnpool.main.preferred_node="$PID"; uci commit vpnpool
 mb_run

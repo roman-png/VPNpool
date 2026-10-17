@@ -132,7 +132,9 @@ jq -nc --arg a "$ID1" '{($a): {tag: "Node001", link: "vless://x", active: false,
 	"aaaaaaaaaaaa": {tag: "Gone-Fav", link: "vless://y", active: false, auto: true, type: "vless", server: "203.0.113.200", port: 443}}' > /etc/vpnpool/favorites.map.json
 uci set vpnpool.main.preferred_node="$ID2"
 uci add_list vpnpool.main.hidden="$ID3"; uci add_list vpnpool.main.hidden=bbbbbbbbbbbb
-uci add_list vpnpool.main.auto_member="$ID1"; uci add_list vpnpool.main.keep_auto="$ID2"; uci commit vpnpool
+uci add_list vpnpool.main.auto_member="$ID1"; uci add_list vpnpool.main.keep_auto="$ID2"
+# ui1 review 2: excluded ids — a real id and junk; only the id may come out
+uci add_list vpnpool.main.auto_exclude="$ID2"; uci add_list vpnpool.main.auto_exclude=not-an-id; uci commit vpnpool
 jq -nc --arg c "$ID3" '[{id: $c, tag: "Node003-hidden", type: "vless", server: "10.0.3.7", port: 443, src: "sub:sp"}]' > /tmp/vpnpool/hidden.json
 jq -nc --arg a "$ID1" '[$a]' > /tmp/vpnpool/.dead_ids.json
 jq -nc --arg a "$ID1" '{($a): {youtube: true}}' > /etc/vpnpool/unlock.map.json
@@ -147,11 +149,12 @@ expect_jq "hidden: the one a source still has (name) + the one none has" "$SOUT"
 	"(.hidden|length)==2 and .hidden[0].id==\"$ID3\" and .hidden[0].tag==\"Node003-hidden\" and .hidden[0].in_source==true and .hidden[0].sub==\"sp\" and .hidden[1]=={id:\"bbbbbbbbbbbb\", tag:null, in_source:false}"
 expect_jq "preferred: id + its tag in this build" "$SOUT" ".preferred=={id:\"$ID2\", tag:\"Node002\", in_pool:true} and .settings.preferred_id==\"$ID2\""
 expect_jq "the stores by id" "$SOUT" ".dead_ids==[\"$ID1\"] and .kept_ids==[\"$ID2\"] and .auto_member_ids==[\"$ID1\"]"
+expect_jq "excluded ids: the id only (junk dropped), not the member list" "$SOUT" ".auto_exclude_ids==[\"$ID2\"]"
 expect_jq "the older screens' fields in tags (they compare tags)" "$SOUT" \
 	'.dead_nodes==["Node001"] and .kept_nodes==["Node002"] and .auto_members==["Node001"] and .settings.preferred_node=="Node002" and .settings.selected_node==""'
 end
 rm -f /etc/vpnpool/favorites.map.json /tmp/vpnpool/hidden.json /tmp/vpnpool/.dead_ids.json /etc/vpnpool/unlock.map.json
-uci -q delete vpnpool.main.preferred_node; uci -q delete vpnpool.main.hidden; uci -q delete vpnpool.main.auto_member; uci -q delete vpnpool.main.keep_auto; uci commit vpnpool
+uci -q delete vpnpool.main.preferred_node; uci -q delete vpnpool.main.hidden; uci -q delete vpnpool.main.auto_member; uci -q delete vpnpool.main.keep_auto; uci -q delete vpnpool.main.auto_exclude; uci commit vpnpool
 
 # a node waiting for the engine (deferred.json) carries the same marks (by id) and its source
 jq -nc '[{id: "cccccccccccc", tag: "AWG-wait", type: "awg", server: "198.51.100.9", port: 51820, _src: "awg", reason: "engine_missing"}]' > /tmp/vpnpool/deferred.json

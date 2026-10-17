@@ -465,6 +465,37 @@ test('automatic choice by the engine\'s rule: a stale member list excludes nobod
 	eq(t.calls('set_config'), [ { settings: { auto_members: [], auto_excludes: [ ID.C, ID.D ] } } ], 'exclusions saved');
 });
 
+// ui1 review 2: the "last node" guard decides on the set before "favourites only"; the dialog keeps
+// the exclusions of nodes it does not show; a 1.x member list in effect is said once
+test('the last-node guard as the engine; the dialog keeps unseen exclusions; the old member list is said', async (t) => {
+	t.env.handlers.auto_exclude = () => ({ ok: true, code: 'saved', daemon: 'signalled' });
+	// (a) every other node is excluded: excluding Alpha would be ignored by the engine -> refused
+	const lone = fixture(s => { s.auto_exclude_ids = [ ID.B, ID.C, ID.D, ID.M ]; });
+	ok(lone.nodes.filter(n => !n.deferred && !lone.auto_exclude_ids.includes(n.id)).map(n => n.tag).join() === 'Alpha', 'fixture: Alpha is the only one left');
+	const root = await open(t, lone);
+	clickMenu(t, card(root, 'Alpha'), 'Exclude from the automatic choice'); await settle(t);
+	eq(t.calls('auto_exclude'), [], 'refused: nothing sent');
+	ok(toasts(t, 'warning').some(x => /At least one node must stay/.test(x)), 'said why');
+	// (b) "favourites only" with one favourite: excluding it is fine (the option steps back)
+	await poll(t, fixture(s => { s.settings.favorites_only = true; s.auto_exclude_ids = []; }));
+	eq(stateOf(card(root, 'Delta')), 'Not in the automatic choice: "favourites only" is on', 'fixture: favourites only acts (one favourite)');
+	clickMenu(t, card(root, 'My link'), 'Exclude from the automatic choice'); await settle(t);
+	eq(t.calls('auto_exclude'), [ { id: ID.M } ], 'the only favourite can be excluded');
+	// (c) the dialog keeps the exclusions of a deferred node and of a node not in this build
+	const gone = '0000000000e9';
+	await poll(t, fixture(s => { s.auto_exclude_ids = [ ID.C, ID.W, gone ]; }));
+	ok(!t.env.doc.body.querySelector('.vp-pool-oldlist'), 'no old-list note without a member list');
+	t.env.handlers.set_config = () => ({ ok: true, code: 'saved', daemon: 'signalled' });
+	t.v.handleAutoPool();
+	ok(!modal(t).querySelector('.vp-pool-oldlist'), 'no old-list note in the dialog');
+	click(t, modal(t).querySelectorAll('button').find(b => b.textContent === 'Save')); await settle(t);
+	eq(t.calls('set_config'), [ { settings: { auto_members: [], auto_excludes: [ ID.C, ID.W, gone ] } } ], 'unseen exclusions kept');
+	// (d) a 1.x member list in effect: the dialog says it once
+	await poll(t, fixture(s => { s.auto_member_ids = [ ID.A, ID.B ]; s.auto_exclude_ids = []; }));
+	t.v.handleAutoPool();
+	ok(!!modal(t).querySelector('.vp-pool-oldlist'), 'the old member list is said');
+});
+
 test('a hidden favourite is one card (in "Hidden"), not also "not among the nodes"', async (t) => {
 	const root = await open(t, fixture(s => { s.favorites.push({ id: ID.H, tag: 'Hidden one', in_pool: false, type: 'vless' }); }));
 	eq(cards(root).filter(c => titleOf(c) === 'Hidden one').length, 1, 'one card');
@@ -557,6 +588,10 @@ const MUTATIONS = [
 	{ name: 'lines numbered without dropping the blank lines on top', from: "return t.replace(/^", to: "return t.replace(/^$^", expect: [ '"+ Add": a chip and a reason per line, add sends the checked lines, the result names the error lines', '"+ Add" a subscription address: pick nodes -> add with mode pick and the picked ids' ] },
 	{ name: 'request limit counted in characters', from: "if (requestBytes(text) > MAX_TEXT) {", to: "if (text.length > MAX_TEXT) {", expect: [ '"+ Add" from a file: links are added to the field, AmneziaWG settings replace it, a huge file is refused' ] },
 	{ name: 'field error of analyze not shown', from: "}, function(e) { common.markFieldErrors(D.box, e); });", to: "}, noop);", expect: [ '"+ Add": everything fine closes the dialog with the result; "nothing added" is a result, not an error' ] },
+	{ name: 'last-node guard after "favourites only"', from: "if (p.beforeFav.length === 1 && p.beforeFav[0] === n.id) {", to: "if (p.participants.length === 1 && p.participants[0] === n.id) {", expect: [ 'the last-node guard as the engine; the dialog keeps unseen exclusions; the old member list is said' ] },
+	{ name: 'no last-node guard', from: "if (p.beforeFav.length === 1 && p.beforeFav[0] === n.id) {", to: "if (false) {", expect: [ 'the last-node guard as the engine; the dialog keeps unseen exclusions; the old member list is said' ] },
+	{ name: 'the dialog drops unseen exclusions', from: "arr(st.auto_exclude_ids).forEach(function(i) { if (shown.indexOf(i) < 0 && excl.indexOf(i) < 0) excl.push(i); });", to: "", expect: [ 'the last-node guard as the engine; the dialog keeps unseen exclusions; the old member list is said' ] },
+	{ name: 'the old member list not said', from: "p.memberListActive ? E('p'", to: "false ? E('p'", expect: [ 'the last-node guard as the engine; the dialog keeps unseen exclusions; the old member list is said' ] },
 	{ name: 'speed result not shown', from: "self.speed[n.id] = res.mbps;", to: "", expect: [ 'speed test: the card says it is testing, the result is a badge; a failure is said' ] },
 	{ name: 'service off not said', from: "var b = !st.enabled ?", to: "var b = false ?", expect: [ 'service off: a banner; nothing at all: the empty state with "+ Add"' ] }
 ];

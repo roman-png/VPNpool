@@ -341,7 +341,8 @@ call)
 		# job: a token of THIS probe, carried by its result — the UI shows a result only when the
 		# token is the one its own start got (another window may have started another address)
 		JOB="$(date +%s)-$$"
-		setsid sh -c '/usr/libexec/vpnpool/probe.sh "$1" | jq -c --arg j "$2" ". + {job:\$j}" > /tmp/vpnpool/.probe-result.json 2>/dev/null; rm -f /tmp/vpnpool/.probe-running' _ "$u" "$JOB" >/dev/null 2>&1 &
+		# (probe.sh output that is not JSON -> a script_failed result with the job, never an empty file)
+		setsid sh -c 'R=$(/usr/libexec/vpnpool/probe.sh "$1" | jq -c --arg j "$2" ". + {job:\$j}" 2>/dev/null); [ -n "$R" ] || R=$(jq -nc --arg j "$2" "{ok:false, code:\"script_failed\", job:\$j}"); printf "%s\n" "$R" > /tmp/vpnpool/.probe-result.json; rm -f /tmp/vpnpool/.probe-running' _ "$u" "$JOB" >/dev/null 2>&1 &
 		echo $! > /tmp/vpnpool/.probe-running   # record worker PID -> clear_stale_lock frees it the instant it dies
 		rep true started n/a "$(jq -nc --arg j "$JOB" '{running:true, started:true, job:$j}')"
 		;;

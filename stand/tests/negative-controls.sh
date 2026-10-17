@@ -390,7 +390,7 @@ ctl ui1-gen-exclude-empties build fail 'build/model-excluding-every-node-is-igno
 	"$LIBX/generator.uc" '	if (length(kept)) auto_tags = kept;' '	auto_tags = kept;'
 ctl ui1-api-include-no-member rpcd fail 'rpcd/auto_include/ok ' \
 	"$LIBX/api.uc" 'if (r && r.node && length(filter(mem, (x) => live[x]))' 'if (false && length(filter(mem, (x) => live[x]))'
-ctl ui1-api-include-stale-member rpcd fail 'rpcd/auto_include/stale-member-list-left-alone ' \
+ctl ui1-api-include-stale-member rpcd fail 'rpcd/auto_include/stale-member-list-left-alone ;rpcd/auto_include/deferred-only-member-list-left-alone ' \
 	"$LIBX/api.uc" 'if (r && r.node && length(filter(mem, (x) => live[x]))' 'if (r && r.node && length(mem)'
 ctl ui1-api-exclude-keeps-kept rpcd fail 'rpcd/auto_exclude/ok ' \
 	"$LIBX/api.uc" "		ch = list_del(u, 'keep_auto', [ r.id ]) || ch;" ''
@@ -398,6 +398,17 @@ ctl ui1-probe-no-job rpcd fail 'rpcd/probe_source/ok ' \
 	"$RPCD" '". + {job:\$j}"' '"."'
 ctl ui1-status-no-excluded rpcd fail 'rpcd/status/ok ' \
 	"$LIBX/status.uc" '	auto_exclude_ids: excl_ids,' ''
+# ui1 review 2: deferred nodes do not make a member list count; status filters the excluded ids;
+# exclusions come before "favourites only" in the generator
+ctl ui1-api-include-deferred rpcd fail 'rpcd/auto_include/deferred-only-member-list-left-alone ' \
+	"$LIBX/api.uc" 'if (n.id && !n._deferred) live[n.id] = true;' 'if (n.id) live[n.id] = true;'
+ctl ui1-status-excl-unfiltered status fail 'status/favorites-hidden-preferred ' \
+	"$LIBX/status.uc" 'let excl_ids = filter(as_list(M.auto_exclude, true), is_id);' 'let excl_ids = as_list(M.auto_exclude, true);'
+ctl ui1-status-excl-from-members status fail 'status/favorites-hidden-preferred ' \
+	"$LIBX/status.uc" 'let excl_ids = filter(as_list(M.auto_exclude, true), is_id);' 'let excl_ids = filter(as_list(M.auto_member, true), is_id);'
+ctl ui1-gen-exclude-after-favourites build fail 'build/model-excluded-only-favourite-then-the-others ' \
+	"$LIBX/generator.uc" 'if (length(excl_set)) {' 'if (false) {' \
+	"$LIBX/generator.uc" '	if (length(only)) auto_tags = only;' '	if (length(only)) auto_tags = only; } if (true) { let kept2 = filter(auto_tags, (t) => !excl_set[t]); if (length(kept2)) auto_tags = kept2;'
 # ui1: the Nodes tab — 2.0 methods only, reasons of a pasted line, the tabs of 2.0
 ctl ui1-nodes-connect-legacy ui-nodes fail 'FAIL - "Connect" is the soft choice;FAIL - only the 2.0 methods' \
 	"$VIEW/nodes.js" "common.call('connect', { id: id }" "common.call('select', { id: id }"
