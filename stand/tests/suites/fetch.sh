@@ -163,3 +163,32 @@ expect_true "control: the answer is above 16 KiB" [ "$(wc -c < "$FXF/big.txt")" 
 expect_eq "the extra subscription served from its cached copy (1 node), not the big answer" "$(pool_tags)" '["Ext1","Pri1","Pri2"]'
 expect_true "the log says why" grep -q 'more than the limit' "$FXF/logbig"
 end
+
+# ---- ui4: "Update" of ONE subscription (fetch.sh --only <id>): the others are not downloaded ----
+reset_state; two_subs
+fetch_setup 200 200; sh "$FETCH" >/dev/null 2>&1                     # a full run first
+echo "1000 $(sig)" > /tmp/vpnpool/.last_fetch   # an old stamp: a rewrite within the same second would not show
+_st0=$(cat /tmp/vpnpool/.last_fetch 2>/dev/null)
+_pat0=$(jq -c --arg u "$PRI" '.[$u].at' /tmp/vpnpool/fetch_status.json 2>/dev/null)
+cp "$FXF/extra.txt" "$FXF/extra.orig"
+printf 'vless://%s@203.0.113.65:443?security=tls&sni=a.example#Ext3\n' "$U" >> "$FXF/extra.txt"   # changed at the panel
+rm -f /tmp/curlmock/calls.log
+sh "$FETCH" --only se > "$FXF/logo" 2>&1; FRC=$?
+_fs=$(cat /tmp/vpnpool/fetch_status.json 2>/dev/null)
+begin "fetch/only-one-subscription"
+expect_eq "exit code" "$FRC" 0
+expect_true "the asked subscription was downloaded (positive control)" [ "$(mock_calls "GET $EXT")" -ge 1 ]
+expect_eq "no request to the other one" "$(mock_calls "GET $PRI")" 0
+expect_eq "pool: the other's nodes stay, the asked one's are new" "$(pool_tags)" '["Ext1","Ext3","Pri1","Pri2"]'
+expect_jq "status: the asked one fetched now (2 nodes), the other's entry of the last run kept" "$_fs" \
+	".[\"$EXT\"].result==\"ok\" and .[\"$EXT\"].nodes==2 and .[\"$PRI\"].result==\"ok\" and (.[\"$PRI\"].at|tostring)==\"$_pat0\""
+expect_eq "the throttle stamp of the full run is not rewritten" "$(cat /tmp/vpnpool/.last_fetch 2>/dev/null)" "$_st0"
+end
+# the other subscription's copy of the last run is gone (never fetched since boot): from its cache
+rm -f /tmp/vpnpool/sources/*.raw
+sh "$FETCH" --only se >/dev/null 2>&1
+begin "fetch/only-the-others-from-their-own-cache"
+expect_eq "pool: the other one from its cached copy" "$(pool_tags)" '["Ext1","Ext3","Pri1","Pri2"]'
+expect_eq "still no request to it" "$(mock_calls "GET $PRI")" 0
+end
+cp "$FXF/extra.orig" "$FXF/extra.txt"

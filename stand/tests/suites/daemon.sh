@@ -27,7 +27,7 @@ exit 0
 EOF
 cat > "$FL/fetch.sh" <<EOF
 #!/bin/sh
-echo fetch >> "$RLOG"
+if [ \$# -gt 0 ]; then echo "fetch \$*" >> "$RLOG"; else echo fetch >> "$RLOG"; fi
 [ -f "$DS/fetch_slow" ] && /bin/sleep 20
 exit 0
 EOF
@@ -107,6 +107,21 @@ ds_reset 0 down; in_daemon sc_periodic
 begin "daemon/periodic-refresh-through-failsafe"
 expect_eq "call sequence" "$(calls)" "fetch;build;start;route down;"
 expect_eq "ROUTED" "$(routed)" 0
+end
+
+# ui4: "Update" of one subscription (rpcd sub_refresh queues its id + USR1): the reload fetches
+# only the queued subscriptions; a full refetch takes the queue along (no second fetch)
+sc_reload_one() { ROUTED=1; printf 'sp\nse\nsp\nbad id\n' > "$FETCH_ONLY"; do_reload reload; [ -e "$FETCH_ONLY" ] || [ -e "$FETCH_ONLY.run" ] || echo gone >> "$RLOG"; }
+ds_reset 0 up; in_daemon sc_reload_one
+begin "daemon/reload-fetches-only-the-queued-subscriptions"
+expect_eq "call sequence (one fetch of the queued ids, sorted, the bad line dropped)" "$(calls)" "fetch --only se sp;build;start;route up;"
+expect_eq "the queue is taken" "$(gcount '^gone' "$RLOG")" 1
+end
+sc_refetch_queue() { ROUTED=1; echo sp > "$FETCH_ONLY"; do_reload refetch; [ -e "$FETCH_ONLY" ] || echo gone >> "$RLOG"; }
+ds_reset 0 up; in_daemon sc_refetch_queue
+begin "daemon/full-refetch-takes-the-queue-along"
+expect_eq "call sequence (one full fetch)" "$(calls)" "fetch;build;start;route up;"
+expect_eq "the queue is cleared" "$(gcount '^gone' "$RLOG")" 1
 end
 
 # start-up with no working node: a table left by a crashed run must be cleared (fail-safe)
