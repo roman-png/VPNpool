@@ -696,7 +696,9 @@ exit_info_check() {   # $1 = the active node (tag) $2 = now (seconds)
 	if [ "$1" = "$EXIT_NODE" ]; then
 		[ "$age" -lt "$EXIT_RETRY" ] && return 0
 		if [ -z "$EXIT_SEEN" ]; then
-			if grep -q '"ok":true' "$SB_DATA/exit.json" 2>/dev/null; then EXIT_SEEN=ok; else EXIT_SEEN=failed; fi
+			# the answer counts only for this node (a lookup of another node is not this one's)
+			if grep -q '"ok":true' "$SB_DATA/exit.json" 2>/dev/null && grep -qF "\"node\":\"$1\"" "$SB_DATA/exit.json" 2>/dev/null
+			then EXIT_SEEN=ok; else EXIT_SEEN=failed; fi
 		fi
 		[ "$EXIT_SEEN" = ok ] && [ "$age" -lt "$EXIT_EVERY" ] && return 0
 	fi

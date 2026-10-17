@@ -285,6 +285,25 @@ fi
 exit_ip_services() {
 	printf '%s\n' "https://ifconfig.co/json" "https://ipinfo.io/json" "https://api.ip.sb/geoip" "https://api.ipify.org?format=json"
 }
+# exit_ip_lookup <local proxy port> -> "<ip> <country>" (country: two upper-case letters or empty);
+# exit 1 when no service gave an address. ONE rule of "what is an address" for exitip.sh and rpcd
+# conntest: hex digits, "." and ":" only, with a "." or ":" (an error page or a word like "cafe" is
+# not one). Through the tunnel only (socks5h: the name lookup too).
+exit_ip_lookup() {
+	local url j ip co
+	for url in $(exit_ip_services); do
+		j=$(curl -s -m 7 --proxy "socks5h://127.0.0.1:$1" "$url" 2>/dev/null)
+		[ -n "$j" ] || continue
+		ip=$(printf '%s' "$j" | jq -r '(.ip // .ip_addr // .query // "") | tostring' 2>/dev/null)
+		case "$ip" in (*[!0-9a-fA-F:.]*|'') continue ;; esac
+		case "$ip" in (*[.:]*) ;; (*) continue ;; esac
+		co=$(printf '%s' "$j" | jq -r '(.country_iso // .country_code // .country // "") | tostring | ascii_upcase' 2>/dev/null)
+		case "$co" in ([A-Z][A-Z]) ;; (*) co="" ;; esac
+		printf '%s %s\n' "$ip" "$co"
+		return 0
+	done
+	return 1
+}
 
 # THE single source of truth for "is a node good": the user-configured services the VPN
 # must actually make work THROUGH a node (often the blocked ones). Emits one normalised

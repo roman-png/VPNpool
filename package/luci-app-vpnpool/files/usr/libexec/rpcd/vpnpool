@@ -243,14 +243,8 @@ call)
 		# generically (ip/ip_addr/query, country/country_iso/country_code).
 		TP=$(uci -q get vpnpool.main.test_port); [ -n "$TP" ] || TP=1605
 		IP=""; CO=""
-		for url in $(exit_ip_services); do   # lib.sh: the same list as the daemon's exitip.sh
-			J=$(curl -s -m 7 --proxy "socks5h://127.0.0.1:$TP" "$url" 2>/dev/null)
-			[ -n "$J" ] || continue
-			IP=$(echo "$J" | jq -r '(.ip // .ip_addr // .query // "") | tostring' 2>/dev/null)
-			[ -n "$IP" ] && [ "$IP" != "null" ] || { IP=""; continue; }
-			CO=$(echo "$J" | jq -r '(.country_iso // .country_code // .country // "") | tostring' 2>/dev/null); [ "$CO" = "null" ] && CO=""
-			break
-		done
+		# lib.sh: the same services and the same "what is an address" as the daemon's exitip.sh
+		R=$(exit_ip_lookup "$TP") && { IP=${R%% *}; CO=${R#* }; }
 		X=$(jq -nc --arg ip "$IP" --arg co "$CO" '{ip:$ip, country:$co}')
 		if [ -n "$IP" ]; then rep true ok n/a "$X"
 		elif daemon_alive; then rep false exit_unreachable n/a "$X"
