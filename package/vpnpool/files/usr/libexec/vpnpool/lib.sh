@@ -13,6 +13,22 @@ SB_CONF_FLASH="$CONF_DIR/sing-box.json"
 
 log() { logger -t "$NAME" "$1"; }
 
+# The log for the Diagnostics page (rpcd logs, diag.sh): the last <n> lines of the service's
+# lines in the system log (logread, tag vpnpool; the facility column dropped) or of the engine's
+# own log (sing-box.log in RAM, colour codes dropped). Telegram bot tokens are masked, a line is
+# cut to 400 characters, and the newest lines that fit in ~160 KB are kept (rpcd takes at most
+# 256 KiB from an exec method, JSON escapes included).
+log_lines() {   # $1=service|engine $2=lines
+	case "$1" in
+		engine) tail -n "$2" "$SB_DATA/sing-box.log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' ;;
+		*) logread 2>/dev/null | grep -E "$NAME(\[[0-9]+\])?: " | tail -n "$2" \
+			| sed -E "s/ [a-z]+\.[a-z]+ $NAME(\[[0-9]+\])?: / /" ;;
+	esac | sed -E 's#(bot[0-9]{1,20}):[A-Za-z0-9_-]+#\1:***#g' | cut -c1-400 \
+		| awk '{ a[NR] = $0 } END { t = 0; s = NR + 1
+			for (i = NR; i >= 1; i--) { t += length(a[i]) + 1; if (t > 160000) break; s = i }
+			for (i = s; i <= NR; i++) print a[i] }'
+}
+
 # ---- the sing-box engine (ROADMAP 4.1): EVERY run of sing-box goes through sb_bin ----
 # build.sh picks the binary for the pool (enginecap.uc select: uci singbox_bin, default the
 # stock /usr/bin/sing-box; /usr/bin/sing-box-awg when there are AmneziaWG nodes and the stock one
@@ -484,6 +500,9 @@ sources_sig() {
 	ucode "$MODEL" subs 2>/dev/null | awk -F'\t' '$2 == 1 {print $4}' | md5sum | cut -c1-12
 }
 FETCH_STAMP="$SB_DATA/.last_fetch"   # "<epoch> <sources_sig>", written by fetch.sh
+# subscription ids to fetch on the next reload, one per line (rpcd sub_refresh queues + USR1;
+# vpnpoold do_reload takes them: fetch.sh --only <ids>)
+FETCH_ONLY="$SB_DATA/.fetch_only"
 # fetch_due -> 0 when the subscriptions should be downloaded now: never fetched since boot,
 # the subscription set changed, no fetched files, or the last attempt is >= INTERVAL_MIN old.
 fetch_due() {

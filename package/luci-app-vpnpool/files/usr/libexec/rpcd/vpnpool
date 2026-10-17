@@ -183,7 +183,7 @@ RESTORE_MAX_FILES=500
 case "$1" in
 list)
 	cat <<'L'
-{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x", "id": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x", "id": "x", "file": "x" }, "delete_nodes": { "tags": [], "ids": [] }, "restore_node": { "tag": "x", "id": "x" }, "refilter_node": { "tag": "x", "id": "x" }, "save_node": { "tag": "x", "id": "x" }, "unsave_node": { "tag": "x", "id": "x" }, "activate_saved": { "tag": "x", "id": "x" }, "deactivate_saved": { "tag": "x", "id": "x" }, "node_link": { "tag": "x", "id": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x", "id": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x", "id": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x", "id": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [], "ids": [], "name": "x" }, "tg_test": { "token": "x", "chat": "x", "via_proxy": true }, "set_config": { "settings": {} }, "analyze": { "text": "x" }, "add": { "text": "x", "items": [], "lines": [], "options": {} }, "backup": {}, "restore": { "data": "x", "path": "x", "replace_all": false }, "fav": { "id": "x" }, "unfav": { "id": "x" }, "hide": { "id": "x" }, "unhide": { "id": "x" }, "connect": { "id": "x" }, "auto_select": {}, "sub_set": { "id": "x", "name": "x", "url": "x", "enabled": true, "mode": "x", "pick": [] }, "sub_del": { "id": "x" }, "auto_exclude": { "id": "x" }, "auto_include": { "id": "x" } }
+{ "status": {}, "diag": {}, "conntest": {}, "leases": {}, "export": {}, "import": { "config": "x" }, "set_enabled": { "enabled": true }, "select": { "tag": "x", "id": "x" }, "refresh": {}, "ping": {}, "set_url": { "url": "x" }, "del_subscription": {}, "del_source": { "url": "x" }, "add_node": { "link": "x" }, "del_node": { "link": "x" }, "import_nodes": { "text": "x" }, "delete_node": { "tag": "x", "id": "x", "file": "x" }, "delete_nodes": { "tags": [], "ids": [] }, "restore_node": { "tag": "x", "id": "x" }, "refilter_node": { "tag": "x", "id": "x" }, "save_node": { "tag": "x", "id": "x" }, "unsave_node": { "tag": "x", "id": "x" }, "activate_saved": { "tag": "x", "id": "x" }, "deactivate_saved": { "tag": "x", "id": "x" }, "node_link": { "tag": "x", "id": "x" }, "export_nodes": { "scope": "x" }, "add_sub": { "url": "x" }, "del_sub": { "url": "x" }, "unlock": { "tag": "x", "id": "x" }, "unlock_result": {}, "add_auto_domain": { "domain": "x" }, "del_auto_domain": { "domain": "x" }, "run_adaptive": {}, "set_domains": { "domains": [] }, "set_communities": { "communities": [] }, "set_option": { "name": "x", "value": "y" }, "set_clients": { "mode": "all", "clients": [], "devices": [] }, "set_auto_members": { "members": [] }, "set_preferred": { "tag": "x", "id": "x" }, "set_schedule": { "enabled": true, "on": "x", "off": "x", "refresh": "x" }, "speedtest": { "tag": "x", "id": "x" }, "speedtest_result": {}, "probe_source": { "url": "x" }, "probe_result": {}, "import_select": { "url": "x", "idx": [], "ids": [], "name": "x" }, "tg_test": { "token": "x", "chat": "x", "via_proxy": true }, "set_config": { "settings": {} }, "analyze": { "text": "x" }, "add": { "text": "x", "items": [], "lines": [], "options": {} }, "backup": {}, "restore": { "data": "x", "path": "x", "replace_all": false }, "fav": { "id": "x" }, "unfav": { "id": "x" }, "hide": { "id": "x" }, "unhide": { "id": "x" }, "connect": { "id": "x" }, "auto_select": {}, "sub_set": { "id": "x", "name": "x", "url": "x", "enabled": true, "mode": "x", "pick": [] }, "sub_del": { "id": "x" }, "auto_exclude": { "id": "x" }, "auto_include": { "id": "x" }, "sub_refresh": { "id": "x" }, "logs": { "lines": 1, "source": "x" } }
 L
 	;;
 call)
@@ -867,6 +867,34 @@ call)
 		# "Return to the automatic choice" {id}: off that list (and a member of a 1.x member list
 		# when one is in effect)
 		apply_api "node include" "$input"
+		;;
+	sub_refresh)
+		# "Update" of ONE subscription {id}: its id is queued for the daemon and USR1 asks for a
+		# reload; the daemon fetches only the queued subscriptions (vpnpoold do_reload ->
+		# fetch.sh --only), the others keep their nodes, then rebuild + hot-reload. The screen
+		# follows the subscription's last_fetch_at in status.
+		sid=$(printf '%s' "$input" | jq -r '.id // "" | tostring')
+		case "$sid" in ''|*[!A-Za-z0-9_]*) rep false invalid n/a '{"errors":{"id":"bad_value"}}'; exit 0 ;; esac
+		en=$(ucode /usr/libexec/vpnpool/model.uc subs 2>/dev/null | awk -F'\t' -v i="$sid" '$1 == i {print $2; exit}')
+		[ -n "$en" ] || { rep false not_found; exit 0; }
+		[ "$en" = 1 ] || { rep false disabled; exit 0; }
+		daemon_alive || { rep false daemon_not_running not_running; exit 0; }
+		mkdir -p /tmp/vpnpool
+		echo "$sid" >> "$FETCH_ONLY"
+		d=$(signal_word USR1)
+		if [ "$d" = signalled ]; then rep true started "$d"; else rep false daemon_not_running "$d"; fi
+		;;
+	logs)
+		# The log for the Diagnostics page (read): {lines: 1..500 (default 200), source: service
+		# (the service's lines of the system log) | engine (the engine's own log)} -> {lines:[...]}
+		# oldest first (lib.sh log_lines: tokens masked, lines cut, ~160 KB at most).
+		n=$(printf '%s' "$input" | jq -r '.lines // 200 | tostring' 2>/dev/null)
+		case "$n" in ''|*[!0-9]*|0*) rep false invalid n/a '{"errors":{"lines":"bad_value"}}'; exit 0 ;; esac
+		[ "${#n}" -le 3 ] && [ "$n" -le 500 ] || { rep false invalid n/a '{"errors":{"lines":"too_large"}}'; exit 0; }
+		src=$(printf '%s' "$input" | jq -r '.source // "service" | tostring' 2>/dev/null)
+		case "$src" in service|engine) ;; *) rep false invalid n/a '{"errors":{"source":"bad_value"}}'; exit 0 ;; esac
+		log_lines "$src" "$n" | jq -R . | jq -sc --arg s "$src" '{ok:true, code:"ok", daemon:"n/a", source:$s, lines:.}' 2>/dev/null \
+			|| rep false script_failed n/a '{"message":"logs"}'
 		;;
 	*)
 		rep false unknown_method
