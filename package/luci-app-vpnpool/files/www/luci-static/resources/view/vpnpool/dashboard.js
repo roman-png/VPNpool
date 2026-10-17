@@ -120,8 +120,11 @@ function stateOf(st) {
 		return { t: _('Not started: the settings of the previous version could not be converted'), k: 'error',
 			d: _('Nothing was changed. Open Diagnostics to see why.') };
 	if (!st.enabled) return { t: _('VPN is off'), k: '', d: _('The internet goes directly, without the VPN.') };
+	// (a Telegram pause outlives a restart of the service: then the button on the screen is
+	// "Turn the VPN on", and the words name it)
 	if (!st.running) return { t: _('VPN is on, but the service is not running'), k: 'error',
-		d: _('Turn the VPN off and on again; if it repeats, open Diagnostics.') };
+		d: st.paused ? _('Press "Turn the VPN on"; if it repeats, open Diagnostics.')
+			: _('Turn the VPN off and on again; if it repeats, open Diagnostics.') };
 	if (st.paused) return { t: _('Paused'), k: 'warn',
 		d: _('Paused from Telegram: the internet goes directly, without the VPN. "Turn the VPN on" resumes it.') };
 	if (tn === 'wan_down') return { t: _('The router has no internet'), k: 'error',
