@@ -28,6 +28,9 @@ var SETTINGS = 'admin/services/vpnpool/settings';
 
 var CSS = [
 	'.vp-ov [hidden]{display:none!important}',
+	// the secondary texts: the theme's grey alone is 3.95:1 on its background (bootstrap, measured on
+	// the stand) - mixed with the theme's text colour for >= 4.5:1; without color-mix() the grey stays
+	'.vp-ov-detail,.vp-ov-facts dt,.vp-ov-sub-facts,.vp-ov .vp-dev-meta,.vp-ov .vp-empty p,.vp-ov .vp-hint{color:var(--text-color-medium,GrayText);color:color-mix(in srgb,var(--text-color-medium,GrayText) 60%,var(--text-color-high,CanvasText))}',
 	'.vp-ov-err{color:var(--error-color-medium,var(--danger-color,inherit));margin:0 0 .8em}',
 	'.vp-ov-now{box-sizing:border-box;max-width:100%;min-width:0}',
 	'.vp-ov-head{display:flex;flex-wrap:wrap;align-items:center;gap:.5em .8em;min-width:0}',
@@ -36,17 +39,21 @@ var CSS = [
 	'.vp-ov-state[data-kind=ok]{color:var(--success-color-medium,var(--success-color,inherit));color:color-mix(in srgb,var(--success-color-medium,var(--success-color,#2e7d32)) 55%,var(--text-color-high,CanvasText))}',
 	'.vp-ov-state[data-kind=warn]{color:var(--warn-color-high,var(--warning-color,inherit));color:color-mix(in srgb,var(--warn-color-high,var(--warning-color,#b58900)) 35%,var(--text-color-high,CanvasText))}',
 	'.vp-ov-state[data-kind=error]{color:var(--error-color-medium,var(--danger-color,inherit));color:color-mix(in srgb,var(--error-color-medium,var(--danger-color,#c62828)) 55%,var(--text-color-high,CanvasText))}',
-	'.vp-ov-detail{margin:.3em 0 0;color:var(--text-color-medium,GrayText);overflow-wrap:anywhere}',
+	'.vp-ov-detail{margin:.3em 0 0;overflow-wrap:anywhere}',
 	'.vp-ov-facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.3em 1em;margin:.7em 0 0;min-width:0}',
-	'.vp-ov-facts dt{margin:0;color:var(--text-color-medium,GrayText);font-weight:normal}',
+	'.vp-ov-facts dt{margin:0;font-weight:normal}',
 	'.vp-ov-facts dd{margin:0;min-width:0;overflow-wrap:anywhere}',
 	'.vp-ov-who{display:flex;flex-wrap:wrap;align-items:center;gap:.4em .8em;margin:.7em 0 0;min-width:0;overflow-wrap:anywhere}',
 	'.vp-ov-alerts{margin:0 0 .8em}',
-	'.vp-ov-alert{display:flex;flex-wrap:wrap;align-items:center;gap:.4em .8em;margin:0 0 .5em;overflow-wrap:anywhere}',
+	// an alert = a card with a coloured edge; the words keep the theme's text colour (the theme's own
+	// alert boxes are gradients: dark-theme red with dark text measured 3.3:1)
+	'.vp-ov-alert{display:flex;flex-wrap:wrap;align-items:center;gap:.4em .8em;margin:0 0 .5em;border-left-width:.35em;overflow-wrap:anywhere}',
+	'.vp-ov-alert[data-kind=warn]{border-left-color:var(--warn-color-high,var(--warning-color,#b58900))}',
+	'.vp-ov-alert[data-kind=error]{border-left-color:var(--error-color-medium,var(--danger-color,#c62828))}',
 	'.vp-ov-alert-text{flex:1 1 14em;min-width:0}',
 	'.vp-ov-subs{display:grid;grid-template-columns:repeat(auto-fill,minmax(16em,1fr));gap:.6em;min-width:0}',
 	'.vp-ov-sub-name{font-weight:bold;overflow-wrap:anywhere}',
-	'.vp-ov-sub-facts{margin:.3em 0 0;color:var(--text-color-medium,GrayText);overflow-wrap:anywhere}',
+	'.vp-ov-sub-facts{margin:.3em 0 0;overflow-wrap:anywhere}',
 	'.vp-ov-sub-facts [data-kind=error]{color:var(--error-color-medium,var(--danger-color,inherit));color:color-mix(in srgb,var(--error-color-medium,var(--danger-color,#c62828)) 55%,var(--text-color-high,CanvasText))}',
 	'.vp-ov-sub-facts [data-kind=warn]{color:var(--warn-color-high,var(--warning-color,inherit));color:color-mix(in srgb,var(--warn-color-high,var(--warning-color,#b58900)) 35%,var(--text-color-high,CanvasText))}',
 	'.vp-ov-bar{height:.45em;margin:.45em 0 0;border-radius:.3em;overflow:hidden;background:var(--border-color-low,rgba(128,128,128,.25))}',
@@ -219,7 +226,7 @@ return view.extend({
 
 		var root = E('div', { 'class': 'cbi-map vpnpool-view vp-page vp-ov' }, [
 			common.header(_('VPN Pool — Overview')),
-			this.errLine, this.wizard, this.alertsEl, this.nowEl, this.subsSec, this.devSec
+			this.errLine, this.wizard, this.nowEl, this.alertsEl, this.subsSec, this.devSec
 		]);
 		this.update(st);
 		poll.add(L.bind(this.refresh, this), 5);
@@ -315,7 +322,7 @@ return view.extend({
 	updateAlerts: function(list) {
 		if (!this.changed('alerts', list)) return;
 		dom.content(this.alertsEl, list.map(function(a) {
-			return E('div', { 'class': 'alert-message vp-ov-alert ' + (a.k === 'error' ? 'error' : 'warning'), 'data-kind': a.k }, [
+			return E('div', { 'class': 'vp-card vp-ov-alert', 'data-kind': a.k, 'role': a.k === 'error' ? 'alert' : null }, [
 				E('span', { 'class': 'vp-ov-alert-text' }, [ a.t ]),
 				a.go ? link(a.go[0], a.go[1]) : ''
 			]);

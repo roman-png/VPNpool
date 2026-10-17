@@ -204,7 +204,7 @@ test('alerts in words: failing nodes, engine, set aside, unreadable files, subsc
 	], 'every alert, in order (a kept node and a turned-off subscription do not warn)');
 	eq(alertLinks(root).slice(0, 3), [ 'Diagnostics /cgi-bin/luci/admin/services/vpnpool/diagnostics', 'Nodes /cgi-bin/luci/admin/services/vpnpool/nodes',
 		'How to install it /cgi-bin/luci/admin/services/vpnpool/diagnostics' ], 'each alert leads where it is fixed');
-	ok(root.querySelectorAll('.vp-ov-alert')[0].classes.has('error') && root.querySelectorAll('.vp-ov-alert')[1].classes.has('warning'), 'error and warning look');
+	eq(root.querySelectorAll('.vp-ov-alert').map(a => a.getAttribute('data-kind')), [ 'error', 'warn', 'warn', 'warn', 'warn', 'warn', 'warn', 'error', 'error' ], 'error and warning look');
 	await poll(t, fixture(s => { node(s, 'Bravo').dead = true; s.settings.check_services = 'www.youtube.com chat.example'; }));
 	eq(alerts(root), [ '1 node fails the check of the sites (www.youtube.com, chat.example): it is left out of the automatic choice.' ], 'several sites: the strict check over all of them');
 	await poll(t, fixture(s => { s.nodes = []; s.build = { ok: false, error: 'no_nodes', at: SEC }; }));
