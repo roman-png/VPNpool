@@ -278,6 +278,8 @@ test('traffic by device: the name or the address, ↓↑, connections; nothing w
 	const rows = root.querySelectorAll('.vp-ov-dev');
 	eq(rows.length, 2, 'positive control: a row per device');
 	eq(rows.map(r => r.textContent), [ 'laptop192.168.1.10↓ 3.0 MB ↑ 1.0 KB2 connections', '192.168.1.11↓ 2.0 KB ↑ 0 B1 connection' ], 'rows');
+	await poll(t, fixture(s => { s.client_traffic.push({ ip: '', host: '', self: true, down: 1024, up: 0, conns: 1 }); }));
+	eq(root.querySelectorAll('.vp-ov-dev')[2].textContent, 'This router↓ 1.0 KB ↑ 0 B1 connection', 'the own connections of the router: named, no address');
 	await poll(t, fixture(s => { s.client_traffic = []; }));
 	eq(text(root, '.vp-ov-devices'), 'No device uses the internet through the router right now.', 'no traffic');
 	await poll(t, fixture(s => { s.enabled = false; s.running = false; }));
@@ -403,6 +405,7 @@ const MUTATIONS = [
 	{ name: 'common: a turned-off subscription warns', file: 'common', from: "alert: (days < 7 && s.enabled) ?", to: "alert: (days < 7) ?", expect: [ T_ALERT ] },
 	{ name: 'common: the quota threshold off', file: 'common', from: "var low = left <= s.total * 0.1;", to: "var low = false;", expect: [ T_ALERT ] },
 	{ name: 'no bar of the traffic left', from: "if (v.total > 0) {\n\t\t\t\tvar pct", to: "if (false) {\n\t\t\t\tvar pct", expect: [ T_SUBS ] },
+	{ name: 'the router shown as an empty name', from: "name: c.self ? _('This router') : (c.host || c.ip || '?')", to: "name: (c.host || c.ip || '?')", expect: [ T_DEV ] },
 	{ name: 'devices shown while off', from: "var view = live ? arr(st.client_traffic)", to: "var view = true ? arr(st.client_traffic)", expect: [ T_DEV ] },
 	{ name: 'the wizard never shown', from: "this.wizard.hidden = !empty;", to: "this.wizard.hidden = true;", expect: [ T_WIZ ] },
 	{ name: 'alerts on an empty install', from: "this.updateAlerts(empty ? [] : alertsOf(st));", to: "this.updateAlerts(alertsOf(st));", expect: [ T_WIZ ] },

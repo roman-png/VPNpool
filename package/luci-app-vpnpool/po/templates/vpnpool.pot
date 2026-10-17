@@ -288,6 +288,10 @@ msgid_plural "%d nodes in use"
 msgstr[0] ""
 msgstr[1] ""
 
+#: files/www/luci-static/resources/view/vpnpool/dashboard.js:384
+msgid "This router"
+msgstr ""
+
 #: files/www/luci-static/resources/view/vpnpool/dashboard.js:387
 msgid "The VPN is not running: there is no traffic to show."
 msgstr ""

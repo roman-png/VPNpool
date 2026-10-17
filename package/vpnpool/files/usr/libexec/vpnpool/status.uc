@@ -118,6 +118,20 @@ for (let n in nodes_in) if (type(n) == 'object') { node_tag_set[n.tag] = true; i
 // the ids of a list -> the tags of this build (the legacy fields of the older screens)
 function tags_of(ids) { let r = []; for (let i in ids) if (tag_of[i] != null) push(r, tag_of[i]); return r; }
 
+// where a connection comes from: 'self' (the router: loopback), 'lan' (a private address: RFC 1918,
+// CGNAT 100.64/10 e.g. a VPN peer behind a LAN device, IPv6 ULA / link-local), else null
+function src_kind(ip) {
+	if (type(ip) != 'string' || ip == '') return null;
+	if (ip == '::1' || match(ip, /^127\./)) return 'self';
+	let m = match(ip, /^([0-9]+)\.([0-9]+)\.[0-9]+\.[0-9]+$/);
+	if (m) {
+		let a = +m[1], b = +m[2];
+		if (a == 10 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168) || (a == 100 && b >= 64 && b <= 127)) return 'lan';
+		return null;
+	}
+	return match(lc(ip), /^(f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):/) ? 'lan' : null;
+}
+
 // per-node / per-client live traffic from the clash connections
 let ntraf = {}, ctraf = {}, clist = [];
 let conn_arr = (type(conns.connections) == 'array') ? conns.connections : [];
@@ -135,9 +149,18 @@ for (let c in conn_arr) {
 			break;
 		}
 	}
-	let ip = c.metadata?.sourceIP ?? '?';
-	if (!ctraf[ip]) { ctraf[ip] = { ip: ip, host: leases[ip] ?? '', up: 0, down: 0, conns: 0 }; push(clist, ctraf[ip]); }
-	ctraf[ip].up += up; ctraf[ip].down += dn; ctraf[ip].conns++;
+	// devices = LAN sources; the router's own connections (bot, checks) are one "router" entry;
+	// any other source (a public address) is not a device of this network and is left out
+	let ip = c.metadata?.sourceIP ?? '', kind = src_kind(ip);
+	if (!kind) continue;
+	let key = (kind == 'self') ? 'self' : ip;
+	if (!ctraf[key]) {
+		let h = (kind == 'lan') ? (leases[ip] ?? '') : '';
+		ctraf[key] = (kind == 'self') ? { ip: '', host: '', self: true, up: 0, down: 0, conns: 0 }
+			: { ip: ip, host: (h == '*') ? '' : h, up: 0, down: 0, conns: 0 };
+		push(clist, ctraf[key]);
+	}
+	ctraf[key].up += up; ctraf[key].down += dn; ctraf[key].conns++;
 }
 clist = sort(clist, (a, b) => (b.up + b.down) - (a.up + a.down));
 if (length(clist) > 30) clist = slice(clist, 0, 30);

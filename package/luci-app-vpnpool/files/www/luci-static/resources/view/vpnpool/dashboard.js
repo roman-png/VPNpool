@@ -381,7 +381,7 @@ return view.extend({
 	updateDevices: function(st) {
 		var live = !!(st.enabled && st.running);
 		var view = live ? arr(st.client_traffic).map(function(c) {
-			return { name: c.host || c.ip || '?', ip: (c.host && c.ip) ? c.ip : '', down: +c.down || 0, up: +c.up || 0, conns: +c.conns || 0 };
+			return { name: c.self ? _('This router') : (c.host || c.ip || '?'), ip: (!c.self && c.host && c.ip) ? c.ip : '', down: +c.down || 0, up: +c.up || 0, conns: +c.conns || 0 };
 		}) : null;
 		if (!this.changed('devices', view)) return;
 		if (!view) { dom.content(this.devEl, [ E('p', { 'class': 'vp-hint' }, [ _('The VPN is not running: there is no traffic to show.') ]) ]); return; }

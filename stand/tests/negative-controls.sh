@@ -936,6 +936,11 @@ ctl s6-status-migration-failure-hidden migrate fail 'migrate/failure-visible-in-
 	"$LIBX/status.uc" "let migration = (o('schema', '') != '2' && type(migfail) == 'object')" 'let migration = (false)'
 ctl s6-upgrade-never-migrates upgrade fail 'FAIL - migrated (schema 2);FAIL - the service is started again after the migration;FAIL - the call right before the first one on the migrated config' \
 	package/vpnpool/files/etc/uci-defaults/90-vpnpool-2.0 '[ -x /usr/libexec/vpnpool/migrate.sh ] || exit 0' 'exit 0'
+# traffic per device: a public source is no device; the router's own connections are one entry
+ctl status-public-source-a-device status fail 'status/devices-are-lan-sources ' \
+	"$LIBX/status.uc" '	if (!kind) continue;' '	if (!kind) kind = "lan";'
+ctl status-router-per-address status fail 'status/devices-are-lan-sources ' \
+	"$LIBX/status.uc" "let key = (kind == 'self') ? 'self' : ip;" 'let key = ip;'
 # the tunnel proved by the probe before the routes is "up" at once (not "starting" for the warm-up)
 ctl daemon-proven-tunnel-starting daemon fail 'daemon/tunnel-proven-at-start-is-up ' \
 	"$LIBX/vpnpoold" '[ "$h" = 1 ] && { TUNNEL_PROVEN=$SB_STARTED; tunnel_state up "$(date +%s)"; }' '[ "$h" = 1 ] && { TUNNEL_PROVEN=$SB_STARTED; }'
