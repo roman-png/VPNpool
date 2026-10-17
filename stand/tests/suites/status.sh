@@ -223,3 +223,56 @@ expect_eq "40 names written" "$(grep -c . "$FXS/uniq.out")" 40
 expect_eq "40 different" "$(sort -u "$FXS/uniq.out" | grep -c .)" 40
 end
 daemon_stop
+
+# ---- ui2: the tunnel state, its exit and the last check of each node (Overview / Nodes) ----
+# tunnel <- /tmp/vpnpool/.tunnel (vpnpoold watchdog), exit <- exit.json (exitip.sh) only while its
+# node is the active one, node.check <- .deadstrikes (nodecheck.sh: id, fails in a row, at, hosts)
+ID1=$(jq -r '.[0].id' "$FXS/nodes.json"); ID2=$(jq -r '.[1].id' "$FXS/nodes.json"); ID3=$(jq -r '.[2].id' "$FXS/nodes.json")
+ui2_files() {   # <exit node>
+	echo 'up 1700000000' > /tmp/vpnpool/.tunnel
+	jq -nc --arg n "$1" '{ok: true, ip: "198.51.100.7", country: "DE", node: $n, at: 1700000100}' > /tmp/vpnpool/exit.json
+	printf '%s\t3\t1700000200\twww.youtube.com,chat.example\n%s\t0\t1700000200\t\n%s\t2\nnot-an-id\t5\t1\tx\n' "$ID1" "$ID2" "$ID3" > /tmp/vpnpool/.deadstrikes
+}
+daemon_start; mock_on
+mock_rule 'GET http://127.0.0.1:9091/proxies' 200 "$FXS/proxies.json"
+mock_rule 'GET http://127.0.0.1:9091/connections' 200 "$FXS/conns.json"
+ui2_files Node001
+measure_status
+begin "status/tunnel-exit-and-node-checks"
+expect_jq "positive control: daemon up, auto on Node001" "$SOUT" '.running==true and .auto_now=="Node001"'
+expect_jq "tunnel state + since" "$SOUT" '.tunnel=={"state":"up","since":1700000000}'
+expect_jq "exit of the active node" "$SOUT" '.exit.ip=="198.51.100.7" and .exit.country=="DE" and .exit.node=="Node001" and .exit.at==1700000100'
+expect_jq "a failing node: fails in a row, when, which hosts" "$SOUT" "(.nodes[] | select(.id==\"$ID1\") | .check)=={\"fails\":3,\"at\":1700000200,\"failed\":[\"www.youtube.com\",\"chat.example\"]}"
+expect_jq "a passing node" "$SOUT" "(.nodes[] | select(.id==\"$ID2\") | .check)=={\"fails\":0,\"at\":1700000200,\"failed\":[]}"
+expect_jq "a line of the older two-column form" "$SOUT" "(.nodes[] | select(.id==\"$ID3\") | .check)=={\"fails\":2,\"at\":null,\"failed\":[]}"
+expect_jq "a node never checked: null" "$SOUT" '(.nodes[3].check)==null'
+end
+begin "status/tunnel-exit-checks-at-most-15-processes"
+expect_le "processes per poll" "$SPROCS" 15
+end
+# the exit belongs to another node (the active one changed since): not shown
+ui2_files Node002
+measure_status
+begin "status/exit-of-another-node-not-shown"
+expect_jq "tunnel still shown (positive control)" "$SOUT" '.tunnel.state=="up"'
+expect_jq "no exit" "$SOUT" '.exit==null'
+end
+# a failed lookup / a broken tunnel file
+ui2_files Node001
+jq -nc '{ok: false, ip: "", country: "", node: "Node001", at: 1}' > /tmp/vpnpool/exit.json
+echo 'sideways 12' > /tmp/vpnpool/.tunnel
+measure_status
+begin "status/failed-exit-lookup-and-unknown-tunnel-state"
+expect_jq "node checks still read (positive control)" "$SOUT" "(.nodes[] | select(.id==\"$ID1\") | .check.fails)==3"
+expect_jq "no exit" "$SOUT" '.exit==null'
+expect_jq "unknown state -> null" "$SOUT" '.tunnel==null'
+end
+# the daemon is down: the files of a killed run say nothing
+daemon_stop
+ui2_files Node001
+measure_status
+begin "status/daemon-down-no-tunnel-no-exit"
+expect_jq "not running (positive control)" "$SOUT" '.running==false and (.nodes|length)==300'
+expect_jq "no tunnel, no exit" "$SOUT" '.tunnel==null and .exit==null'
+end
+rm -f /tmp/vpnpool/.tunnel /tmp/vpnpool/exit.json /tmp/vpnpool/.deadstrikes

@@ -418,6 +418,27 @@ ctl ui1-reason-without-text ui-unit fail 'FAIL - every reason the backend gives 
 	"$LIBX/parser.uc" "return 'bad_uuid';" "return 'bad_brand_new_reason';"
 ctl ui1-sources-tab-back ui-smoke fail 'menu: Nodes tab / no Sources tab' \
 	package/luci-app-vpnpool/files/usr/share/luci/menu.d/luci-app-vpnpool.json '"admin/services/vpnpool/nodes": {' '"admin/services/vpnpool/sources": { "title": "Sources", "order": 9, "action": { "type": "view", "path": "vpnpool/dashboard" } }, "admin/services/vpnpool/nodes": {'
+# ui2: what the Overview / Nodes read from the daemon's background checks
+ctl ui2-nodecheck-no-host daemon fail 'daemon/nodecheck-strikes-say-when-and-which-host ' \
+	"$LIBX/nodecheck.sh" '[ "$ok" = 1 ] || failed="${failed:+$failed,}${p#*|}"' ':'
+ctl ui2-tunnel-not-written daemon fail 'daemon/tunnel-state-for-the-overview ' \
+	"$LIBX/vpnpoold" '	[ "$1" = "$TUNNEL_STATE" ] && return 0' '	return 0'
+ctl ui2-tunnel-every-tick daemon fail 'daemon/tunnel-state-for-the-overview ' \
+	"$LIBX/vpnpoold" '	[ "$1" = "$TUNNEL_STATE" ] && return 0' '	:'
+ctl ui2-exit-every-tick daemon fail 'daemon/exit-lookup-only-when-needed ' \
+	"$LIBX/vpnpoold" '		[ "$age" -lt "$EXIT_RETRY" ] && return 0' '		:'
+ctl ui2-exit-without-tunnel daemon fail 'daemon/exit-lookup-only-when-needed ' \
+	"$LIBX/vpnpoold" '	[ -n "$1" ] && [ "$WD_HEALTHY" = 1 ] || return 0' '	[ -n "$1" ] || return 0'
+ctl ui2-exitip-direct daemon fail 'daemon/exitip-first-address-through-the-tunnel ;daemon/exitip-nothing-answers-says-so ' \
+	"$LIBX/exitip.sh" 'J=$(curl -s -m 7 --proxy "socks5h://127.0.0.1:$TP" "$url" 2>/dev/null)' 'J=$(curl -s -m 7 "$url" 2>/dev/null)'
+ctl ui2-exitip-junk-address daemon fail 'daemon/exitip-first-address-through-the-tunnel ' \
+	"$LIBX/exitip.sh" '	case "$IP" in (*[!0-9a-fA-F:.]*|'"''"') IP=""; continue ;; esac' '	:'
+ctl ui2-status-exit-other-node status fail 'status/exit-of-another-node-not-shown ' \
+	"$LIBX/status.uc" '&& length(now_tag) && exj.node == now_tag)' '&& length(now_tag))'
+ctl ui2-status-tunnel-stale status fail 'status/daemon-down-no-tunnel-no-exit ' \
+	"$LIBX/status.uc" "let tf = running ? split(" "let tf = true ? split("
+ctl ui2-status-check-dropped status fail 'status/tunnel-exit-and-node-checks ;status/failed-exit-lookup-and-unknown-tunnel-state ' \
+	"$LIBX/status.uc" 'check: id ? (ncheck[id] ?? null) : null,' 'check: null,'
 # runner: a suite that silently stops early must fail the run (min-cases.txt), not shrink total
 ctl suite-stops-early sched fail 'runner/sched-ran-at-least-6-cases' \
 	stand/tests/suites/sched.sh '# ---- garbage times are rejected' 'return 0   # ---- garbage times are rejected'

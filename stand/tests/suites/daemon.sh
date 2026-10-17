@@ -505,3 +505,86 @@ sh /usr/libexec/vpnpool/snapshot.sh >/dev/null 2>&1
 begin "daemon/snapshot-keeps-an-active-automatic-favourite"
 expect_true "Node1 kept (active), Node2 added" jq -e --arg a "$SN1" --arg b "$SN2" '.[$a].active==true and .[$b].auto==true' /etc/vpnpool/favorites.map.json
 end
+
+# ---- ui2: what the Overview / Nodes read from the daemon's background checks ----
+# (1) the tunnel state the watchdog saw (.tunnel "<state> <since>", rewritten only on a change)
+sc_tstate() {
+	SB_STARTED=$(date +%s); watchdog_check; cp "$TUNNEL_FILE" "$DS/t0"   # warm-up: not judged
+	SB_STARTED=0; watchdog_check; cp "$TUNNEL_FILE" "$DS/t1"
+	/bin/sleep 1; watchdog_check; cp "$TUNNEL_FILE" "$DS/t2"            # still up: unchanged
+	echo down > "$DS/tunnel"; watchdog_check; cp "$TUNNEL_FILE" "$DS/t3"
+	echo down > "$DS/wan"; watchdog_check; cp "$TUNNEL_FILE" "$DS/t4"
+}
+ds_reset 0 up; rm -f "$DS"/t[0-4]; in_daemon sc_tstate
+begin "daemon/tunnel-state-for-the-overview"
+expect_true "positive control: all five states written" test -s "$DS/t4"
+expect_eq "warm-up" "$(cut -d' ' -f1 "$DS/t0")" starting
+expect_eq "healthy" "$(cut -d' ' -f1 "$DS/t1")" up
+expect_true "since = a time" grep -qE '^up [0-9]{9,}$' "$DS/t1"
+expect_true "still healthy a second later: since unchanged" cmp -s "$DS/t1" "$DS/t2"
+expect_eq "dead while WAN works" "$(cut -d' ' -f1 "$DS/t3")" down
+expect_eq "the router has no internet" "$(cut -d' ' -f1 "$DS/t4")" wan_down
+end
+# (2) the exit lookup: only with a working tunnel, on a node change, again after 30 min (5 min
+# after a lookup that found nothing) — never per tick
+printf '#!/bin/sh\necho "exitip $1" >> %s\n' "$RLOG" > "$FL/exitip.sh"; chmod +x "$FL/exitip.sh"
+sc_exit() {
+	WD_HEALTHY=1
+	exit_info_check A 1000; exit_info_check A 1100           # the same node 100 s later: no second lookup
+	exit_info_check B 1150                                    # the node changed: a lookup
+	echo '{"ok":false,"ip":""}' > "$SB_DATA/exit.json"
+	exit_info_check B 1460                                    # found nothing, 5 min later: again
+	echo '{"ok":true,"ip":"198.51.100.7"}' > "$SB_DATA/exit.json"
+	exit_info_check B 1770                                    # found, 5 min later: not again
+	exit_info_check B 3300                                    # found, 30 min later: again
+	WD_HEALTHY=0; exit_info_check C 4000                      # the tunnel does not work: never
+	WD_HEALTHY=""; exit_info_check C 4001                     # not judged (warm-up): never
+	exit_info_check "" 4002
+	wait
+}
+ds_reset 0 up; in_daemon sc_exit
+begin "daemon/exit-lookup-only-when-needed"
+expect_eq "node A looked up once" "$(gcount '^exitip A$' "$RLOG")" 1
+expect_eq "node B: change, retry after nothing, 30 min" "$(gcount '^exitip B$' "$RLOG")" 3
+expect_eq "never without a working tunnel" "$(gcount '^exitip C' "$RLOG")" 0
+expect_eq "nothing else" "$(gcount '^exitip' "$RLOG")" 4
+end
+# (3) exitip.sh: through the tunnel only, the first service with an address, country upper case
+reset_state; mock_on
+echo '{"ip":"<b>blocked</b>"}' > "$DS/ex_junk"
+echo '{"ip":"198.51.100.7","country":"de"}' > "$DS/ex_ok"
+mock_rule 'P GET https://ifconfig.co/json' 200 "$DS/ex_junk"
+mock_rule 'P GET https://ipinfo.io/json' 200 "$DS/ex_ok"
+sh /usr/libexec/vpnpool/exitip.sh NodeA >/dev/null 2>&1
+begin "daemon/exitip-first-address-through-the-tunnel"
+expect_true "ip, country, node, time" jq -e '.ok==true and .ip=="198.51.100.7" and .country=="DE" and .node=="NodeA" and (.at|type)=="number"' /tmp/vpnpool/exit.json
+expect_eq "no direct request" "$(gcount '^GET ' /tmp/curlmock/calls.log)" 0
+expect_eq "stops at the first address" "$(mock_calls 'api.ip.sb')" 0
+expect_true "no lock left" test ! -e /tmp/vpnpool/.exitip-running
+end
+mock_on; : > /tmp/curlmock/calls.log   # nothing answers
+sh /usr/libexec/vpnpool/exitip.sh NodeA >/dev/null 2>&1
+begin "daemon/exitip-nothing-answers-says-so"
+expect_true "ok false, no address" jq -e '.ok==false and .ip=="" and .node=="NodeA"' /tmp/vpnpool/exit.json
+expect_eq "every service tried" "$(mock_calls '^P GET https://')" 4
+end
+# (4) nodecheck: the strike file says when and which checked host a node did not reach
+reset_state
+U=9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce
+printf 'vless://%s@203.0.113.71:443?security=tls&sni=a.example#Node1\nvless://%s@203.0.113.72:443?security=tls&sni=b.example#Node2\n' "$U" "$U" > "$DS/l2.txt"
+ucode /usr/libexec/vpnpool/parser.uc --with-id "$DS/l2.txt" > /tmp/vpnpool/nodes.json
+uci set vpnpool.main.check_services='www.youtube.com https://chat.example/x'; uci set vpnpool.main.dead_filter_tries=1; uci commit vpnpool
+echo '{"delay":42}' > "$DS/d42"
+mock_on
+mock_rule 'GET http://cp.cloudflare.com/generate_204' 204
+mock_rule 'GET http://connectivitycheck.gstatic.com/generate_204' 204
+mock_rule 'GET http://127.0.0.1:9091/proxies/Node1/delay?url=http%3A%2F%2Fwww.youtube.com*' 200 "$DS/d42"
+mock_rule 'GET http://127.0.0.1:9091/proxies/Node2/delay?url=*' 200 "$DS/d42"
+NODECHECK_DRYRUN=1 sh /usr/libexec/vpnpool/nodecheck.sh >/dev/null 2>&1
+N1=$(jq -r '.[0].id' /tmp/vpnpool/nodes.json); N2=$(jq -r '.[1].id' /tmp/vpnpool/nodes.json)
+sline() { awk -F'\t' -v k="$1" '$1==k{print $2 "|" (($3 ~ /^[0-9]+$/ && length($3) >= 9) ? "time" : "no-time:" $3) "|" $4}' /tmp/vpnpool/.deadstrikes; }
+begin "daemon/nodecheck-strikes-say-when-and-which-host"
+expect_eq "positive control: the passing node, no failed host" "$(sline "$N2")" '0|time|'
+expect_eq "the failing node: one strike, when, the host it did not reach" "$(sline "$N1")" '1|time|chat.example'
+expect_eq "one line per node" "$(grep -c . /tmp/vpnpool/.deadstrikes)" 2
+end
