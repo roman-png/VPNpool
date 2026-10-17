@@ -132,7 +132,7 @@ msgid "The last update of the VPN settings failed; the previous ones keep workin
 msgstr "Последнее обновление настроек VPN не удалось; работают прежние."
 
 #: files/www/luci-static/resources/view/vpnpool/dashboard.js:154
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:276
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:284
 #: files/usr/share/luci/menu.d/luci-app-vpnpool.json
 msgid "Diagnostics"
 msgstr "Диагностика"
@@ -410,7 +410,7 @@ msgstr "есть"
 
 #: files/www/luci-static/resources/view/vpnpool/diagnostics.js:101
 #: files/www/luci-static/resources/view/vpnpool/diagnostics.js:102
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:133
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:139
 msgid "not found"
 msgstr "нет"
 
@@ -418,253 +418,257 @@ msgstr "нет"
 msgid "zapret on this router"
 msgstr "zapret на этом роутере"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:113
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:114
 msgid "Checked again."
 msgstr "Проверено заново."
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:120
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:126
 msgid "Checking the exit through the VPN…"
 msgstr "Проверяется выход через VPN…"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:122
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:128
 msgid "Exit through the VPN: %s, address %s."
 msgstr "Выход через VPN: %s, адрес %s."
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:133
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:139
 msgid "Version"
 msgstr "Версия"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:134
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:140
 msgid "AmneziaWG"
 msgstr "AmneziaWG"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:134
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:140
 msgid "supported, including 3.1"
 msgstr "поддерживается, включая 3.1"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:134
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:140
 msgid "supported (without 3.1)"
 msgstr "поддерживается (без 3.1)"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:135
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:141
 msgid "not supported"
 msgstr "не поддерживается"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:136
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:142
 msgid "Engine with AmneziaWG"
 msgstr "Движок с AmneziaWG"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:137
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:143
 msgid "installed, version %s"
 msgstr "установлен, версия %s"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:137
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:143
 msgid "kept in memory (installed again at every start)"
 msgstr "хранится в памяти (ставится заново при каждом запуске)"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:138
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:144
 msgid "not installed"
 msgstr "не установлен"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:140
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:146
 msgid "A newer version of the engine with AmneziaWG is available: %s. To update it, connect to the router over SSH and run:"
 msgstr "Есть новая версия движка с AmneziaWG: %s. Чтобы обновить его, подключитесь к роутеру по SSH и выполните:"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:143
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:149
 msgid "The engine with AmneziaWG is up to date. A later version is installed by this command on the router (over SSH):"
 msgstr "Движок с AmneziaWG обновлён до последней версии. Когда выйдет новая, её ставит эта команда на роутере (по SSH):"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:146
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:152
 msgid "For AmneziaWG nodes, install the engine with AmneziaWG: connect to the router over SSH and run:"
 msgstr "Чтобы работали узлы AmneziaWG, установите движок с AmneziaWG: подключитесь к роутеру по SSH и выполните:"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:149
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:155
 msgid "The standard engine is updated with the other packages of the router: System → Software. If podkop is installed, update them together."
 msgstr "Обычный движок обновляется вместе с другими пакетами роутера: «Система → Программное обеспечение». Если установлен podkop, обновляйте их вместе."
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:157
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:163
 msgid "For reference when something goes wrong. They must not coincide with those of other VPN services on the router (podkop has its own). They are changed only on the router itself."
 msgstr "Справочно — на случай, если что-то не работает. Они не должны совпадать с такими же у других VPN-служб на роутере (у podkop свои). Меняются только на самом роутере."
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:159
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:165
 msgid "Port that receives the routed traffic"
 msgstr "Порт, на который приходит направляемый трафик"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:160
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:166
 msgid "Port for checks through the VPN"
 msgstr "Порт для проверок через VPN"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:161
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:167
 msgid "Port for testing one node"
 msgstr "Порт для проверки одного узла"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:162
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:168
 msgid "Mark of the routed traffic"
 msgstr "Метка направляемого трафика"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:163
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:169
 msgid "Routing table and its priority"
 msgstr "Таблица маршрутов и её приоритет"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:164
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:170
 msgid "Engine control address"
 msgstr "Адрес управления движком"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:165
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:171
 msgid "Network of the devices"
 msgstr "Сеть устройств"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:165
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:171
 msgid "found automatically"
 msgstr "найдена автоматически"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:166
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:172
 msgid "Living next to other VPN services"
 msgstr "Совместная работа с другими VPN-службами"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:167
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:173
 msgid "Order of name lookups"
 msgstr "Порядок поиска адресов по имени"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:168
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:174
 msgid "Address of the connection check"
 msgstr "Адрес проверки связи"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:169
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:175
 msgid "Largest subscription download, KB"
 msgstr "Наибольший размер скачиваемой подписки, КБ"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:170
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:176
 msgid "Free memory a speed test needs, KB"
 msgstr "Свободная память для теста скорости, КБ"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:171
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:177
 msgid "Sites checked per search run"
 msgstr "Сайтов за один проход автопоиска"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:172
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:178
 msgid "Engine program"
 msgstr "Программа движка"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:172
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:178
 msgid "chosen automatically"
 msgstr "выбирается автоматически"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:173
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:179
 msgid "Program names used to download subscriptions"
 msgstr "Имена программ при скачивании подписок"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:173
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:179
 msgid "the standard list"
 msgstr "стандартный список"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:174
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:180
 msgid "Engine process number"
 msgstr "Номер процесса движка"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:175
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:181
 msgid "Ready-made lists in use"
 msgstr "Готовых списков включено"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:176
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:182
 msgid "Copy of the ready-made lists"
 msgstr "Копия готовых списков"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:176
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:182
 msgid "%d KB"
 msgstr "%d КБ"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:176
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:182
 msgid "none yet"
 msgstr "пока нет"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:177
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:183
 msgid "Internet connection of the router"
 msgstr "Подключение роутера к интернету"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:185
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:191
 msgid "Which log"
 msgstr "Какой журнал"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:186
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:192
 msgid "The service"
 msgstr "Служба"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:187
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:193
 msgid "The VPN engine"
 msgstr "Движок VPN"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:190
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:196
 msgid "How many lines"
 msgstr "Сколько строк"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:191
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:197
 msgid "last %d lines"
 msgstr "последние %d строк"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:193
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:199
 msgid "Filter: show the lines with this text"
 msgstr "Фильтр: показать строки с этим текстом"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:194
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:200
 msgid "Filter"
 msgstr "Фильтр"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:200
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:206
 msgid "Refresh"
 msgstr "Обновить"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:201
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:207
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:1059
 msgid "Download"
 msgstr "Скачать"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:219
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:225
 msgid "No line has this text."
 msgstr "Ни одна строка не содержит этот текст."
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:219
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:245
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:225
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:251
 msgid "The log is empty."
 msgstr "Журнал пуст."
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:226
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:232
 msgid "Lines: %d"
 msgstr "Строк: %d"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:226
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:232
 msgid "Lines: %d of %d"
 msgstr "Строк: %d из %d"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:254
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:261
 msgid "The router did not give the diagnostics. Press \"Check again\"."
 msgstr "Роутер не отдал данные диагностики. Нажмите «Проверить снова»."
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:268
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:261
+msgid "Checking the router…"
+msgstr "Проверяем роутер…"
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:276
 msgid "The log could not be read."
 msgstr "Не удалось прочитать журнал."
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:272
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:280
 msgid "Check again"
 msgstr "Проверить снова"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:273
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:281
 msgid "Check the exit through the VPN"
 msgstr "Проверить выход через VPN"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:277
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:285
 msgid "Checks"
 msgstr "Проверки"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:278
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:286
 msgid "Log"
 msgstr "Журнал"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:279
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:287
 msgid "VPN engine"
 msgstr "Движок VPN"
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:280
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:288
 msgid "Technical parameters"
 msgstr "Технические параметры"
 
