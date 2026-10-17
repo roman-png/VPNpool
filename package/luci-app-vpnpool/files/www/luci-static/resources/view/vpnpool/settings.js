@@ -22,6 +22,22 @@ var txt = common.txt;
 var RESTORE_MAX_B64 = 60000;
 var RESTORE_MAX_BYTES = RESTORE_MAX_B64 / 4 * 3;
 
+// A restore file that is not an archive: the text copy of the settings an older version (1.x)
+// saved with "Export" (the configuration as text). The router checks it and moves it to this
+// version (import: incomplete, masked or invalid copies are refused, nothing changes then).
+function isGzip(bytes) { return bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b; }
+function textOf(bytes) {
+	if (typeof TextDecoder === 'function') {
+		try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch (e) { return null; }
+	}
+	var s = '';
+	for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+	try { return decodeURIComponent(escape(s)); } catch (e) { return null; }
+}
+function looksLikeConfig(t) { return typeof t === 'string' && /^[ \t]*(package[ \t]+vpnpool|config[ \t]+vpnpool[ \t])/m.test(t); }
+// bytes of the text inside the JSON-RPC request (escapes and UTF-8 counted)
+function jsonBytes(t) { return unescape(encodeURIComponent(JSON.stringify(t))).length; }
+
 function settings(st) { return (st && st.settings) || {}; }
 function sv(name, def) { return function(st) { var v = settings(st)[name]; return (v == null) ? def : v; }; }
 function bool(name, def) { return function(st) { var v = settings(st)[name]; return (v == null) ? def : !!v; }; }
@@ -127,6 +143,8 @@ return view.extend({
 		if (Math.ceil(file.size / 3) * 4 > RESTORE_MAX_B64) return Promise.resolve(tooBig());
 		return common.readFileBase64(file).then(function(b64) {
 			if (b64.length > RESTORE_MAX_B64) return tooBig();
+			var bytes = common.b64ToBytes(b64);
+			if (!isGzip(bytes)) return self.importText(textOf(bytes), tooBig);
 			return common.call('restore', { data: b64 }, { handle: [ 'confirm_required' ] }).then(function() {
 				return null;   // the router never replaces without replace_all: nothing happened
 			}, function(e) {
@@ -157,6 +175,32 @@ return view.extend({
 		}, function() {
 			common.toast(common.codeText('invalid_archive'), 'error', 'restore');
 			return null;
+		});
+	},
+
+	// the text copy of an older version: the router can't check it without importing, so the
+	// page asks first (what is replaced), then import
+	importText: function(text, tooBig) {
+		var self = this;
+		if (!looksLikeConfig(text)) {
+			common.toast(common.codeText('invalid_archive'), 'error', 'restore');
+			return Promise.resolve(null);
+		}
+		if (jsonBytes(text) > RESTORE_MAX_B64) return Promise.resolve(tooBig());
+		var cons = [ _('The subscriptions, nodes and settings in the file are moved over to this version.') ];
+		if (self.saver && self.saver.dirty()) cons.push(_('The unsaved changes on this page are lost.'));
+		return common.confirm({
+			title: _('Restore the settings of an older version?'),
+			text: _('This is a text copy of the settings saved by an older version of VPN Pool, not a backup file. All current settings, subscriptions and nodes are replaced by the ones from it.'),
+			consequences: cons,
+			confirm: _('Replace everything'),
+			danger: true
+		}).then(function(yes) {
+			if (!yes) return null;
+			return common.call('import', { config: text },
+				{ success: function(r) { return (r && r.daemon === 'not_running') ? common.codeText('restored')
+					: _('Restored. The service starts again with the restored settings.'); } })
+				.then(function(r) { return self.reload().then(function() { return r; }); }, function() { return null; });
 		});
 	},
 
@@ -242,7 +286,7 @@ return view.extend({
 			_('A file with all settings, subscriptions and nodes, including the Telegram token. Keep it safe.'));
 		o = s.option(Action, 'files', '');
 		o.build = function() {
-			var file = E('input', { 'type': 'file', 'accept': '.gz,.tgz,application/gzip', 'style': 'display:none', 'change': function(ev) {
+			var file = E('input', { 'type': 'file', 'accept': '.gz,.tgz,.txt,.conf,application/gzip,text/plain', 'style': 'display:none', 'change': function(ev) {
 				var f = ev.target.files && ev.target.files[0];
 				ev.target.value = '';
 				self.restoreFile(f);
@@ -254,7 +298,8 @@ return view.extend({
 				E('button', { 'class': 'btn cbi-button cbi-button-neutral', 'type': 'button', 'click': function(ev) {
 					ev.preventDefault(); file.click();
 				} }, [ txt(_('Restore from a file…')) ]),
-				file
+				file,
+				E('p', { 'class': 'vp-hint' }, [ txt(_('A text copy of the settings saved by an older version can be restored here too.')) ])
 			]);
 		};
 

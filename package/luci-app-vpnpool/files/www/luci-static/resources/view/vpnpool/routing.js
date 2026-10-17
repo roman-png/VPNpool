@@ -290,7 +290,8 @@ return view.extend({
 
 		return m.render().then(function(mapNode) {
 			self.map = m;
-			self.saver = common.formSaver({ fields: FIELDS, maps: [ m ], onSaved: function() { return self.reload(); } });
+			self.saver = common.formSaver({ fields: FIELDS, maps: [ m ], onSaved: function() { return self.reload(); },
+				prepare: function(ch) { return self.mergeFound(ch); } });
 			var box = self.box || (self.box = E('div', { 'class': 'vp-page' }));
 			dom.content(box, [
 				common.header(_('Routes')),
@@ -299,6 +300,26 @@ return view.extend({
 				self.saver.bar()
 			]);
 			return box;
+		});
+	},
+
+	// "Found automatically" edited: the automatic search may have added sites since the page was
+	// loaded. Right before the save the list is read again and the user's edit is applied to it
+	// (what they deleted goes, what they added comes), so a site found meanwhile is not wiped out.
+	mergeFound: function(ch) {
+		if (!ch || !Object.prototype.hasOwnProperty.call(ch, 'auto_domains')) return ch;
+		var base = (this.saver && this.saver.base && this.saver.base.auto_domains) || [];
+		var cur = Array.isArray(ch.auto_domains) ? ch.auto_domains : [];
+		return common.call('status', {}, { quiet: true }).then(function(st) {
+			var fresh = (st && Array.isArray(st.auto_domains)) ? st.auto_domains : base;
+			var out = [];
+			var put = function(d) { if (out.indexOf(d) < 0) out.push(d); };
+			fresh.forEach(function(d) { if (base.indexOf(d) < 0 || cur.indexOf(d) >= 0) put(d); });
+			cur.forEach(function(d) { if (base.indexOf(d) < 0) put(d); });
+			var res = {};
+			Object.keys(ch).forEach(function(k) { res[k] = ch[k]; });
+			res.auto_domains = out;
+			return res;
 		});
 	},
 
