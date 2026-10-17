@@ -62,10 +62,14 @@ expect_eq "no NEW" "$(sed -n 's/^NEW_COUNT //p' "$OUTU/stale.out")" 0
 end
 
 # ---- the baseline really gates: drop one baseline line => that violation becomes NEW ----
-grep -v '^#' "$BL" | sed '1d' > "$OUTU/short.baseline"
-ucode "$G" "$APP" "$SL" "$OUTU/short.baseline" > "$OUTU/short.out" 2>&1; GRC=$?
+# (on the bad fixture: the real app's baseline is empty since 2.0, so it can't show this)
+sed -n 's/^NEW //p' "$OUTU/bad.out" > "$OUTU/full.baseline"
+ucode "$G" "$FXU/bad" "$SL" "$OUTU/full.baseline" > "$OUTU/full.out" 2>&1; GRC0=$?
+sed '1d' "$OUTU/full.baseline" > "$OUTU/short.baseline"
+ucode "$G" "$FXU/bad" "$SL" "$OUTU/short.baseline" > "$OUTU/short.out" 2>&1; GRC=$?
 begin "uitext/baseline-gates-new-violations"
-expect_true "baseline is not empty (else this control is void)" [ "$(gcount -v '^#' "$BL")" -ge 1 ]
-expect_eq "exit code 1" "$GRC" 1
+expect_true "the fixture's baseline is not empty (else this control is void)" [ "$(gcount . "$OUTU/full.baseline")" -ge 1 ]
+expect_eq "with every line: exit code 0, no NEW" "$GRC0/$(sed -n 's/^NEW_COUNT //p' "$OUTU/full.out")" 0/0
+expect_eq "one line dropped: exit code 1" "$GRC" 1
 expect_eq "exactly one NEW" "$(sed -n 's/^NEW_COUNT //p' "$OUTU/short.out")" 1
 end
