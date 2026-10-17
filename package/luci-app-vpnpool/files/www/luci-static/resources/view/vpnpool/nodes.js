@@ -104,21 +104,6 @@ function loadCollapsed() {
 }
 function saveCollapsed(c) { try { window.localStorage.setItem(LS_KEY, JSON.stringify(c)); } catch (e) {} }
 
-function fmtBytes(n) {
-	n = +n || 0;
-	if (n < 1024) return _('%d B').format(n);
-	if (n < 1048576) return _('%s KB').format((n / 1024).toFixed(1));
-	if (n < 1073741824) return _('%s MB').format((n / 1048576).toFixed(1));
-	return _('%s GB').format((n / 1073741824).toFixed(2));
-}
-function fmtDate(ts) { return new Date(ts * 1000).toLocaleDateString(); }
-function ago(ts) {
-	var s = Math.floor(Date.now() / 1000 - ts);
-	if (s < 90) return _('just now');
-	if (s < 3600) return _('%d min ago').format(Math.round(s / 60));
-	if (s < 86400) return _('%d h ago').format(Math.round(s / 3600));
-	return fmtDate(ts);
-}
 function typeName(t) { return t ? (TYPE_NAMES[t] || String(t).toUpperCase()) : ''; }
 function delayText(d) {
 	if (d == null) return '—';
@@ -625,20 +610,8 @@ return view.extend({
 		var parts = [];
 		if (g.kind === 'sub') {
 			var s = g.sub;
-			if (!s.enabled) parts.push({ t: _('turned off'), k: 'warn' });
-			parts.push({ t: s.mode === 'pick' ? _('picked nodes: %d').format(s.picked || 0) : _('every node') });
-			if (s.expire) {
-				var days = Math.floor((s.expire * 1000 - Date.now()) / 86400000);
-				parts.push(days < 0 ? { t: _('expired on %s').format(fmtDate(s.expire)), k: 'error' }
-					: { t: _('valid until %s (%d days left)').format(fmtDate(s.expire), days), k: days < 7 ? 'warn' : '' });
-			}
-			if (s.total > 0) {
-				var left = Math.max(0, s.total - (s.used || 0));
-				parts.push({ t: _('%s of %s left').format(fmtBytes(left), fmtBytes(s.total)), k: (left < s.total * 0.1) ? 'warn' : '' });
-			}
-			if (s.updated_at) parts.push({ t: _('updated %s').format(ago(s.updated_at)) });
-			if (s.result === 'failed') parts.push({ t: _('the last update failed'), k: 'error' });
-			if (s.pick_missing > 0) parts.push({ t: _('picked nodes gone from it: %d').format(s.pick_missing), k: 'warn' });
+			// the same facts as the Overview's subscription cards (one computation: common.subFacts)
+			common.subFacts(s).forEach(function(f) { parts.push({ t: f.t, k: f.k || '' }); });
 			var et = !s.enabled ? _('The subscription is turned off.') : (s.result === 'failed' ? _('The last update failed and there are no nodes from it.') : _('No nodes from this subscription yet.'));
 			if (G.empty.textContent !== et) G.empty.textContent = et;
 			var on = !!s.enabled;
