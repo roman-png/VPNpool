@@ -350,7 +350,7 @@ ctl ui-backend-code-without-text ui-unit fail 'FAIL - every code the backend ans
 # what is typed (rpcd tg_test {token, chat, via_proxy}), the masked token = the saved one
 ctl ui3-pages-every-field-sent ui-pages fail 'FAIL - routing: every field of the page;FAIL - settings: every field of the page;FAIL - routing: one Save;FAIL - settings: one Save;FAIL - routing: leaving the page;FAIL - settings: leaving the page;FAIL - settings: after a save;FAIL - routing and settings: Revert;FAIL - routing: Save with nothing changed;FAIL - settings: Save with nothing changed;FAIL - routing: after a refused save' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js 'if (has(cur, f) && cur[f] !== undefined && !same(cur[f], this.base[f])) out[f] = cur[f];' 'if (has(cur, f) && cur[f] !== undefined) out[f] = cur[f];'
-ctl ui3-tg-test-ignores-typed rpcd fail 'rpcd/tg_test/typed-values-used ;rpcd/tg_test/empty-typed-token-is-none ;rpcd/tg_test/bad-typed-values-refused ;rpcd/tg_test/token-with-a-line-break-refused ' \
+ctl ui3-tg-test-ignores-typed rpcd fail 'rpcd/tg_test/typed-values-used ;rpcd/tg_test/empty-typed-token-is-none ;rpcd/tg_test/bad-typed-values-refused ;rpcd/tg_test/token-with-a-line-break-refused ;rpcd/tg_test/overlong-token-refused ' \
 	"$RPCD" "*) tok=\$v ;; esac; fi" '*) : ;; esac; fi'
 ctl ui3-tg-test-mask-as-token rpcd fail 'rpcd/tg_test/masked-token-means-the-saved-one ' \
 	"$RPCD" "case \"\$v\" in *'***'*) ;; *) tok=\$v ;; esac" 'tok=$v'
