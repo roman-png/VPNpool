@@ -1,0 +1,1 @@
+# UI text guard baseline — known violations; may only SHRINK (see stand/tests/ui-text-guard.sh)

@@ -3,7 +3,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=vpnpool
-PKG_VERSION:=1.5.0
+PKG_VERSION:=2.0.0
 PKG_RELEASE:=1
 PKG_MAINTAINER:=roman-png
 PKG_LICENSE:=GPL-3.0-only
@@ -52,6 +52,10 @@ define Package/vpnpool/install
 	chmod 0755 $(1)/usr/libexec/vpnpool/*
 endef
 
+# An upgrade 1.x -> 2.0: opkg runs the OLD package's prerm (stop + disable) before the new
+# postinst, whose default_postinst runs the 1.x -> 2.0 migration (uci-defaults) and then starts
+# the service — so no 1.x daemon runs on the migrated config (stand/tests/upgrade-opkg-test.sh;
+# init.d does not start the daemon if the migration failed). The postinst enables it again.
 define Package/vpnpool/postinst
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] || {

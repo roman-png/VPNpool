@@ -14,11 +14,30 @@
 
 import { readfile } from 'fs';
 import { cursor } from 'uci';
+import { VALID_COMMUNITY } from './common.uc';
 
 let nodes_path = ARGV[0];
 let nodes = nodes_path ? json(readfile(nodes_path)) : [];
 if (type(nodes) != 'array')
 	nodes = [];
+// nodes.json carries the node identity `id` (parser --with-id: EVERY store keys on it — auto-pool
+// members, dead marks, favourites, the preferred node) and bookkeeping fields `_*` (`_link`,
+// `_src`): sing-box rejects unknown outbound fields, so none of them may reach the config.
+// TAG_OF: id -> the tag this build gave the node (the config references nodes by tag).
+let TAG_OF = {};
+for (let n in nodes) {
+	if (type(n) != 'object') continue;
+	if (n.id != null) TAG_OF[n.id] = n.tag;
+	delete n.id;
+	for (let k in keys(n)) if (substr(k, 0, 1) == '_') delete n[k];
+}
+// a list of ids -> the tags of the nodes of THIS build (unknown ids are dropped)
+function tags_of(ids) {
+	let out = [];
+	for (let i in ids) if (TAG_OF[i] != null) push(out, TAG_OF[i]);
+	return out;
+}
+function as_array(v) { return (v == null) ? [] : ((type(v) == 'array') ? v : [ v ]); }
 
 let uci = cursor();
 function opt(section, name, def) {
@@ -45,6 +64,12 @@ if (length(check_services)) {
 	if (first)
 		probe_url = (index(first, '://') >= 0) ? first : ('http://' + first + '/generate_204');
 }
+// build.sh passes the URL computed by lib.sh (primary_probe_url — THE single "is it alive"
+// definition shared with nodecheck / watchdog / ping) in VPNPOOL_PROBE_URL; the local
+// computation above is only the fallback for a direct invocation.
+let env_probe = getenv('VPNPOOL_PROBE_URL');
+if (env_probe != null && length(env_probe))
+	probe_url = env_probe;
 let fo_interval = opt('main', 'failover_interval', '60');
 let fo_tol      = int(opt('main', 'failover_tolerance', 50));
 let log_level   = opt('main', 'log_level', 'warn');
@@ -69,12 +94,22 @@ if (type(communities) != 'array')
 	communities = [communities];
 
 let SRS_BASE = 'https://github.com/itdoginfo/allow-domains/releases/latest/download';
-let VALID_COMMUNITY = {
-	russia_inside: 1, russia_outside: 1, geoblock: 1, block: 1,
-	porn: 1, news: 1, anime: 1, youtube: 1, hdrezka: 1, tiktok: 1, google_ai: 1,
-	google_play: 1, google_meet: 1, hodca: 1, discord: 1, meta: 1, twitter: 1,
-	cloudflare: 1, cloudfront: 1, digitalocean: 1, hetzner: 1, ovh: 1, telegram: 1, roblox: 1
-};
+// stand tests only: a local server with the SRS files (the stand has no network)
+if (length(getenv('VPNPOOL_SRS_BASE') ?? '')) SRS_BASE = getenv('VPNPOOL_SRS_BASE');
+// VALID_COMMUNITY: the one list lives in common.uc (the settings validator uses it too).
+
+// The config is generated FOR the engine that will run it (ROADMAP 4.2): build.sh passes its
+// `version -n` in VPNPOOL_SB_VERSION (enginecap.uc). sing-box >= 1.14 downloads rule-sets
+// through an HTTP client: `download_detour` is deprecated there (removed in 1.16) and the
+// implicit default client is deprecated too (it dials through the DEFAULT outbound = our
+// urltest). So on >= 1.14: a top-level http client WITHOUT a detour (= a plain direct dial)
+// as route.default_http_client. NOT `detour: "direct"`: 1.14 refuses that at the first download
+// ("detour to an empty direct outbound makes no sense" — a runtime error `check` does not see).
+// 1.12/1.13 (and an unknown version) keep download_detour, which they need.
+let SB_VER = getenv('VPNPOOL_SB_VERSION') ?? '';
+let sbv = match(SB_VER, /^([0-9]+)\.([0-9]+)/);
+let SB_GE_114 = sbv ? (int(sbv[1]) > 1 || (int(sbv[1]) == 1 && int(sbv[2]) >= 14)) : false;
+let HTTP_CLIENT_TAG = 'vpnpool-direct';
 
 let rule_sets = [];
 let comm_tags = [];
@@ -82,22 +117,18 @@ for (let c in communities) {
 	if (!VALID_COMMUNITY[c])
 		continue;
 	let tag = 'comm-' + c;
-	push(rule_sets, {
+	let rs = {
 		type: 'remote',
 		tag: tag,
 		format: 'binary',
 		url: SRS_BASE + '/' + c + '.srs',
-		// download_detour: route rule-set downloads via the "direct" outbound (so SRS
-		// fetches don't loop through the proxy before it's up). VERIFIED working on the
-		// targeted sing-box 1.12.25 (rule-sets download, build ok). It is DEPRECATED from
-		// 1.14 (replacement: route-level rule_set download via `http_client`) and slated
-		// for REMOVAL in 1.16 — but that replacement does NOT exist before 1.14, so we must
-		// keep download_detour while targeting 1.12.x. MIGRATION GATE: when the package
-		// bumps sing-box to >=1.14, switch to the http_client form and re-verify on that
-		// build; do NOT change it earlier or rule-set downloads break on the current target.
-		download_detour: 'direct',
 		update_interval: '24h'
-	});
+	};
+	// < 1.14: download_detour routes the SRS download via the "direct" outbound (so it does not
+	// loop through the proxy before that is up) — verified on 1.12.25. >= 1.14: route
+	// default_http_client below (see SB_GE_114).
+	if (!SB_GE_114) rs.download_detour = 'direct';
+	push(rule_sets, rs);
 	push(comm_tags, tag);
 }
 
@@ -106,26 +137,44 @@ let node_tags = [];
 for (let n in nodes)
 	push(node_tags, n.tag);
 
-// auto-pool members: which node tags take part in urltest auto-switching.
-// Empty / unset => ALL nodes (default; new nodes auto-join). When a non-empty
-// subset is configured, only those nodes are auto-switched (the rest stay
-// available for manual selection via the "proxy" selector). Filtered to tags
-// that still exist; if the filter leaves nothing (e.g. tags changed after a
-// subscription update) we fall back to all nodes so urltest is never empty.
-let auto_member = uci.get('vpnpool', 'main', 'auto_member') ?? [];
-if (type(auto_member) != 'array')
-	auto_member = [auto_member];
+// auto-pool members (uci list auto_member, node IDS): which nodes take part in urltest
+// auto-switching. Empty / unset => ALL nodes (default; new nodes auto-join). When a non-empty
+// subset is configured, only those nodes are auto-switched (the rest stay available for manual
+// selection via the "proxy" selector). Ids of nodes not in this build are dropped; if the filter
+// leaves nothing we fall back to all nodes so urltest is never empty.
 let member_set = {};
-for (let m in auto_member)
-	if (length(m)) member_set[m] = 1;
+for (let t in tags_of(as_array(uci.get('vpnpool', 'main', 'auto_member'))))
+	member_set[t] = 1;
 
 let auto_tags = [];
-if (length(auto_member)) {
+if (length(member_set)) {
 	for (let t in node_tags)
 		if (member_set[t]) push(auto_tags, t);
 }
 if (!length(auto_tags))
 	auto_tags = node_tags;                               // default / fallback: all nodes
+
+// nodes the user excluded from the automatic choice (uci list auto_exclude, node IDS; the UI's
+// "Exclude from the automatic choice"): every other node takes part, new nodes too. Excluding
+// every node would empty urltest: then the exclusions are ignored.
+let excl_set = {};
+for (let t in tags_of(as_array(uci.get('vpnpool', 'main', 'auto_exclude'))))
+	excl_set[t] = 1;
+if (length(excl_set)) {
+	let kept = filter(auto_tags, (t) => !excl_set[t]);
+	if (length(kept)) auto_tags = kept;
+}
+
+// "Favourites only" (uci favorites_only=1): the automatic choice uses only the user's
+// favourite nodes (/etc/vpnpool/favorites.map.json, keyed by id). Never empties the pool: with
+// no favourite in this build the option has no effect.
+if (opt('main', 'favorites_only', '0') == '1') {
+	let fav = json(readfile('/etc/vpnpool/favorites.map.json') ?? 'null');
+	let fav_set = {};
+	if (type(fav) == 'object') for (let t in tags_of(keys(fav))) fav_set[t] = 1;
+	let only = filter(auto_tags, (t) => fav_set[t]);
+	if (length(only)) auto_tags = only;
+}
 
 // Health prefilter (build.sh writes .alive_tags.json): keep ONLY TCP-reachable nodes
 // in the urltest pool. A dead node leaves a hung probe socket every interval; ~10 of
@@ -149,17 +198,17 @@ if (alive_raw) {
 	}
 }
 
-// Node-quality filter (nodecheck.sh writes .dead_tags.json): drop nodes that the
-// e2e probe found unable to reach ANY real endpoint for a sustained run — they TCP-
+// Node-quality filter (nodecheck.sh writes .dead_ids.json, node ids): drop nodes that the
+// e2e probe found unable to reach the user's services for a sustained run — they TCP-
 // ping (and may even pass the single cp.cloudflare urltest probe) but carry no real
 // traffic (expired-sub placeholders, over-quota / service-blocked exits). They stay
 // in node_tags (manually selectable) but leave the auto/urltest pool. Never empty it.
-let dead_raw = (opt('main', 'dead_filter', '1') != '0') ? readfile('/tmp/vpnpool/.dead_tags.json') : null;
+let dead_raw = (opt('main', 'dead_filter', '1') != '0') ? readfile('/tmp/vpnpool/.dead_ids.json') : null;
 if (dead_raw) {
 	let dead = json(dead_raw);
 	if (type(dead) == 'array' && length(dead)) {
 		let dead_set = {};
-		for (let t in dead)
+		for (let t in tags_of(dead))
 			dead_set[t] = 1;
 		let kept = [];
 		for (let t in auto_tags)
@@ -183,25 +232,23 @@ push(outbounds, {
 	interrupt_exist_connections: true
 });
 
-// manual override selector. Default depends on auto_switch + a persisted manual
-// pick (so a chosen node survives reload/subscription updates if it still exists).
+// manual override selector. Its default is 'auto' (urltest + failover): the user's
+// "Connect" choice is the SOFT preferred node (uci preferred_node, a node id), which the
+// daemon's preferred_check puts on this selector while the node works and hands back to auto
+// when it fails (ROADMAP 9.5 — there is no hard pin any more). auto_switch=0 = no automatic
+// switching: the selector stays on the preferred node (or the first node).
 let auto_switch = opt('main', 'auto_switch', '1');
-let selected    = opt('main', 'selected_node', '');
+let preferred_tag = TAG_OF[opt('main', 'preferred_node', '')] ?? null;
 
 let sel = [ 'auto' ];
-let sel_exists = false;
-for (let t in node_tags) {
+for (let t in node_tags)
 	push(sel, t);
-	if (t == selected) sel_exists = true;
-}
 
 let def;
-if (length(selected) && sel_exists)
-	def = selected;                                  // honor persisted manual pick
-else if (auto_switch == '0')
-	def = length(node_tags) ? node_tags[0] : 'auto'; // off -> fixed node, no auto-switch
+if (auto_switch == '0')
+	def = preferred_tag ?? (length(node_tags) ? node_tags[0] : 'auto');
 else
-	def = 'auto';                                    // on -> urltest auto + failover
+	def = 'auto';
 
 push(outbounds, {
 	type: 'selector',
@@ -210,6 +257,18 @@ push(outbounds, {
 	default: def,
 	interrupt_exist_connections: true
 });
+
+// Per-node test selector: speedtest.sh / unlock.sh point THIS selector (never the shared
+// 'proxy' one) at the node under test and send their requests through the node-test-in
+// inbound below — so a test never moves the LAN's traffic onto the tested node.
+if (length(node_tags))
+	push(outbounds, {
+		type: 'selector',
+		tag: 'vpnpool-test',
+		outbounds: node_tags,
+		default: node_tags[0],
+		interrupt_exist_connections: false
+	});
 
 // the actual node outbounds (anti-DPI is applied as a route rule action below,
 // not as an outbound field — sing-box only exposes tls_fragment via route-options).
@@ -258,6 +317,8 @@ else if (antidpi == '1' || antidpi == 'on')
 // the local test/SOCKS inbound always egresses through the proxy (for the
 // "test exit via VPN" diagnostic and as a handy local proxy port)
 push(rules, { inbound: [ 'test-mixed-in' ], outbound: 'proxy' });
+if (length(node_tags))
+	push(rules, { inbound: [ 'node-test-in' ], outbound: 'vpnpool-test' });
 if (length(comm_tags))
 	push(rules, { rule_set: comm_tags, outbound: listed_ob });
 if (length(domains))
@@ -282,11 +343,14 @@ let route = {
 };
 if (length(rule_sets))
 	route.rule_set = rule_sets;
+if (length(rule_sets) && SB_GE_114)
+	route.default_http_client = HTTP_CLIENT_TAG;
 
 // ---- inbound (tproxy) ----
 // NOTE: omit "network" so tproxy listens on BOTH tcp and udp. The field is a
 // single enum ("tcp"|"udp"); "tcp,udp" is invalid and fails sing-box check.
 let test_port = int(opt('main', 'test_port', 1605));
+let node_test_port = int(opt('main', 'node_test_port', 1606));
 let inbounds = [
 	{
 		type: 'tproxy',
@@ -301,6 +365,13 @@ let inbounds = [
 		tag: 'test-mixed-in',
 		listen: '127.0.0.1',
 		listen_port: test_port
+	},
+	{
+		// per-node tests (speedtest / unlock): egress via the 'vpnpool-test' selector only
+		type: 'mixed',
+		tag: 'node-test-in',
+		listen: '127.0.0.1',
+		listen_port: node_test_port
 	}
 ];
 
@@ -316,6 +387,11 @@ if (dns_strategy != 'off')
 		strategy: dns_strategy
 	};
 
+// AmneziaWG / WireGuard endpoints log their whole device config, private and preshared keys
+// included, at debug level ("AWG IPC config: ..." in the engine): never below info with them
+if (length(endpoints) && (log_level == 'trace' || log_level == 'debug'))
+	log_level = 'info';
+
 // ---- assemble ----
 let config = {
 	log: { level: log_level, timestamp: true },
@@ -328,6 +404,8 @@ let config = {
 };
 if (dns)
 	config.dns = dns;
+if (length(rule_sets) && SB_GE_114)
+	config.http_clients = [ { tag: HTTP_CLIENT_TAG } ];   // no detour = direct dial (see SB_GE_114)
 config.inbounds = inbounds;
 if (length(endpoints))
 	config.endpoints = endpoints;          // sing-box >=1.13 WireGuard/AmneziaWG endpoints

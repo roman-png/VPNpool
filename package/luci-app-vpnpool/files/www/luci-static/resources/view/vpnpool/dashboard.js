@@ -1,819 +1,423 @@
 'use strict';
 'require view';
-'require rpc';
 'require ui';
 'require poll';
 'require dom';
-'require vpnpool.i18n as i18n';
+'require vpnpool.common as common';
 
-var _ = function(s) { return i18n.tr(s); };
+// "Overview" tab (ROADMAP-2.0 §10.2): is the VPN working and through what, at a glance.
+//   - "Now": on/off, the state in words (from the daemon's own tunnel check), the node, the exit
+//     IP and country (the daemon's background lookup), the delay, the speed ↓↑, "Automatic choice"
+//     or "Connected to X" + "Back to automatic choice";
+//   - alerts in words: nodes that fail the check, subscriptions that expire / run out / failed to
+//     update, AmneziaWG nodes waiting for the engine, nodes set aside, unreadable AmneziaWG files,
+//     a failed update of the VPN settings;
+//   - a card per subscription (expiry, the traffic left, "updated");
+//   - traffic per device;
+//   - nothing added yet: the "Add a subscription or a node" wizard (-> Nodes, "+ Add").
+// Backend: status, set_enabled, auto_select only (2.0 methods). Every poll updates the texts in
+// place; the lists are rebuilt only when what they show changed (buttons keep the focus).
+// SAFETY: node, subscription and device names are foreign data — common.E keeps every string a
+// text node.
 
-var callStatus     = rpc.declare({ object: 'vpnpool', method: 'status' });
-var callSetEnabled = rpc.declare({ object: 'vpnpool', method: 'set_enabled', params: [ 'enabled' ] });
-var callSelect     = rpc.declare({ object: 'vpnpool', method: 'select',      params: [ 'tag' ] });
-var callRefresh    = rpc.declare({ object: 'vpnpool', method: 'refresh' });
-var callPing       = rpc.declare({ object: 'vpnpool', method: 'ping' });
-var callSetAutoMembers = rpc.declare({ object: 'vpnpool', method: 'set_auto_members', params: [ 'members' ] });
-var callSetPreferred = rpc.declare({ object: 'vpnpool', method: 'set_preferred', params: [ 'tag' ] });
-var callSaveNode   = rpc.declare({ object: 'vpnpool', method: 'save_node',   params: [ 'tag' ] });
-var callUnsaveNode = rpc.declare({ object: 'vpnpool', method: 'unsave_node', params: [ 'tag' ] });
-var callActivateSaved   = rpc.declare({ object: 'vpnpool', method: 'activate_saved',   params: [ 'tag' ] });
-var callDeactivateSaved = rpc.declare({ object: 'vpnpool', method: 'deactivate_saved', params: [ 'tag' ] });
-var callSpeedtest  = rpc.declare({ object: 'vpnpool', method: 'speedtest',   params: [ 'tag' ] });
-var callSpeedRes   = rpc.declare({ object: 'vpnpool', method: 'speedtest_result' });
-var callNodeLink   = rpc.declare({ object: 'vpnpool', method: 'node_link',    params: [ 'tag' ] });
-var callExportNodes = rpc.declare({ object: 'vpnpool', method: 'export_nodes', params: [ 'scope' ] });
-var callImportNodes = rpc.declare({ object: 'vpnpool', method: 'import_nodes', params: [ 'text' ] });
-var callDeleteNode  = rpc.declare({ object: 'vpnpool', method: 'delete_node',  params: [ 'tag' ] });
-var callDeleteNodes = rpc.declare({ object: 'vpnpool', method: 'delete_nodes', params: [ 'tags' ] });
-var callRestoreNode = rpc.declare({ object: 'vpnpool', method: 'restore_node', params: [ 'tag' ] });
-var callRefilterNode = rpc.declare({ object: 'vpnpool', method: 'refilter_node', params: [ 'tag' ] });
-var callUnlock     = rpc.declare({ object: 'vpnpool', method: 'unlock',        params: [ 'tag' ] });
-var callUnlockRes  = rpc.declare({ object: 'vpnpool', method: 'unlock_result' });
+var E = common.E;
 
-// short labels for the per-node service-unlock badges
-var UNLOCK_LABELS = { youtube: 'YT', openai: 'AI', netflix: 'NF', instagram: 'IG', telegram: 'TG', google: 'GG' };
-function unlockBadges(u) {
-	if (!u) return '';
-	var chips = [];
-	for (var k in UNLOCK_LABELS) {
-		if (u[k] === true || u[k] === false)
-			chips.push(E('span', { 'style': 'margin-left:3px;font-size:10px;padding:0 4px;border-radius:6px;color:#fff;background:' + (u[k] ? '#2e7d32' : '#aaa'),
-				'title': k + (u[k] ? ': ok' : ': blocked') }, UNLOCK_LABELS[k]));
+var NODES = 'admin/services/vpnpool/nodes';
+var DIAG = 'admin/services/vpnpool/diagnostics';
+var SETTINGS = 'admin/services/vpnpool/settings';
+
+var CSS = [
+	'.vp-ov [hidden]{display:none!important}',
+	// the secondary texts: the theme's grey alone is 3.95:1 on its background (bootstrap, measured on
+	// the stand) - mixed with the theme's text colour for >= 4.5:1; without color-mix() the grey stays
+	'.vp-ov-detail,.vp-ov-facts dt,.vp-ov-sub-facts,.vp-ov .vp-dev-meta,.vp-ov .vp-empty p,.vp-ov .vp-hint{color:var(--text-color-medium,GrayText);color:color-mix(in srgb,var(--text-color-medium,GrayText) 60%,var(--text-color-high,CanvasText))}',
+	'.vp-ov-err{color:var(--error-color-medium,var(--danger-color,inherit));margin:0 0 .8em}',
+	'.vp-ov-now{box-sizing:border-box;max-width:100%;min-width:0}',
+	'.vp-ov-head{display:flex;flex-wrap:wrap;align-items:center;gap:.5em .8em;min-width:0}',
+	'.vp-ov-state{flex:1 1 14em;min-width:0;font-size:1.25em;font-weight:bold;overflow-wrap:anywhere}',
+	// the same readable mix of the theme colours as common.js (>= 4.5:1 on the theme's background)
+	'.vp-ov-state[data-kind=ok]{color:var(--success-color-medium,var(--success-color,inherit));color:color-mix(in srgb,var(--success-color-medium,var(--success-color,#2e7d32)) 55%,var(--text-color-high,CanvasText))}',
+	'.vp-ov-state[data-kind=warn]{color:var(--warn-color-high,var(--warning-color,inherit));color:color-mix(in srgb,var(--warn-color-high,var(--warning-color,#b58900)) 35%,var(--text-color-high,CanvasText))}',
+	'.vp-ov-state[data-kind=error]{color:var(--error-color-medium,var(--danger-color,inherit));color:color-mix(in srgb,var(--error-color-medium,var(--danger-color,#c62828)) 55%,var(--text-color-high,CanvasText))}',
+	'.vp-ov-detail{margin:.3em 0 0;overflow-wrap:anywhere}',
+	'.vp-ov-facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.3em 1em;margin:.7em 0 0;min-width:0}',
+	'.vp-ov-facts dt{margin:0;font-weight:normal}',
+	'.vp-ov-facts dd{margin:0;min-width:0;overflow-wrap:anywhere}',
+	'.vp-ov-who{display:flex;flex-wrap:wrap;align-items:center;gap:.4em .8em;margin:.7em 0 0;min-width:0;overflow-wrap:anywhere}',
+	'.vp-ov-alerts{margin:0 0 .8em}',
+	// an alert = a card with a coloured edge; the words keep the theme's text colour (the theme's own
+	// alert boxes are gradients: dark-theme red with dark text measured 3.3:1)
+	'.vp-ov-alert{display:flex;flex-wrap:wrap;align-items:center;gap:.4em .8em;margin:0 0 .5em;border-left-width:.35em;overflow-wrap:anywhere}',
+	'.vp-ov-alert[data-kind=warn]{border-left-color:var(--warn-color-high,var(--warning-color,#b58900))}',
+	'.vp-ov-alert[data-kind=error]{border-left-color:var(--error-color-medium,var(--danger-color,#c62828))}',
+	'.vp-ov-alert-text{flex:1 1 14em;min-width:0}',
+	'.vp-ov-subs{display:grid;grid-template-columns:repeat(auto-fill,minmax(16em,1fr));gap:.6em;min-width:0}',
+	'.vp-ov-sub-name{font-weight:bold;overflow-wrap:anywhere}',
+	'.vp-ov-sub-facts{margin:.3em 0 0;overflow-wrap:anywhere}',
+	'.vp-ov-sub-facts [data-kind=error]{color:var(--error-color-medium,var(--danger-color,inherit));color:color-mix(in srgb,var(--error-color-medium,var(--danger-color,#c62828)) 55%,var(--text-color-high,CanvasText))}',
+	'.vp-ov-sub-facts [data-kind=warn]{color:var(--warn-color-high,var(--warning-color,inherit));color:color-mix(in srgb,var(--warn-color-high,var(--warning-color,#b58900)) 35%,var(--text-color-high,CanvasText))}',
+	'.vp-ov-bar{height:.45em;margin:.45em 0 0;border-radius:.3em;overflow:hidden;background:var(--border-color-low,rgba(128,128,128,.25))}',
+	'.vp-ov-bar>span{display:block;height:100%;background:var(--primary-color-high,var(--main-bright-color,Highlight))}',
+	'.vp-ov-bar[data-kind=warn]>span{background:var(--warn-color-high,var(--warning-color,#b58900))}',
+	'.vp-ov-links{margin:.6em 0 0}',
+	'.vp-ov-dev-traffic{white-space:nowrap}',
+	'@media (max-width:600px){',
+	'.vp-ov-head>.btn{flex:1 1 auto}',
+	'.vp-ov-who>.btn,.vp-ov-alert>.btn{flex:1 1 auto}',
+	'.vp-ov-subs{grid-template-columns:minmax(0,1fr)}',
+	'}'
+].join('\n');
+
+function injectCss() {
+	if (document.getElementById('vpnpool-overview-css')) return;
+	var st = document.createElement('style');
+	st.id = 'vpnpool-overview-css';
+	st.appendChild(document.createTextNode(CSS));
+	(document.head || document.documentElement).appendChild(st);
+}
+
+function arr(v) { return Array.isArray(v) ? v : []; }
+function setText(el, t) { t = (t == null) ? '' : String(t); if (el.textContent !== t) el.textContent = t; }
+function link(label, path, cls) {
+	return E('a', { 'class': 'btn cbi-button ' + (cls || 'cbi-button-neutral'), 'href': L.url.apply(L, path.split('/')) }, [ label ]);
+}
+// the node the traffic goes through now: the selector, or the automatic choice behind it
+function activeTag(st) { return (st.active && st.active !== 'auto') ? st.active : (st.auto_now || ''); }
+function nodeOf(st, tag) {
+	var n = null;
+	arr(st.nodes).forEach(function(x) { if (!n && x && x.tag === tag) n = x; });
+	return n;
+}
+// has the user added anything (else: the wizard)
+function isEmpty(st) {
+	return !arr(st.nodes).length && !arr(st.subscriptions).length && !arr(st.favorites).length
+		&& !arr(st.hidden).length && !arr(st.unreadable).length;
+}
+// a country name from its two-letter code, in the page's language (the code as is without Intl)
+function countryName(code) {
+	if (!code) return '';
+	try {
+		if (typeof Intl !== 'undefined' && Intl.DisplayNames) {
+			var lang = (document.documentElement && document.documentElement.getAttribute('lang')) || undefined;
+			var n = new Intl.DisplayNames(lang ? [ lang ] : undefined, { type: 'region' }).of(String(code).toUpperCase());
+			if (n) return n;
+		}
+	} catch (e) {}
+	return String(code).toUpperCase();
+}
+// is the VPN switched on: the user's switch, and no Telegram pause
+function vpnOn(st) { return !!(st && st.enabled && !st.paused); }
+function speed(n) { return _('%s/s').format(common.fmtBytes(n)); }
+
+// ---- the state in words: ONE function, from the daemon's own facts ----
+// enabled (the user's switch), running (the daemon), paused (Telegram /off), tunnel.state (the
+// daemon's end-to-end check: starting | up | down | wan_down), routing (our routes are up),
+// settings.killswitch (block what should go through the VPN while no node works)
+function stateOf(st) {
+	var set = st.settings || {};
+	var tn = st.tunnel && st.tunnel.state;
+	if (st.migration && st.migration.state === 'failed')
+		return { t: _('Not started: the settings of the previous version could not be converted'), k: 'error',
+			d: _('Nothing was changed. Open Diagnostics to see why.') };
+	if (!st.enabled) return { t: _('VPN is off'), k: '', d: _('The internet goes directly, without the VPN.') };
+	// (a Telegram pause outlives a restart of the service: then the button on the screen is
+	// "Turn the VPN on", and the words name it)
+	if (!st.running) return { t: _('VPN is on, but the service is not running'), k: 'error',
+		d: st.paused ? _('Press "Turn the VPN on"; if it repeats, open Diagnostics.')
+			: _('Turn the VPN off and on again; if it repeats, open Diagnostics.') };
+	if (st.paused) return { t: _('Paused'), k: 'warn',
+		d: _('Paused from Telegram: the internet goes directly, without the VPN. "Turn the VPN on" resumes it.') };
+	if (tn === 'wan_down') return { t: _('The router has no internet'), k: 'error',
+		d: (set.killswitch && st.routing) ? _('What should go through the VPN is blocked until the internet is back.') : _('Check the cable or the internet provider.') };
+	if (tn === 'down') return { t: _('No node works'), k: 'error',
+		d: (set.killswitch && st.routing)
+			? _('What should go through the VPN is blocked until a node works (protection is on).')
+			// the daemon takes the routes down after its second failed check (~15-30 s): until then
+			// the traffic still goes into the tunnel
+			: (st.routing ? _('If no node works again in a moment, what should go through the VPN goes directly.')
+				: _('What should go through the VPN goes directly until a node works.')) };
+	if (tn === 'up') return st.routing
+		? { t: _('VPN works'), k: 'ok', d: (st.mode === 'exclude') ? _('Everything except the chosen sites') : _('Only the chosen sites') }
+		: { t: _('The VPN works, but the traffic does not go through it'), k: 'error', d: _('The routes could not be set up. Open Diagnostics.') };
+	if (!st.routing) return { t: _('Starting…'), k: '', d: _('Looking for a working node.') };
+	return { t: _('VPN is on'), k: 'ok', d: _('Checking that the nodes work…') };
+}
+
+// ---- the alerts in words: ONE list from the status (the order is the order of importance) ----
+function alertsOf(st) {
+	var out = [];
+	var nodes = arr(st.nodes);
+	var b = st.build;
+	if (b && b.ok === false && b.error === 'no_nodes')
+		out.push({ k: 'error', t: _('There is not a single node: the subscriptions could not be downloaded or have no nodes.'), go: [ _('Nodes'), NODES ] });
+	else if (b && b.ok === false && b.error && b.error !== 'interrupted' && b.error !== 'only_deferred')
+		out.push({ k: 'error', t: _('The last update of the VPN settings failed; the previous ones keep working.'), go: [ _('Diagnostics'), DIAG ] });
+	var dead = nodes.filter(function(n) { return n && n.dead && !n.kept && !n.deferred; });
+	if (dead.length) {
+		// the same answer as the Nodes cards (the node checker's last sweep, else the checked sites)
+		var sites = common.failedSites(st, dead).sites;
+		var t = (sites.length === 1)
+			? N_(dead.length, '%d node does not open %s: it is left out of the automatic choice.', '%d nodes do not open %s: they are left out of the automatic choice.').format(dead.length, sites[0])
+			: sites.length
+				? N_(dead.length, '%d node fails the check of the sites (%s): it is left out of the automatic choice.', '%d nodes fail the check of the sites (%s): they are left out of the automatic choice.').format(dead.length, sites.join(', '))
+				: N_(dead.length, '%d node fails the connection check: it is left out of the automatic choice.', '%d nodes fail the connection check: they are left out of the automatic choice.').format(dead.length);
+		out.push({ k: 'warn', t: t, go: [ _('Nodes'), NODES ] });
 	}
-	return E('span', { 'style': 'margin-left:6px;white-space:nowrap' }, chips);
+	var engine = nodes.filter(function(n) { return n && n.deferred && /^engine_/.test(String(n.reason || '')); });
+	if (engine.length)
+		out.push({ k: 'warn', t: N_(engine.length, '%d AmneziaWG node waits for the AmneziaWG engine: it starts working once the engine is installed.', '%d AmneziaWG nodes wait for the AmneziaWG engine: they start working once the engine is installed.').format(engine.length),
+			go: [ _('How to install it'), DIAG ] });
+	var aside = nodes.filter(function(n) { return n && n.deferred && n.reason === 'start_failed'; });
+	if (aside.length)
+		out.push({ k: 'warn', t: N_(aside.length, '%d node was set aside: the VPN engine could not start with it.', '%d nodes were set aside: the VPN engine could not start with them.').format(aside.length), go: [ _('Nodes'), NODES ] });
+	var unr = arr(st.unreadable);
+	if (unr.length)
+		out.push({ k: 'warn', t: N_(unr.length, '%d AmneziaWG settings file could not be read.', '%d AmneziaWG settings files could not be read.').format(unr.length), go: [ _('Nodes'), NODES ] });
+	arr(st.subscriptions).forEach(function(s) {
+		common.subFacts(s).forEach(function(f) { if (f.alert) out.push({ k: f.k === 'error' ? 'error' : 'warn', t: f.alert, go: [ _('Nodes'), NODES ] }); });
+	});
+	if (st.running && nodes.length && !nodes.some(function(n) { return n && !n.deferred; }))
+		out.push({ k: 'error', t: common.codeText('only_deferred'), go: [ _('Nodes'), NODES ] });
+	return out;
 }
 
-// client-side node view state (filter/sort), persisted across polls
-var nodeFilter = '';
-var nodeSort = 'ping';            // ping | name | down
-var nodeReachOnly = false;
-var speedResults = {};            // tag -> mbps (last speed test)
-var nodeSel = {};                 // tag -> true (checkbox selection for bulk actions)
-
-function pingColor(d) {
-	if (d == null) return '#888';
-	if (d <= 0)    return '#cc3333';
-	if (d < 150)   return '#2e7d32';
-	if (d < 400)   return '#e08a00';
-	return '#cc3333';
-}
-function pingText(d) {
-	if (d == null) return '—';
-	if (d <= 0)    return _('down');
-	return d + ' ms';
-}
-function fmtExpire(ts) {
-	if (!ts) return _('unknown');
-	var days = Math.floor((ts * 1000 - Date.now()) / 86400000);
-	return new Date(ts * 1000).toLocaleDateString() + ' (' + (days >= 0 ? days + ' ' + _('days') : _('expired')) + ')';
-}
-function badge(text, color) {
-	return E('span', { 'style': 'display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;color:#fff;background:' + color + ';margin-right:6px' }, text);
-}
-function fmtBytes(n) {
-	n = n || 0;
-	if (n < 1024) return n.toFixed(0) + ' B';
-	if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
-	if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
-	return (n / 1073741824).toFixed(2) + ' GB';
-}
 var prevTraffic = null;
 
 return view.extend({
-	notify: function(msg) { ui.addNotification(null, E('p', msg), 'info'); },
-	handleToggle: function(cur) {
-		ui.showModal(_('Please wait'), [ E('p', { 'class': 'spinning' }, cur ? _('Stopping…') : _('Starting…')) ]);
-		return callSetEnabled(!cur).then(L.bind(function() {
-			window.setTimeout(L.bind(function() { ui.hideModal(); this.refresh(); }, this), cur ? 2500 : 15000);
-		}, this));
-	},
-	handleSelect: function(tag) {
-		return callSelect(tag).then(L.bind(function() {
-			ui.addNotification(null, E('p', _('Switched to %s').format(tag)), 'info');
-			this.refresh();
-		}, this));
-	},
-	// Preferred-node soft pin straight from the dashboard (📌): stick to it while it's
-	// reachable, hand over to auto if it dies, switch back when it recovers. Toggling the
-	// already-pinned node clears it. The backend applies it live (no tunnel bounce).
-	handleSetPreferred: function(tag, isPinned) {
-		return callSetPreferred(tag).then(L.bind(function() {
-			ui.addNotification(null, E('p', isPinned ? _('Preferred node cleared (auto)') : _('Preferred node: %s').format(tag)), 'info');
-			window.setTimeout(L.bind(this.refresh, this), 1500);
-		}, this));
-	},
-	handleRefresh: function() {
-		ui.addNotification(null, E('p', _('Updating subscription…')), 'info');
-		return callRefresh().then(L.bind(function() { window.setTimeout(L.bind(this.refresh, this), 12000); }, this));
-	},
-	handlePing: function() {
-		ui.addNotification(null, E('p', _('Pinging all nodes…')), 'info');
-		return callPing().then(L.bind(function() { window.setTimeout(L.bind(this.refresh, this), 1500); }, this));
-	},
-	// Configure which nodes take part in automatic switching (urltest pool).
-	handleConfigAuto: function(st) {
-		var nodes = (st.nodes || []);
-		var members = st.auto_members || [];
-		var all = (members.length === 0);   // empty list = ALL nodes (default)
-		if (!nodes.length) {
-			ui.addNotification(null, E('p', _('No nodes yet (waiting for subscription / pings)…')), 'warning');
-			return;
-		}
-		var checks = nodes.map(function(n) {
-			var checked = all || members.indexOf(n.tag) >= 0;
-			return E('label', { 'style': 'display:block;margin:5px 0;cursor:pointer' }, [
-				E('input', { 'type': 'checkbox', 'data-tag': n.tag, 'checked': checked ? 'checked' : null, 'style': 'margin-right:8px;vertical-align:middle' }),
-				E('span', { 'style': 'vertical-align:middle' }, n.tag),
-				n.server ? E('span', { 'style': 'color:#888;font-family:monospace;margin-left:8px;vertical-align:middle' }, n.server) : ''
-			]);
-		});
-		ui.showModal(_('Auto-switch pool'), [
-			E('p', {}, _('Select which nodes take part in automatic switching (urltest). Unchecked nodes stay available for manual selection only.')),
-			E('div', { 'id': 'vp-auto-list', 'style': 'max-height:320px;overflow:auto;margin:8px 0;padding:6px;border:1px solid rgba(128,128,128,.3);border-radius:4px' }, checks),
-			E('div', { 'class': 'right' }, [
-				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
-				' ',
-				E('button', { 'class': 'btn cbi-button cbi-button-positive', 'click': ui.createHandlerFn(this, 'saveAutoMembers') }, _('Save'))
-			])
-		]);
-	},
-	saveAutoMembers: function() {
-		var boxes = document.querySelectorAll('#vp-auto-list input[type=checkbox]');
-		var sel = [], total = boxes.length, checked = 0;
-		for (var i = 0; i < boxes.length; i++) {
-			if (boxes[i].checked) { sel.push(boxes[i].getAttribute('data-tag')); checked++; }
-		}
-		if (checked === 0) {
-			ui.addNotification(null, E('p', _('Select at least one node for auto-switching.')), 'warning');
-			return;
-		}
-		// all checked => store empty list (means "all", future nodes auto-join)
-		var members = (checked === total) ? [] : sel;
-		ui.hideModal();
-		return callSetAutoMembers(members).then(L.bind(function() {
-			ui.addNotification(null, E('p', _('Auto-switch pool saved.')), 'info');
-			window.setTimeout(L.bind(this.refresh, this), 1500);
-		}, this));
-	},
-	handleSaveNode: function(tag) {
-		// archive-only change (no config rebuild) -> refresh right away so the star
-		// appears immediately; the backend wrote the map before returning.
-		return callSaveNode(tag).then(L.bind(function() {
-			ui.addNotification(null, E('p', _('Node saved: %s').format(tag)), 'info');
-			return this.refresh();
-		}, this));
-	},
-	handleUnsaveNode: function(tag) {
-		return callUnsaveNode(tag).then(L.bind(function() {
-			ui.addNotification(null, E('p', _('Node removed from saved: %s').format(tag)), 'info');
-			window.setTimeout(L.bind(this.refresh, this), 1200);
-		}, this));
-	},
-	handleActivateSaved: function(tag) {
-		return callActivateSaved(tag).then(L.bind(function() {
-			ui.addNotification(null, E('p', _('Added to the active pool: %s').format(tag)), 'info');
-			window.setTimeout(L.bind(this.refresh, this), 1500);
-		}, this));
-	},
-	handleDeactivateSaved: function(tag) {
-		return callDeactivateSaved(tag).then(L.bind(function() {
-			ui.addNotification(null, E('p', _('Removed from the active pool: %s').format(tag)), 'info');
-			window.setTimeout(L.bind(this.refresh, this), 1500);
-		}, this));
-	},
-	handleRestoreNode: function(tag) {
-		return callRestoreNode(tag).then(L.bind(function() {
-			ui.addNotification(null, E('p', _('Returned to the auto-pool: %s').format(tag)), 'info');
-			window.setTimeout(L.bind(this.refresh, this), 1500);
-		}, this));
-	},
-	handleRefilterNode: function(tag) {
-		return callRefilterNode(tag).then(L.bind(function() {
-			ui.addNotification(null, E('p', _('Node is back under the service filter: %s').format(tag)), 'info');
-			window.setTimeout(L.bind(this.refresh, this), 1500);
-		}, this));
-	},
-	handleAddAutoMember: function(tag) {
-		// add ONE node back to the manually-pinned auto pool (auto_member is a non-empty
-		// subset here, so we append rather than reset). set_auto_members replaces the list.
-		var cur = ((this._st && this._st.auto_members) || []).slice();
-		if (cur.indexOf(tag) < 0) cur.push(tag);
-		return callSetAutoMembers(cur).then(L.bind(function() {
-			ui.addNotification(null, E('p', _('Added to the auto-pool: %s').format(tag)), 'info');
-			window.setTimeout(L.bind(this.refresh, this), 1500);
-		}, this));
-	},
-	handleSpeedtest: function(tag) {
-		var self = this;
-		var poller = function() {
-			return callSpeedRes().then(function(r) {
-				if (r && r.running) { window.setTimeout(poller, 2000); return; }
-				if (r && r.ok) {
-					speedResults[tag] = r.mbps;
-					ui.addNotification(null, E('p', _('%s: %s Mbit/s').format(tag, r.mbps)), 'info');
-				} else {
-					ui.addNotification(null, E('p', _('Speed test failed for %s.').format(tag)), 'warning');
-				}
-				if (self._st) { var b = document.getElementById('vp-nodes'); if (b) dom.content(b, self.renderNodes(self._st)); }
-			});
-		};
-		return callSpeedtest(tag).then(function(r) {
-			if (r && r.lowmem) {
-				var avail = Math.round((r.avail_kb || 0) / 1024), need = Math.round((r.need_kb || 0) / 1024);
-				ui.addNotification(null, E('p', _('Not enough free memory for a speed test: %s MB free, need ≥ %s MB. Skipped to keep the VPN stable.').format(avail, need)), 'warning');
-				return;
-			}
-			ui.addNotification(null, E('p', _('Speed-testing %s… (router traffic briefly uses this node)').format(tag)), 'info');
-			window.setTimeout(poller, 2000);
-		});
-	},
-	handleUnlock: function(tag) {
-		var self = this;
-		var poller = function() {
-			return callUnlockRes().then(function(r) {
-				if (r && r.running) { window.setTimeout(poller, 2000); return; }
-				if (r && r.ok) {
-					ui.addNotification(null, E('p', _('Unlock test done for %s.').format(tag)), 'info');
-					window.setTimeout(L.bind(self.refresh, self), 500);   // pull persisted badges
-				} else {
-					ui.addNotification(null, E('p', _('Unlock test failed for %s.').format(tag)), 'warning');
-				}
-			});
-		};
-		return callUnlock(tag).then(function(r) {
-			if (r && r.lowmem) {
-				var avail = Math.round((r.avail_kb || 0) / 1024), need = Math.round((r.need_kb || 0) / 1024);
-				ui.addNotification(null, E('p', _('Not enough free memory for a speed test: %s MB free, need ≥ %s MB. Skipped to keep the VPN stable.').format(avail, need)), 'warning');
-				return;
-			}
-			ui.addNotification(null, E('p', _('Testing what %s unblocks… (router traffic briefly uses this node)').format(tag)), 'info');
-			window.setTimeout(poller, 2000);
-		});
-	},
-	rerenderNodes: function() {
-		if (this._st) { var b = document.getElementById('vp-nodes'); if (b) dom.content(b, this.renderNodes(this._st)); }
-	},
-	// Live count of checked nodes (selection is shared across the main list AND the out-of-
-	// pool list and persists across the 5s poll, so it MUST be visible — otherwise stale
-	// checks pile up and a bulk delete removes far more than intended).
-	updateSelCount: function() {
-		var el = document.getElementById('vp-selcount');
-		if (el) el.textContent = String(Object.keys(nodeSel).length);
-	},
-	// QR is rendered fully client-side (vendored qrcodejs) so node secrets never
-	// leave the router — loaded on demand to keep the page light.
-	renderQR: function(el, text) {
-		var make = function() { try { dom.content(el, ''); new window.QRCode(el, { text: text, width: 220, height: 220, correctLevel: window.QRCode.CorrectLevel.M }); } catch (e) {} };
-		if (window.QRCode) { make(); return; }
-		var s = document.createElement('script');
-		s.src = L.resource('vpnpool/qrcode.min.js');
-		s.onload = make;
-		s.onerror = function() { dom.content(el, E('em', { 'style': 'color:#888' }, _('QR library unavailable.'))); };
-		document.head.appendChild(s);
-	},
-	handleShowLink: function(tag) {
-		return callNodeLink(tag).then(L.bind(function(r) {
-			if (!r || !r.ok || !r.link) {
-				ui.addNotification(null, E('p', _('No shareable link for this node.')), 'warning');
-				return;
-			}
-			var qr = E('div', { 'style': 'display:flex;justify-content:center;min-height:220px;margin:10px 0' }, E('em', { 'style': 'color:#888' }, '…'));
-			var ta = E('textarea', { 'rows': '4', 'readonly': 'readonly', 'style': 'width:100%;font-family:monospace;font-size:11px' }, r.link);
-			ui.showModal(_('Share node') + ': ' + tag, [
-				E('p', {}, _('Scan the QR with your phone VPN app, or copy the link.')),
-				qr, ta,
-				E('div', { 'class': 'right', 'style': 'margin-top:8px' }, [
-					E('button', { 'class': 'btn cbi-button cbi-button-action', 'click': function() { ta.select(); try { document.execCommand('copy'); } catch (e) {} } }, _('Copy link')),
-					' ',
-					E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Close'))
-				])
-			]);
-			this.renderQR(qr, r.link);
-		}, this)).catch(function(e) {
-			ui.addNotification(null, E('p', _('No shareable link for this node.') + ' (' + e + ')'), 'warning');
-		});
-	},
-	handleDeleteNode: function(tag) {
-		var self = this;
-		if (!confirm(_('Delete node "%s"? A subscription node is hidden until you delete the subscription; a manual/imported/saved node is removed permanently.').format(tag))) return;
-		return callDeleteNode(tag).then(function(r) {
-			if (r && r.ok) { delete speedResults[tag]; self.notify(_('Node deleted: %s').format(tag)); window.setTimeout(function() { self.refresh(); }, 1200); }
-			else ui.addNotification(null, E('p', _('Could not delete node: %s').format((r && r.error) || '?')), 'warning');
-		}).catch(function(e) {
-			ui.addNotification(null, E('p', _('Could not delete node: %s').format(e) + ' — ' + _('try re-logging into LuCI (permissions update on login).')), 'error');
-		});
-	},
-	handleSelClear: function() { nodeSel = {}; this.updateSelCount(); if (this.rerenderNodes) this.rerenderNodes(); },
-	handleBulkDelete: function() {
-		var self = this, tags = Object.keys(nodeSel);
-		if (!tags.length) { ui.addNotification(null, E('p', _('Select node(s) with the checkboxes first.')), 'warning'); return; }
-		if (!confirm(_('Delete %d selected node(s)? Subscription nodes are hidden until you delete the subscription; manual/imported/saved are removed permanently.').format(tags.length))) return;
-		// ONE backend call -> ONE rebuild/reload (was a per-node chain = N sing-box restarts).
-		return callDeleteNodes(tags).then(function() {
-			nodeSel = {}; self.updateSelCount(); self.notify(_('Deleted %d node(s).').format(tags.length));
-		}).catch(function(e) {
-			ui.addNotification(null, E('p', _('Could not delete node: %s').format(e)), 'error');
-		});
-	},
-	handleBulkDeactivate: function() {
-		var self = this, tags = Object.keys(nodeSel);
-		if (!tags.length) { ui.addNotification(null, E('p', _('Select node(s) first.')), 'warning'); return; }
-		var chain = Promise.resolve();
-		tags.forEach(function(t) { chain = chain.then(function() { return callDeactivateSaved(t); }); });
-		return chain.then(function() { nodeSel = {}; self.updateSelCount(); self.notify(_('Deactivated %d node(s).').format(tags.length)); });
-	},
-	handleSelSpeedtest: function() {
-		var tags = Object.keys(nodeSel);
-		if (tags.length !== 1) { ui.addNotification(null, E('p', _('Select exactly one node for the speed test.')), 'warning'); return; }
-		return this.handleSpeedtest(tags[0]);
-	},
-	handleSelUnlock: function() {
-		var tags = Object.keys(nodeSel);
-		if (tags.length !== 1) { ui.addNotification(null, E('p', _('Select exactly one node for the unblock test.')), 'warning'); return; }
-		return this.handleUnlock(tags[0]);
-	},
-	handleImport: function() {
-		var self = this;
-		var awgOk = !!(this._st && this._st.awg);   // installed sing-box supports AmneziaWG?
-		var ta = E('textarea', { 'style': 'width:100%;min-height:120px;font-family:monospace;font-size:12px',
-			'placeholder': 'vless://…\n' + _('or a base64 subscription') + (awgOk ? '\n' + _('or an AmneziaWG .conf / vpn:// link') : '') });
-		var fileInput = E('input', { 'type': 'file', 'accept': '.txt,.text,text/plain', 'style': 'display:none' });
-		fileInput.addEventListener('change', function() {
-			var f = fileInput.files && fileInput.files[0]; if (!f) return;
-			var rd = new FileReader();
-			rd.onload = function() { ta.value = (ta.value ? ta.value.replace(/\s*$/, '') + '\n' : '') + String(rd.result || ''); fileInput.value = ''; };
-			rd.onerror = function() { ui.addNotification(null, E('p', _('Could not read the file.')), 'error'); };
-			rd.readAsText(f);
-		});
-		ui.showModal(_('Import nodes'), [
-			E('p', {}, _('Paste node links (one per line) or a whole base64 subscription, or load a .txt file. New links are added to your manual nodes.')),
-			awgOk ? E('p', { 'style': 'color:#888' }, _('AmneziaWG: paste an AmneziaWG .conf or an AmneziaVPN vpn:// link here too — it joins the same pool.')) : '',
-			ta,
-			E('div', { 'style': 'margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, [
-				E('button', { 'class': 'btn cbi-button', 'click': function() { fileInput.click(); } }, '📄 ' + _('Load file…')),
-				fileInput,
-				E('span', { 'style': 'flex:1' }, ''),
-				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
-				E('button', { 'class': 'btn cbi-button cbi-button-positive', 'click': ui.createHandlerFn(this, 'doImport', ta) }, '⬆ ' + _('Import'))
-			])
-		]);
-	},
-	doImport: function(ta) {
-		var self = this;
-		var txt = (ta && ta.value || '').trim();
-		if (!txt) { ui.addNotification(null, E('p', _('Paste links or load a file first.')), 'warning'); return; }
-		// vpn:// is decoded server-side (rpcd awgdecode.uc) — send the raw text as-is.
-		return callImportNodes(txt).then(function(r) {
-			ui.hideModal();
-			if (r && r.ok) self.notify(r.awg ? _('AmneziaWG node imported.') : _('Imported %d new node(s) (manual list: %d).').format((r.added != null ? r.added : 0), (r.total != null ? r.total : 0)));
-			else ui.addNotification(null, E('p', _('Import failed') + (r && r.error ? (': ' + r.error) : '.')), 'error');
-		}).catch(function(e) {
-			ui.hideModal();
-			ui.addNotification(null, E('p', _('Import failed') + ': ' + e + ' — ' + _('try re-logging into LuCI (permissions update on login).')), 'error');
-		});
-	},
-	handleExport: function() {
-		var self = this;
-		var mk = function(scope, label) {
-			return E('button', { 'class': 'btn cbi-button', 'style': 'margin:3px', 'click': function() { self.doExport(scope); } }, label);
-		};
-		ui.showModal(_('Export nodes as subscription'), [
-			E('p', {}, _('Pick which nodes to export. You get the raw vless:// links and a base64 subscription you can import elsewhere.')),
-			E('div', {}, [ mk('saved', _('Saved')), mk('manual', _('Manual')), mk('all', _('All nodes')) ]),
-			E('div', { 'id': 'vp-export-out', 'style': 'margin-top:10px' }, ''),
-			E('div', { 'class': 'right', 'style': 'margin-top:8px' }, E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Close')))
-		]);
-	},
-	doExport: function(scope) {
-		return callExportNodes(scope).then(function(r) {
-			var out = document.getElementById('vp-export-out');
-			if (!out) return;
-			var links = (r && r.links) || [];
-			if (!links.length) { dom.content(out, E('em', { 'style': 'color:#888' }, _('Nothing to export in this set.'))); return; }
-			var text = links.join('\n');
-			var b64 = '';
-			try { b64 = btoa(unescape(encodeURIComponent(text))); } catch (e) { b64 = ''; }
-			// one reusable block: a labelled, read-only textarea + Copy + Download.
-			var block = function(label, value, filename) {
-				var ta = E('textarea', { 'rows': '5', 'readonly': 'readonly',
-					'style': 'width:100%;font-family:monospace;font-size:11px' }, value);
-				return E('div', { 'style': 'margin-top:8px' }, [
-					E('p', { 'style': 'margin:4px 0' }, E('b', {}, label)),
-					ta,
-					E('div', { 'style': 'margin-top:6px' }, [
-						E('button', { 'class': 'btn cbi-button cbi-button-action',
-							'click': function() { ta.select(); try { document.execCommand('copy'); } catch (e) {} } }, _('Copy')),
-						' ',
-						E('a', { 'class': 'btn cbi-button', 'download': filename,
-							'href': 'data:text/plain;charset=utf-8,' + encodeURIComponent(value) }, _('Download'))
-					])
-				]);
-			};
-			dom.content(out, [
-				E('p', { 'style': 'margin:4px 0' }, E('b', {}, _('%d nodes').format(links.length))),
-				block(_('vless:// links'), text, 'vpnpool-nodes.txt'),
-				block(_('base64 subscription'), b64, 'vpnpool-subscription.txt')
-			]);
-		}).catch(function(e) {
-			var out = document.getElementById('vp-export-out');
-			if (out) dom.content(out, E('em', { 'style': 'color:#c00' }, _('Export failed') + ': ' + e));
-		});
-	},
-	refresh: function() {
-		return callStatus().then(L.bind(function(st) {
-			this._st = st;
-			var a = document.getElementById('vp-status'), b = document.getElementById('vp-nodes'), c = document.getElementById('vp-clients');
-			var d = document.getElementById('vp-saved-inactive');
-			var e = document.getElementById('vp-dead-nodes');
-			if (a) dom.content(a, this.renderStatus(st));
-			if (b) dom.content(b, this.renderNodes(st));
-			if (c) dom.content(c, this.renderClients(st));
-			if (d) dom.content(d, this.renderSavedInactive(st));
-			if (e) dom.content(e, this.renderDeadNodes(st));
-		}, this));
+	load: function() {
+		return common.call('status', {}, { quiet: true }).catch(function(e) { return { __error: common.errorText(e) }; });
 	},
 
-	renderStatus: function(st) {
-		var on = st.enabled && st.running;
-		var using = (st.active === 'auto' || !st.active) ? (st.auto_now || '—') : st.active;
-
-		// Auto mode = no HARD manual pick (selected_node). A preferred soft-pin (📌)
-		// biases the live target but stays in auto, so the AUTO indicator must stay lit.
-		var hardPick = (st.settings || {}).selected_node || '';
-		var preferredTag = (st.settings || {}).preferred_node || '';
-		var autoMode = !hardPick;
-		// traffic speed = delta of totals between polls
-		var t = st.traffic || {};
-		var now = Date.now(), dn = 0, up = 0;
-		if (prevTraffic && now > prevTraffic.time) {
-			var dt = (now - prevTraffic.time) / 1000;
-			dn = Math.max(0, ((t.down_total || 0) - prevTraffic.down) / dt);
-			up = Math.max(0, ((t.up_total || 0) - prevTraffic.up) / dt);
-		}
-		prevTraffic = { time: now, down: t.down_total || 0, up: t.up_total || 0 };
-
-		// subscription expiry color
-		var exp = st.subscription && st.subscription.expire;
-		var days = exp ? Math.floor((exp * 1000 - Date.now()) / 86400000) : null;
-		var expColor = (days != null && days < 7) ? '#cc3333' : (days != null && days < 30 ? '#e08a00' : '');
-
-		var kids = [
-			E('div', { 'style': 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px' }, [
-				E('button', { 'class': 'btn cbi-button ' + (on ? 'cbi-button-negative' : 'cbi-button-positive'),
-					'click': ui.createHandlerFn(this, 'handleToggle', st.enabled) }, on ? _('Turn OFF') : _('Turn ON')),
-				on ? badge(_('running'), '#2e7d32') : badge(_('stopped'), '#888'),
-				st.routing ? badge(_('routing up'), '#2e7d32') : badge(_('no routing'), '#888'),
-				badge(st.mode === 'exclude' ? _('all except lists') : _('only lists'), '#1565c0')
-			]),
-			E('div', { 'style': 'margin:4px 0' }, [ E('b', {}, _('Active node') + ': '), E('span', {}, using),
-				autoMode ? E('span', { 'style': 'color:#888' }, ' (' + _('auto / urltest') + (preferredTag ? ' · 📌 ' + (using||'') : '') + ')') : '' ])
-		];
-
-		if (on)
-			kids.push(E('div', { 'style': 'margin:4px 0' }, [
-				E('b', {}, _('Traffic') + ': '),
-				E('span', {}, '↓ ' + fmtBytes(dn) + '/s   ↑ ' + fmtBytes(up) + '/s'),
-				E('span', { 'style': 'color:#888;margin-left:12px' }, (t.connections || 0) + ' ' + _('connections')),
-				E('span', { 'style': 'color:#888;margin-left:12px' }, _('total') + ': ↓' + fmtBytes(t.down_total) + ' ↑' + fmtBytes(t.up_total))
-			]));
-
-		kids.push(E('div', { 'style': 'margin:4px 0' }, [ E('b', {}, _('Subscription') + ': '),
-			E('span', { 'style': expColor ? ('color:' + expColor + ';font-weight:bold') : '' }, _('expires %s').format(fmtExpire(exp))),
-			E('button', { 'class': 'btn cbi-button cbi-button-action', 'style': 'margin-left:10px',
-				'click': ui.createHandlerFn(this, 'handleRefresh') }, _('Update now')) ]));
-
-		var sub = st.subscription || {};
-		if (sub.total && sub.total > 0) {
-			var qused = sub.used || 0;
-			var qpct = Math.min(100, Math.round(qused * 100 / sub.total));
-			var qleft = Math.max(0, sub.total - qused);
-			var qcolor = qpct >= 90 ? '#cc3333' : (qpct >= 75 ? '#e08a00' : '#2e7d32');
-			kids.push(E('div', { 'style': 'margin:4px 0' }, [
-				E('b', {}, _('Data quota') + ': '),
-				E('span', {}, fmtBytes(qused) + ' / ' + fmtBytes(sub.total) + '  (' + _('%s left').format(fmtBytes(qleft)) + ')'),
-				E('div', { 'style': 'margin-top:3px;background:#e0e0e0;border-radius:6px;height:10px;width:280px;overflow:hidden' }, [
-					E('div', { 'style': 'height:10px;width:' + qpct + '%;background:' + qcolor }, '')
-				])
-			]));
-		}
-
-		return E('div', {}, kids);
-	},
-
-	renderToolbar: function() {
-		var self = this;
-		var search = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:200px',
-			'placeholder': _('Search node / server…'), 'value': nodeFilter });
-		search.addEventListener('input', function(ev) { nodeFilter = ev.target.value; self.rerenderNodes(); });
-		var sort = E('select', { 'class': 'cbi-input-select' }, [
-			E('option', { 'value': 'ping',  'selected': nodeSort === 'ping' ? 'selected' : null }, _('Sort: ping')),
-			E('option', { 'value': 'name',  'selected': nodeSort === 'name' ? 'selected' : null }, _('Sort: name')),
-			E('option', { 'value': 'down',  'selected': nodeSort === 'down' ? 'selected' : null }, _('Sort: traffic'))
-		]);
-		sort.addEventListener('change', function(ev) { nodeSort = ev.target.value; self.rerenderNodes(); });
-		var reach = E('input', { 'type': 'checkbox', 'checked': nodeReachOnly ? 'checked' : null });
-		reach.addEventListener('change', function(ev) { nodeReachOnly = ev.target.checked; self.rerenderNodes(); });
-		return E('div', { 'style': 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px' }, [
-			E('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, 'handlePing') }, '↻ ' + _('Ping all nodes')),
-			E('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, 'handleExport') }, '⬇ ' + _('Export')),
-			E('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, 'handleImport') }, '⬆ ' + _('Import')),
-			search, sort,
-			E('label', { 'style': 'cursor:pointer' }, [ reach, E('span', { 'style': 'margin-left:5px' }, _('reachable only')) ]),
-			// --- bulk actions on the checked nodes (☑ in each row) ---
-			E('span', { 'style': 'border-left:1px solid rgba(128,128,128,.35);padding-left:10px;color:#888' }, [
-				_('Selected') + ': ', E('b', { 'id': 'vp-selcount', 'style': 'color:#c00' }, String(Object.keys(nodeSel).length))
-			]),
-			E('button', { 'class': 'btn cbi-button', 'title': _('Speed test the selected node'), 'click': ui.createHandlerFn(this, 'handleSelSpeedtest') }, '⚡'),
-			E('button', { 'class': 'btn cbi-button', 'title': _('Unblock-test the selected node'), 'click': ui.createHandlerFn(this, 'handleSelUnlock') }, '🔓'),
-			E('button', { 'class': 'btn cbi-button', 'title': _('Deactivate selected (remove from active pool, keep saved)'), 'click': ui.createHandlerFn(this, 'handleBulkDeactivate') }, '⏏'),
-			E('button', { 'class': 'btn cbi-button cbi-button-remove', 'title': _('Delete the selected nodes'), 'click': ui.createHandlerFn(this, 'handleBulkDelete') }, '✕ ' + _('Delete')),
-			E('button', { 'class': 'btn cbi-button', 'title': _('Clear selection'), 'click': ui.createHandlerFn(this, 'handleSelClear') }, _('Clear'))
-		]);
-	},
-	renderNodes: function(st) {
-		if (!st.running) return E('em', {}, _('Service is stopped — start it to see live node pings.'));
-		var allNodes = (st.nodes || []);
-		if (!allNodes.length) return E('em', {}, _('No nodes yet (waiting for subscription / pings)…'));
-
-		// Nodes OUTSIDE the auto-pool live ONLY in the dedicated section below (like
-		// inactive saved nodes), not mixed into the main list: service-dead nodes
-		// (dead_nodes) AND nodes the user manually excluded via "Configure auto-switch
-		// pool" (not in auto_members when a subset is pinned). inPool/members are defined
-		// here (used both for this filter and per-row below).
-		var members = st.auto_members || [];
-		var poolAll = (members.length === 0);
-		var inPool = function(tag) { return poolAll || members.indexOf(tag) >= 0; };
-		var deadSet = {};
-		(st.dead_nodes || []).forEach(function(t) { deadSet[t] = 1; });
-
-		// client-side filter + sort
-		var f = (nodeFilter || '').toLowerCase();
-		var nodes = allNodes.filter(function(n) {
-			if (deadSet[n.tag]) return false;       // service-dead -> "out of auto-pool" section
-			// AmneziaWG nodes are persistent, file-based and managed in their own section —
-			// keep them in the MAIN list even when a curated auto_member subset excludes them,
-			// so they're never lumped with "unused/excluded" nodes (and bulk-deleted by mistake).
-			if (!inPool(n.tag) && n.proto !== 'awg') return false;   // manually excluded -> dead section
-			if (nodeReachOnly && !(n.delay > 0)) return false;
-			if (!f) return true;
-			return (n.tag || '').toLowerCase().indexOf(f) >= 0 || (n.server || '').toLowerCase().indexOf(f) >= 0;
-		});
-		nodes = nodes.slice().sort(function(a, b) {
-			if (nodeSort === 'name') return (a.tag || '').localeCompare(b.tag || '');
-			if (nodeSort === 'down') return ((b.down || 0) + (b.up || 0)) - ((a.down || 0) + (a.up || 0));
-			var da = (a.delay == null || a.delay <= 0) ? 1e9 : a.delay;
-			var db = (b.delay == null || b.delay <= 0) ? 1e9 : b.delay;
-			return da - db;
-		});
-
-		var activeTag = (st.active === 'auto' || !st.active) ? st.auto_now : st.active;
-		var preferredTag = (st.settings || {}).preferred_node || '';
-		// AUTO row reflects the MODE (no hard manual pick), not the live target — a
-		// preferred soft-pin keeps us in auto even though it biases the current node.
-		var hardPick = (st.settings || {}).selected_node || '';
-		var autoMode = !hardPick;
-		var poolLabel = poolAll ? _('all nodes') : (members.length + ' / ' + allNodes.length);
-		var NCOL = '7';
-
-		var header = E('tr', { 'class': 'tr table-titles' }, [
-			E('th', { 'class': 'th' }, ''), E('th', { 'class': 'th' }, _('Node')),
-			E('th', { 'class': 'th' }, _('Server')), E('th', { 'class': 'th' }, _('Ping')),
-			E('th', { 'class': 'th' }, _('Speed')), E('th', { 'class': 'th' }, _('Traffic')),
-			E('th', { 'class': 'th' }, _('Actions'))
-		]);
-		var autoRow = E('tr', { 'class': 'tr', 'style': autoMode ? 'background:rgba(21,101,192,.12)' : '' }, [
-			E('td', { 'class': 'td' }, autoMode ? '★' : ''),
-			E('td', { 'class': 'td' }, E('b', {}, _('AUTO (urltest)'))),
-			E('td', { 'class': 'td', 'style': 'color:#666' }, _('auto-ping + failover') + ' · ' + _('pool') + ': ' + poolLabel),
-			E('td', { 'class': 'td' }, ''), E('td', { 'class': 'td' }, ''), E('td', { 'class': 'td' }, ''),
-			E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, [
-				E('button', { 'class': 'btn cbi-button cbi-button-action',
-					'click': ui.createHandlerFn(this, 'handleSelect', 'auto') }, _('Use')),
-				' ',
-				E('button', { 'class': 'btn cbi-button', 'title': _('Configure auto-switch pool'),
-					'click': ui.createHandlerFn(this, 'handleConfigAuto', st) }, '⚙ ' + _('Configure'))
-			])
-		]);
-		var makeRow = L.bind(function(n) {
-			var view = this;
-			var act = (n.tag === activeTag);
-			var pinned = (n.tag === preferredTag);
-			var pooled = inPool(n.tag);
-			var sp = speedResults[n.tag];
-			var traf = ((n.down || 0) + (n.up || 0)) > 0 ? ('↓' + fmtBytes(n.down) + ' ↑' + fmtBytes(n.up)) : '—';
-			var cb = E('input', { 'type': 'checkbox', 'checked': nodeSel[n.tag] ? 'checked' : null, 'title': _('Select for bulk actions') });
-			cb.addEventListener('change', function() { if (cb.checked) nodeSel[n.tag] = true; else delete nodeSel[n.tag]; view.updateSelCount(); });
-			return E('tr', { 'class': 'tr', 'style': act ? 'background:rgba(46,125,50,.12)' : (pooled ? '' : 'opacity:.55') }, [
-				E('td', { 'class': 'td' }, cb),
-				E('td', { 'class': 'td' }, [
-					E('span', {}, n.tag),
-					pinned ? E('span', { 'style': 'margin-left:5px;font-size:12px;vertical-align:middle', 'title': _('Preferred node (soft pin with switch-back)') }, '📌') : '',
-					n.active_saved ? E('span', { 'style': 'margin-left:5px;font-size:12px;color:#1565c0;vertical-align:middle', 'title': _('A saved node you promoted into the active pool') }, '➕') : '',
-					pooled ? '' : E('span', { 'style': 'margin-left:6px;font-size:10px;color:#888;border:1px solid #888;border-radius:8px;padding:0 5px',
-						'title': _('Excluded from auto-switching (manual only)') }, _('manual')),
-					unlockBadges(n.unlock)
-				]),
-				E('td', { 'class': 'td', 'style': 'font-family:monospace;color:#666' }, (n.server || '') + ':' + (n.port || '')),
-				E('td', { 'class': 'td', 'style': 'color:' + pingColor(n.delay) + ';font-weight:bold' }, pingText(n.delay)),
-				E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, (sp != null) ? (sp + ' ' + _('Mbit/s')) : '—'),
-				E('td', { 'class': 'td', 'style': 'font-family:monospace;color:#666;white-space:nowrap;font-size:11px' }, traf),
-				E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, [
-					E('button', { 'class': 'btn cbi-button cbi-button-action',
-						'click': ui.createHandlerFn(this, 'handleSelect', n.tag) }, _('Use')),
-					' ',
-					E('button', { 'class': 'btn cbi-button' + (pinned ? ' cbi-button-positive' : ''),
-						'title': pinned ? _('Preferred node — click to unpin (back to auto)') : _('Make preferred (soft pin: used while reachable, auto-failover if it dies, switch back on recovery)'),
-						'click': ui.createHandlerFn(this, 'handleSetPreferred', n.tag, pinned) }, '📌'),
-					' ',
-					E('button', { 'class': 'btn cbi-button', 'title': n.saved ? _('Remove from saved') : _('Save node (keep after subscription expires)'),
-						'click': ui.createHandlerFn(this, n.saved ? 'handleUnsaveNode' : 'handleSaveNode', n.tag) }, n.saved ? '💾' : '⭐'),
-					' ',
-					E('button', { 'class': 'btn cbi-button', 'title': _('Share link / QR'),
-						'click': ui.createHandlerFn(this, 'handleShowLink', n.tag) }, '🔗')
-				])
-			]);
-		}, this);
-
-		var order = [ 'subscription', 'imported', 'manual', 'amneziawg' ];
-		var labels = { subscription: _('Subscription'), imported: _('Imported'), manual: _('Manual'), amneziawg: _('AmneziaWG') };
-		var byGroup = {};
-		nodes.forEach(function(n) { var g = n.group || 'subscription'; (byGroup[g] = byGroup[g] || []).push(n); });
-		var present = order.filter(function(g) { return byGroup[g] && byGroup[g].length; });
-		Object.keys(byGroup).forEach(function(g) { if (present.indexOf(g) < 0) { present.push(g); labels[g] = labels[g] || g; } });
-		var showHeaders = present.length > 1;
-		var bodyRows = [];
-		if (!nodes.length)
-			bodyRows.push(E('tr', { 'class': 'tr' }, [ E('td', { 'class': 'td', 'colspan': NCOL, 'style': 'color:#888' }, _('No nodes match the filter.')) ]));
-		present.forEach(function(g) {
-			if (showHeaders)
-				bodyRows.push(E('tr', { 'class': 'tr' }, [
-					E('td', { 'class': 'td', 'colspan': NCOL, 'style': 'background:rgba(128,128,128,.12);font-weight:bold;padding:5px 8px' },
-						labels[g] + ' · ' + byGroup[g].length)
-				]));
-			byGroup[g].forEach(function(n) { bodyRows.push(makeRow(n)); });
-		});
-		// vp-table -> responsive: on phones the rows reflow into wrapping cards (see
-		// the @media rule injected by i18n) so nothing is clipped or scrolled sideways.
-		return E('table', { 'class': 'table vp-table' }, [ header, autoRow ].concat(bodyRows));
-	},
-
-	// per-client (LAN device) live traffic, top consumers
-	renderClients: function(st) {
-		var cl = st.client_traffic || [];
-		if (!cl.length) return E('em', { 'style': 'color:#888' }, _('No active client connections.'));
-		var header = E('tr', { 'class': 'tr table-titles' }, [
-			E('th', { 'class': 'th' }, _('Device')), E('th', { 'class': 'th' }, _('IP')),
-			E('th', { 'class': 'th' }, '↓'), E('th', { 'class': 'th' }, '↑'), E('th', { 'class': 'th' }, _('connections'))
-		]);
-		var rows = cl.map(function(c) {
-			return E('tr', { 'class': 'tr' }, [
-				E('td', { 'class': 'td' }, c.host || '—'),
-				E('td', { 'class': 'td', 'style': 'font-family:monospace;color:#666' }, c.ip || '?'),
-				E('td', { 'class': 'td', 'style': 'font-family:monospace' }, fmtBytes(c.down)),
-				E('td', { 'class': 'td', 'style': 'font-family:monospace' }, fmtBytes(c.up)),
-				E('td', { 'class': 'td' }, c.conns || 0)
-			]);
-		});
-		return E('table', { 'class': 'table vp-table' }, [ header ].concat(rows));
-	},
-
-	// saved-from-subscription nodes NOT in the live pool right now: a separate INACTIVE
-	// list. Each can be promoted into the active pool, shared, or dropped from the archive.
-	renderSavedInactive: function(st) {
-		var list = st.saved_inactive || [];
-		if (!list.length) return E('em', { 'style': 'color:#888' },
-			_('No inactive saved nodes. Star a node to keep it here after the subscription drops it.'));
-		var header = E('tr', { 'class': 'tr table-titles' }, [
-			E('th', { 'class': 'th' }, _('Node')), E('th', { 'class': 'th' }, _('Server')), E('th', { 'class': 'th' }, _('Actions'))
-		]);
-		var rows = list.map(L.bind(function(n) {
-			return E('tr', { 'class': 'tr', 'style': 'opacity:.85' }, [
-				E('td', { 'class': 'td' }, [
-					E('span', {}, n.tag)
-				]),
-				E('td', { 'class': 'td', 'style': 'font-family:monospace;color:#666' }, (n.server || '') + ':' + (n.port || '')),
-				E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, [
-					E('button', { 'class': 'btn cbi-button cbi-button-action', 'title': _('Add this saved node to the active pool'),
-						'click': ui.createHandlerFn(this, 'handleActivateSaved', n.tag) }, '➕ ' + _('Add to active')),
-					' ',
-					E('button', { 'class': 'btn cbi-button', 'title': _('Share link / QR'),
-						'click': ui.createHandlerFn(this, 'handleShowLink', n.tag) }, '🔗'),
-					' ',
-					E('button', { 'class': 'btn cbi-button', 'title': _('Remove from saved'),
-						'click': ui.createHandlerFn(this, 'handleUnsaveNode', n.tag) }, '💾')
-				])
-			]);
-		}, this));
-		return E('table', { 'class': 'table vp-table' }, [ header ].concat(rows));
-	},
-
-	// Everything OUTSIDE the auto-pool, in one place (like the inactive-saved list):
-	//   • service-dead (dead_nodes)            -> "↩ Return to auto" (force-keep / restore)
-	//   • manually excluded (not in auto_member)-> "➕ Add to auto-pool"
-	//   • force-kept overrides (kept_nodes)     -> "Re-enable filter"
-	// Each can be brought back with one button.
-	renderDeadNodes: function(st) {
-		var dead = st.dead_nodes || [], kept = st.kept_nodes || [];
-		var members = st.auto_members || [], poolAll = (members.length === 0);
-		var deadSet = {}; dead.forEach(function(t) { deadSet[t] = 1; });
-		var keptSet = {}; kept.forEach(function(t) { keptSet[t] = 1; });
-		// AmneziaWG nodes have their own management section and stay in the main list, so they
-		// must NOT show up here as "excluded/unused" (else a bulk delete of unused nodes would
-		// sweep them away too).
-		var awgSet = {}; (st.nodes || []).forEach(function(n) { if (n.proto === 'awg') awgSet[n.tag] = 1; });
-		// manually excluded = a pinned subset is configured AND this node isn't in it
-		// (and it isn't already covered by the dead/forced/awg groups).
-		var excluded = poolAll ? [] : (st.nodes || []).map(function(n) { return n.tag; })
-			.filter(function(t) { return members.indexOf(t) < 0 && !deadSet[t] && !keptSet[t] && !awgSet[t]; });
-		if (!dead.length && !excluded.length && !kept.length) return E('em', { 'style': 'color:#888' },
-			_('No nodes outside the auto-pool — every node is auto-managed.'));
-		var byTag = {};
-		(st.nodes || []).forEach(function(n) { byTag[n.tag] = n; });
-		var srv = function(tag) { var n = byTag[tag] || {}; return (n.server || '') + (n.port ? ':' + n.port : ''); };
-		var badge = function(text, color) { return E('span', { 'style': 'margin-left:6px;font-size:10px;color:' + color + ';border:1px solid ' + color + ';border-radius:8px;padding:0 5px' }, text); };
-		var shareBtn = L.bind(function(tag) { return E('button', { 'class': 'btn cbi-button', 'title': _('Share link / QR'), 'click': ui.createHandlerFn(this, 'handleShowLink', tag) }, '🔗'); }, this);
-		// No "Use" button here — an out-of-pool node (service-dead / excluded) must not be
-		// manually activated as the live exit.
-		var self = this;
-		// Checkbox wired to the SAME nodeSel as the main list, so the bulk-action toolbar
-		// above the Nodes table (✕ Delete, etc.) operates on out-of-pool nodes too.
-		var cbCell = function(tag) {
-			var cb = E('input', { 'type': 'checkbox', 'checked': nodeSel[tag] ? 'checked' : null, 'title': _('Select for bulk actions') });
-			cb.addEventListener('change', function() { if (cb.checked) nodeSel[tag] = true; else delete nodeSel[tag]; self.updateSelCount(); });
-			return E('td', { 'class': 'td' }, cb);
-		};
-		var header = E('tr', { 'class': 'tr table-titles' }, [
-			E('th', { 'class': 'th' }, ''), E('th', { 'class': 'th' }, _('Node')), E('th', { 'class': 'th' }, _('Server')), E('th', { 'class': 'th' }, _('Actions'))
-		]);
-		var rows = [];
-		dead.forEach(L.bind(function(tag) {
-			rows.push(E('tr', { 'class': 'tr', 'style': 'opacity:.85' }, [
-				cbCell(tag),
-				E('td', { 'class': 'td' }, [ E('span', {}, tag), badge(_('service down'), '#c62828') ]),
-				E('td', { 'class': 'td', 'style': 'font-family:monospace;color:#666' }, srv(tag)),
-				E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, [
-					E('button', { 'class': 'btn cbi-button cbi-button-action', 'title': _('Force this node back into auto-switching (keeps it even if the service check fails)'),
-						'click': ui.createHandlerFn(this, 'handleRestoreNode', tag) }, '↩ ' + _('Return to auto')),
-					' ', shareBtn(tag)
-				])
-			]));
-		}, this));
-		excluded.forEach(L.bind(function(tag) {
-			rows.push(E('tr', { 'class': 'tr', 'style': 'opacity:.85' }, [
-				cbCell(tag),
-				E('td', { 'class': 'td' }, [ E('span', {}, tag), badge(_('excluded manually'), '#888') ]),
-				E('td', { 'class': 'td', 'style': 'font-family:monospace;color:#666' }, srv(tag)),
-				E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, [
-					E('button', { 'class': 'btn cbi-button cbi-button-action', 'title': _('Add this node back to auto-switching'),
-						'click': ui.createHandlerFn(this, 'handleAddAutoMember', tag) }, '➕ ' + _('Add to auto-pool')),
-					' ', shareBtn(tag)
-				])
-			]));
-		}, this));
-		kept.forEach(L.bind(function(tag) {
-			rows.push(E('tr', { 'class': 'tr', 'style': 'background:rgba(46,125,50,.08)' }, [
-				cbCell(tag),
-				E('td', { 'class': 'td' }, [ E('span', {}, tag), badge('★ ' + _('forced'), '#2e7d32') ]),
-				E('td', { 'class': 'td', 'style': 'font-family:monospace;color:#666' }, srv(tag)),
-				E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, [
-					E('button', { 'class': 'btn cbi-button cbi-button-remove', 'title': _('Stop forcing — let the service filter manage this node again'),
-						'click': ui.createHandlerFn(this, 'handleRefilterNode', tag) }, _('Re-enable filter'))
-				])
-			]));
-		}, this));
-		return E('table', { 'class': 'table vp-table' }, [ header ].concat(rows));
-	},
-
-	load: function() { return callStatus(); },
 	render: function(st) {
-		this._st = st;
-		var c = E('div', { 'class': 'cbi-map vpnpool-view' }, [
-			i18n.header(_('VPN Pool — Dashboard')),
-			E('div', { 'class': 'cbi-section' }, [ E('div', { 'id': 'vp-status' }, this.renderStatus(st)) ]),
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Nodes')),
-				this.renderToolbar(),
-				E('div', { 'id': 'vp-nodes' }, this.renderNodes(st))
-			]),
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Saved from subscription (inactive)')),
-				E('p', { 'style': 'color:#666;margin:2px 0 8px' }, _('Saved nodes are kept here even after the subscription drops them. They are NOT in the active pool until you add them.')),
-				E('div', { 'id': 'vp-saved-inactive' }, this.renderSavedInactive(st))
-			]),
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Out of the auto-pool')),
-				E('p', { 'style': 'color:#666;margin:2px 0 8px' }, _('Nodes not used for auto-switching: ones that can’t open the configured services (service down), ones you excluded manually, and ones you force-kept. Each stays manually selectable and can be brought back with one button.')),
-				E('div', { 'id': 'vp-dead-nodes' }, this.renderDeadNodes(st))
-			]),
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Per-client traffic')),
-				E('div', { 'id': 'vp-clients' }, this.renderClients(st))
-			])
+		var self = this;
+		injectCss();
+		prevTraffic = null;
+		this.sigs = {};
+		this.st = null;
+
+		this.errLine = E('p', { 'class': 'vp-ov-err', 'role': 'alert', 'hidden': 'hidden' });
+		this.wizard = common.emptyState({
+			title: _('Add a subscription or a node'),
+			text: _('Paste a subscription address, a node link or AmneziaWG settings on the Nodes tab. The VPN starts working as soon as there is a node.'),
+			actions: []
+		});
+		var acts = this.wizard.querySelector('.vp-empty-actions') || this.wizard.appendChild(E('div', { 'class': 'vp-empty-actions' }));
+		acts.appendChild(E('a', { 'class': 'btn cbi-button cbi-button-action important vp-ov-add', 'href': L.url.apply(L, NODES.split('/')) + '#add' }, [ _('+ Add') ]));
+		acts.appendChild(link(_('Open Nodes'), NODES));
+		this.wizard.hidden = true;
+
+		// "Now"
+		this.stateEl = E('div', { 'class': 'vp-ov-state', 'role': 'status' });
+		this.toggleBtn = E('button', { 'class': 'btn cbi-button vp-ov-toggle', 'type': 'button',
+			'click': ui.createHandlerFn(this, 'handleToggle') }, [ '' ]);
+		this.detailEl = E('p', { 'class': 'vp-ov-detail' });
+		this.facts = {};
+		var dl = E('dl', { 'class': 'vp-ov-facts' });
+		[ [ 'node', _('Node') ], [ 'exit', _('Exit') ], [ 'delay', _('Delay') ], [ 'speed', _('Speed') ] ].forEach(function(f) {
+			var dt = E('dt', {}, [ f[1] ]), dd = E('dd', { 'class': 'vp-ov-' + f[0] });
+			dl.appendChild(dt); dl.appendChild(dd);
+			self.facts[f[0]] = { dt: dt, dd: dd };
+		});
+		this.factsEl = dl;
+		this.whoText = E('span', { 'class': 'vp-ov-who-text' });
+		this.autoBtn = E('button', { 'class': 'btn cbi-button cbi-button-action vp-ov-auto', 'type': 'button',
+			'click': ui.createHandlerFn(this, 'handleAuto') }, [ _('Back to automatic choice') ]);
+		this.whoEl = E('div', { 'class': 'vp-ov-who' }, [ this.whoText, this.autoBtn ]);
+		this.nowEl = E('div', { 'class': 'cbi-section vp-card vp-ov-now' }, [
+			E('div', { 'class': 'vp-ov-head' }, [ this.stateEl, this.toggleBtn ]),
+			this.detailEl, this.factsEl, this.whoEl
 		]);
+
+		this.alertsEl = E('div', { 'class': 'vp-ov-alerts', 'aria-live': 'polite' });
+		this.subsEl = E('div', { 'class': 'vp-ov-subs' });
+		this.subsSec = E('div', { 'class': 'cbi-section vp-ov-subs-sec' }, [ E('h3', {}, [ _('Subscriptions') ]), this.subsEl,
+			E('div', { 'class': 'vp-ov-links' }, [ link(_('All nodes'), NODES) ]) ]);
+		this.devEl = E('div', { 'class': 'vp-devlist vp-ov-devices' });
+		this.devSec = E('div', { 'class': 'cbi-section vp-ov-dev-sec' }, [ E('h3', {}, [ _('Traffic by device') ]), this.devEl ]);
+
+		var root = E('div', { 'class': 'cbi-map vpnpool-view vp-page vp-ov' }, [
+			common.header(_('VPN Pool — Overview')),
+			this.errLine, this.wizard, this.nowEl, this.alertsEl, this.subsSec, this.devSec
+		]);
+		this.update(st);
 		poll.add(L.bind(this.refresh, this), 5);
 		poll.start();
-		return c;
+		return root;
 	},
+
+	refresh: function() {
+		var self = this;
+		return common.call('status', {}, { quiet: true }).then(function(st) { self.update(st); }, function(e) {
+			self.update({ __error: common.errorText(e) });
+		});
+	},
+
+	// rebuild a list only when what it shows changed
+	changed: function(key, v) {
+		var s = JSON.stringify(v);
+		if (this.sigs[key] === s) return false;
+		this.sigs[key] = s;
+		return true;
+	},
+
+	update: function(st) {
+		if (!st || st.__error) {
+			setText(this.errLine, (st && st.__error) || common.CODE_TEXT.failed);
+			this.errLine.hidden = false;
+			return;
+		}
+		this.errLine.hidden = true;
+		this.st = st;
+		var empty = isEmpty(st);
+		this.wizard.hidden = !empty;
+		this.updateNow(st);
+		this.updateAlerts(empty ? [] : alertsOf(st));
+		this.updateSubs(arr(st.subscriptions));
+		this.subsSec.hidden = !arr(st.subscriptions).length;
+		this.updateDevices(st);
+	},
+
+	updateNow: function(st) {
+		var s = stateOf(st);
+		setText(this.stateEl, s.t);
+		this.stateEl.setAttribute('data-kind', s.k || '');
+		setText(this.detailEl, s.d);
+		this.detailEl.hidden = !s.d;
+		// on = the VPN carries the traffic as far as the user's switches go: a Telegram pause is an
+		// "off" too (enabled stays 1, the daemon runs), and "Turn the VPN on" ends it (power.sh on)
+		var on = vpnOn(st);
+		setText(this.toggleBtn, on ? _('Turn the VPN off') : _('Turn the VPN on'));
+		this.toggleBtn.classList.toggle('cbi-button-negative', on);
+		this.toggleBtn.classList.toggle('cbi-button-positive', !on);
+
+		// the node / exit / speed / choice rows only while the traffic can go through the VPN
+		var live = !!(on && st.running);
+		var tag = live ? activeTag(st) : '';
+		var n = tag ? nodeOf(st, tag) : null;
+		var tunnelUp = !!(st.tunnel && st.tunnel.state === 'up');
+		var ex = st.exit;
+		var f = {
+			node: tag || null,
+			// the exit only while the tunnel works (exit.json outlives a dead tunnel); a lookup that
+			// found nothing is said, not "being checked" forever
+			exit: !(live && tunnelUp && tag) ? null
+				: (ex && ex.ok !== false && ex.ip) ? (ex.country ? _('%s · %s').format(ex.ip, countryName(ex.country)) : ex.ip)
+				: (ex && ex.ok === false) ? _('could not be determined: the address check services did not answer')
+				: _('being checked…'),
+			delay: (n && n.delay > 0) ? _('%d ms').format(n.delay) : null,
+			speed: null
+		};
+		// the speed = the change of the totals between two polls
+		var t = st.traffic || {}, now = Date.now();
+		if (live) {
+			if (prevTraffic && now > prevTraffic.time) {
+				var dt = (now - prevTraffic.time) / 1000;
+				var dn = Math.max(0, ((+t.down_total || 0) - prevTraffic.down) / dt);
+				var up = Math.max(0, ((+t.up_total || 0) - prevTraffic.up) / dt);
+				f.speed = _('↓ %s ↑ %s · connections: %d').format(speed(dn), speed(up), +t.connections || 0);
+			}
+			prevTraffic = { time: now, down: +t.down_total || 0, up: +t.up_total || 0 };
+		} else prevTraffic = null;
+		var self = this;
+		Object.keys(this.facts).forEach(function(k) {
+			var F = self.facts[k];
+			setText(F.dd, f[k]);
+			F.dt.hidden = F.dd.hidden = (f[k] == null);
+		});
+		this.factsEl.hidden = Object.keys(f).every(function(k) { return f[k] == null; });
+
+		// automatic choice / the node chosen by the user (the soft choice of "Connect")
+		var pref = live ? st.preferred : null, who = '';
+		if (pref && pref.id) {
+			who = (pref.in_pool === false)
+				? _('Chosen by you: %s. It is not among the nodes now, so the automatic choice works.').format(pref.tag || '')
+				: _('Connected to %s: chosen by you. If it stops working, the automatic choice takes over until it is back.').format(pref.tag || '');
+		} else if (live) who = _('Automatic choice: the best working node is used.');
+		setText(this.whoText, who);
+		this.autoBtn.hidden = !(pref && pref.id);
+		this.whoEl.hidden = !who;
+	},
+
+	updateAlerts: function(list) {
+		if (!this.changed('alerts', list)) return;
+		dom.content(this.alertsEl, list.map(function(a) {
+			return E('div', { 'class': 'vp-card vp-ov-alert', 'data-kind': a.k, 'role': a.k === 'error' ? 'alert' : null }, [
+				E('span', { 'class': 'vp-ov-alert-text' }, [ a.t ]),
+				a.go ? link(a.go[0], a.go[1]) : ''
+			]);
+		}));
+		this.alertsEl.hidden = !list.length;
+	},
+
+	updateSubs: function(subs) {
+		var view = subs.map(function(s) {
+			return { name: s.name || _('Subscription'), facts: common.subFacts(s).map(function(f) { return { t: f.t, k: f.k || '' }; }),
+				nodes: +s.in_pool || 0, total: +s.total || 0, used: +s.used || 0 };
+		});
+		if (!this.changed('subs', view)) return;
+		dom.content(this.subsEl, view.map(function(v) {
+			var kids = [];
+			v.facts.forEach(function(f, i) {
+				if (i) kids.push(' · ');
+				kids.push(E('span', { 'data-kind': f.k || null }, [ f.t ]));
+			});
+			var bar = '';
+			if (v.total > 0) {
+				var pct = Math.max(0, Math.min(100, Math.round((v.total - v.used) * 100 / v.total)));
+				bar = E('div', { 'class': 'vp-ov-bar', 'data-kind': pct <= 10 ? 'warn' : null, 'role': 'img',
+					'aria-label': _('Traffic left: %d%%').format(pct) }, [ E('span', { 'style': 'width:' + pct + '%' }) ]);
+			}
+			return E('div', { 'class': 'vp-card vp-ov-sub' }, [
+				E('div', { 'class': 'vp-ov-sub-name' }, [ v.name ]),
+				E('div', { 'class': 'vp-ov-sub-count' }, [ N_(v.nodes, '%d node in use', '%d nodes in use').format(v.nodes) ]),
+				E('div', { 'class': 'vp-ov-sub-facts' }, kids),
+				bar
+			]);
+		}));
+	},
+
+	// traffic per device (LAN client), the biggest first (status.uc: top 30, from the open
+	// connections); the name from the DHCP leases, else the address
+	updateDevices: function(st) {
+		var live = !!(st.enabled && st.running);
+		var view = live ? arr(st.client_traffic).map(function(c) {
+			return { name: c.self ? _('This router') : (c.host || c.ip || '?'), ip: (!c.self && c.host && c.ip) ? c.ip : '', down: +c.down || 0, up: +c.up || 0, conns: +c.conns || 0 };
+		}) : null;
+		if (!this.changed('devices', view)) return;
+		if (!view) { dom.content(this.devEl, [ E('p', { 'class': 'vp-hint' }, [ _('The VPN is not running: there is no traffic to show.') ]) ]); return; }
+		if (!view.length) { dom.content(this.devEl, [ E('p', { 'class': 'vp-hint' }, [ _('No device uses the internet through the router right now.') ]) ]); return; }
+		dom.content(this.devEl, view.map(function(v) {
+			return E('div', { 'class': 'vp-dev vp-ov-dev' }, [
+				E('span', { 'class': 'vp-dev-name' }, [ v.name ]),
+				v.ip ? E('span', { 'class': 'vp-dev-meta' }, [ v.ip ]) : '',
+				E('span', { 'class': 'vp-dev-meta vp-ov-dev-traffic' }, [ _('↓ %s ↑ %s').format(common.fmtBytes(v.down), common.fmtBytes(v.up)) ]),
+				E('span', { 'class': 'vp-dev-meta' }, [ N_(v.conns, '%d connection', '%d connections').format(v.conns) ])
+			]);
+		}));
+	},
+
+	// on/off: wait for the daemon's answer (status) instead of a blind timer
+	handleToggle: function() {
+		var self = this, st = this.st || {};
+		var target = !vpnOn(st);
+		return common.call('set_enabled', { enabled: target }).then(function(r) {
+			common.toast(target ? _('Turning the VPN on…') : _('Turning the VPN off…'));
+			return common.waitFor(function(s) { self.update(s); return target ? (vpnOn(s) && !!s.running) : (!s.enabled && !s.running); },
+				{ timeout: target ? 45000 : 20000, interval: 1500 }).then(function() {
+				common.toast(common.codeText(r && r.code) || (target ? common.CODE_TEXT.on : common.CODE_TEXT.off));
+			}, function(e) {
+				if (e instanceof common.Error && e.code === 'timeout')
+					common.toast(target ? _('The VPN is switched on, but the service has not started yet. The state above shows when it does.')
+						: _('The VPN is switched off, but the service has not stopped yet. The state above shows when it does.'), 'warning', 'set_enabled');
+				else throw e;
+			});
+		}).then(function() { return self.refresh(); }, function() { return self.refresh(); });
+	},
+
+	handleAuto: function() {
+		var self = this;
+		return common.call('auto_select', {}, { success: _('Back to automatic choice.') }).then(function() { return self.refresh(); }, function() {});
+	},
+
 	handleSaveApply: null, handleSave: null, handleReset: null
 });

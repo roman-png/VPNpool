@@ -4,10 +4,85 @@
 
 NAME=vpnpool
 CONF_DIR=/etc/vpnpool
-SB_CONF="$CONF_DIR/sing-box.json"
 SB_DATA=/tmp/vpnpool
+# The LIVE sing-box config is in RAM (/tmp): it is regenerated on every build, and rewriting
+# it in flash on every rebuild wore the flash for nothing. A copy is kept in flash
+# (SB_CONF_FLASH) and rewritten ONLY when the content changed (persist_if_changed).
+SB_CONF="$SB_DATA/sing-box.json"
+SB_CONF_FLASH="$CONF_DIR/sing-box.json"
 
 log() { logger -t "$NAME" "$1"; }
+
+# The log for the Diagnostics page (rpcd logs, diag.sh): the last <n> lines of the service's
+# lines in the system log (logread, tag vpnpool; the facility column dropped) or of the engine's
+# own log (sing-box.log in RAM, colour codes dropped). Telegram bot tokens are masked, a line is
+# cut to 400 characters, and the newest lines that fit in ~160 KB are kept (rpcd takes at most
+# 256 KiB from an exec method, JSON escapes included).
+# The log for the Diagnostics page with the secrets out: bot tokens, the user part of node links
+# (vless://<uuid>@...) and the path / query of any address (subscription tokens, node keys live there).
+log_lines() {   # $1=service|engine $2=lines
+	case "$1" in
+		engine) tail -n "$2" "$SB_DATA/sing-box.log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' ;;
+		*) logread 2>/dev/null | grep -E "$NAME(\[[0-9]+\])?: " | tail -n "$2" \
+			| sed -E "s/ [a-z]+\.[a-z]+ $NAME(\[[0-9]+\])?: / /" ;;
+	esac | sed -E 's#(bot[0-9]{1,20}):[A-Za-z0-9_-]+#\1:***#g; s#([A-Za-z][A-Za-z0-9+.-]*://)[^@/ ]+@#\1***@#g; s#([A-Za-z][A-Za-z0-9+.-]*://[^/?\# ]+)[/?\#][^ ]*#\1/***#g' \
+		| cut -c1-400 \
+		| awk '{ a[NR] = $0 } END { t = 0; s = NR + 1
+			for (i = NR; i >= 1; i--) { t += length(a[i]) + 1; if (t > 160000) break; s = i }
+			for (i = s; i <= NR; i++) print a[i] }'
+}
+
+# ---- the sing-box engine (ROADMAP 4.1): EVERY run of sing-box goes through sb_bin ----
+# build.sh picks the binary for the pool (enginecap.uc select: uci singbox_bin, default the
+# stock /usr/bin/sing-box; /usr/bin/sing-box-awg when there are AmneziaWG nodes and the stock one
+# can't run them), checks the config WITH it and records it in SB_BIN_FILE — so the daemon runs
+# exactly the binary the live config was validated against.
+SB_BIN_DEFAULT=/usr/bin/sing-box
+SB_BIN_FILE="$SB_DATA/.sb_bin"
+ENGINECAP=/usr/libexec/vpnpool/enginecap.uc
+sb_bin() {
+	local b
+	b=$(cat "$SB_BIN_FILE" 2>/dev/null)
+	if [ -n "$b" ] && [ -x "$b" ]; then echo "$b"; return 0; fi
+	# no record (after a reboot /tmp is empty, the flash copy is what runs; or a rollback to a
+	# config of another build): choose by what the config holds — AmneziaWG endpoints need the
+	# engine (enginecap.uc select 1), anything else the configured / stock binary
+	if [ -s "$SB_CONF" ] && jq -e '[(.endpoints // [])[] | select(.type == "awg")] | length > 0' "$SB_CONF" >/dev/null 2>&1; then
+		b=$(ucode "$ENGINECAP" select 1 2>/dev/null | jq -r '.bin // empty' 2>/dev/null)
+		if [ -n "$b" ] && [ -x "$b" ]; then echo "$b"; return 0; fi
+	fi
+	b=$(uci -q get vpnpool.main.singbox_bin)
+	if [ -n "$b" ] && [ -x "$b" ]; then echo "$b"; return 0; fi
+	echo "$SB_BIN_DEFAULT"
+}
+# OUR sing-box processes (by our own -c config path — the RAM one, and the flash one a 1.x
+# instance still runs with right after an upgrade), whichever binary runs them (sing-box,
+# sing-box-awg): podkop's instance (-c /etc/sing-box/config.json) never matches.
+our_singbox_pids() {
+	{ pgrep -f "sing-box[^ ]* run -c $SB_CONF" 2>/dev/null; pgrep -f "sing-box[^ ]* run -c $SB_CONF_FLASH" 2>/dev/null; } | sort -u
+}
+
+# Atomic write: stdin -> "$1" via a temp file in the same directory + mv, so a reader
+# (status.sh, the generator, rpcd) never sees a half-written file.
+write_atomic() {   # $1=destination
+	local t="$1.tmp.$$"
+	cat > "$t" && mv -f "$t" "$1" || { rm -f "$t"; return 1; }
+}
+
+# Copy $1 over $2 ONLY when the content differs (flash wear: identical rewrites are skipped).
+# Atomic (temp file + mv). Returns 0 when $2 is up to date afterwards.
+persist_if_changed() {   # $1=source $2=destination
+	[ -f "$1" ] || return 1
+	cmp -s "$1" "$2" 2>/dev/null && return 0
+	mkdir -p "$(dirname "$2")"
+	cp "$1" "$2.tmp.$$" && mv -f "$2.tmp.$$" "$2" || { rm -f "$2.tmp.$$"; return 1; }
+}
+
+# Subscription URLs carry the access token in the path/query. Never log them in clear:
+# keep scheme + host, drop userinfo, path and query.
+mask_url() {   # $1=url -> e.g. https://sub.example.com/***
+	printf '%s' "$1" | sed -e 's#^\([A-Za-z][A-Za-z0-9+.-]*://\)\([^@/?#]*@\)\{0,1\}\([^/?#]*\).*#\1\3/***#'
+}
 
 # Remove a single-flight lock file if it is older than MAXAGE seconds. Call BEFORE honoring
 # a lock so a run killed by SIGKILL (e.g. OOM on a 16 MB router) — whose EXIT trap never
@@ -75,20 +150,25 @@ tg_curl() {
 # press / command until it expires (the bot "answers after a long time"). Proxy-only keeps
 # polling responsive: a transient proxy failure returns empty fast and the caller retries
 # the proxy after a short sleep. Honors telegram_via_proxy=0 (then it polls direct).
+# Exception: when the proxy port itself refuses the connection (curl rc 7 — our sing-box is
+# not running, e.g. the service is switched off), poll DIRECT: that is the only way a /on can
+# still arrive. A proxy that is up but slow/failing upstream keeps the proxy-only rule.
 tg_poll() {
+	local out rc
 	if [ "$TG_VIA_PROXY" = "1" ]; then
-		curl -s --proxy "socks5h://127.0.0.1:$TG_TEST_PORT" "$@"
-	else
-		curl -s "$@"
+		out=$(curl -s --proxy "socks5h://127.0.0.1:$TG_TEST_PORT" "$@"); rc=$?
+		if [ "$rc" -ne 7 ]; then printf '%s' "$out"; return "$rc"; fi
 	fi
+	curl -s "$@"
 }
 
 # Low-level Telegram send (ignores the enable toggle). Needs token+chat.
-# Echoes the HTTP status code (200 = delivered).
+# Echoes the HTTP status code (200 = delivered). $2/$3 = token/chat to use instead of the
+# saved ones (the settings page's "Test" sends what is typed, before it is saved).
 tg_send() {
 	local tok chat code
-	tok=$(uci -q get vpnpool.main.telegram_token)
-	chat=$(uci -q get vpnpool.main.telegram_chat)
+	tok=${2:-$(uci -q get vpnpool.main.telegram_token)}
+	chat=${3:-$(uci -q get vpnpool.main.telegram_chat)}
 	[ -n "$tok" ] && [ -n "$chat" ] || { echo "000"; return 1; }
 	code=$(tg_curl -m 12 -o /dev/null -w '%{http_code}' \
 		--data-urlencode "chat_id=$chat" \
@@ -147,55 +227,37 @@ tg_notify() {
 	return 0
 }
 
-# ---- saved-node store ----
-# Two persistent maps feed the single uci `saved_node` list:
-#   saved.map.json    — manual ⭐ picks (rpcd save_node/unsave_node)
-#   snapshot.map.json — auto-snapshot of currently-reachable nodes (snapshot.sh)
-# Keeping them separate means auto-snapshot can be bounded/replaced wholesale
-# without ever evicting a node the user saved by hand.
-SAVED_MAP=/etc/vpnpool/saved.map.json
-SNAP_MAP=/etc/vpnpool/snapshot.map.json
+# ---- the data model (ROADMAP 9): node ids everywhere, subscriptions as uci sections ----
+# model.uc is the shell scripts' door to it (subscriptions, picks, hidden ids, favourites,
+# id <-> tag of the last build); the stores are described in common.uc.
+MODEL=/usr/libexec/vpnpool/model.uc
+# the client names (User-Agents) fetch.sh tries by default (uci probe_ua replaces the list)
+DEFAULT_UAS="v2rayNG/1.9.5 v2rayN/6.45 Happ/1.0 sing-box/1.12 clash-meta/1.18 Streisand Hiddify/2.0 Shadowrocket/2.2 Mozilla/5.0"
+# the cache / output file key of a subscription URL (fetch.sh writes $SB_DATA/sources/s-<key>.raw)
+src_key() { printf '%s' "$1" | md5sum | cut -c1-12; }
+# node_resolve <id|tag> -> "<id>\t<tag>" of a node of the last build; rc 1 if there is none
+node_resolve() { ucode "$MODEL" resolve "$1" 2>/dev/null; }
 
-# Regenerate uci saved_node = unique union of both maps' link values, then commit.
-rebuild_saved_list() {
-	mkdir -p "$CONF_DIR"
-	[ -f "$SAVED_MAP" ] || echo '{}' > "$SAVED_MAP"
-	[ -f "$SNAP_MAP" ]  || echo '{}' > "$SNAP_MAP"
-	uci -q delete vpnpool.main.saved_node
-	jq -rn --slurpfile a "$SAVED_MAP" --slurpfile b "$SNAP_MAP" \
-		'[ (($a[0]//{})|.[]), (($b[0]//{})|.[]) ] | unique | .[]' 2>/dev/null \
-	| while IFS= read -r l; do [ -n "$l" ] && uci add_list vpnpool.main.saved_node="$l"; done
-	uci commit vpnpool
+# ---- what a backup holds (ONE rule: rpcd backup/restore and the 1.x -> 2.0 migration copy) ----
+# backup packs only files that match it, restore accepts only members that match it (our own
+# backup can never be refused). Regular files only.
+MEMBER_RE='^(etc/?|etc/config/?|etc/config/vpnpool|etc/vpnpool/?|etc/vpnpool/awg/?|etc/vpnpool/awg/[A-Za-z0-9._-]+\.conf|etc/vpnpool/[A-Za-z0-9._-]+\.map\.json)$'
+BACKUP_MAPS='*.map.json'
+backup_scan() {   # "ok <rel>" / "skip <rel>" for every candidate file of the live config
+	local f rel
+	echo "ok etc/config/vpnpool"
+	for f in /etc/vpnpool/awg/* /etc/vpnpool/$BACKUP_MAPS; do
+		[ -e "$f" ] || [ -L "$f" ] || continue
+		rel=${f#/}
+		if [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$rel" | grep -Eq "$MEMBER_RE"; then
+			echo "ok $rel"
+		else
+			echo "skip $rel"
+		fi
+	done
 }
+backup_members() { backup_scan | sed -n 's/^ok //p'; }   # names never contain spaces (MEMBER_RE)
 
-# JSON array of all saved tags (manual + snapshot), for the dashboard ⭐ flag.
-saved_tags_json() {
-	[ -f "$SAVED_MAP" ] || echo '{}' > "$SAVED_MAP"
-	[ -f "$SNAP_MAP" ]  || echo '{}' > "$SNAP_MAP"
-	jq -n --slurpfile a "$SAVED_MAP" --slurpfile b "$SNAP_MAP" \
-		'[ (($a[0]//{})|keys[]), (($b[0]//{})|keys[]) ] | unique' 2>/dev/null
-}
-
-# Resolve a saved tag -> its archived vless:// link (manual map first, then snapshot).
-# Used to (de)activate a saved node even when it's no longer in the live subscription.
-saved_link_for_tag() {   # $1=tag
-	[ -f "$SAVED_MAP" ] || echo '{}' > "$SAVED_MAP"
-	[ -f "$SNAP_MAP" ]  || echo '{}' > "$SNAP_MAP"
-	jq -rn --slurpfile a "$SAVED_MAP" --slurpfile b "$SNAP_MAP" --arg t "$1" \
-		'(($a[0]//{})[$t]) // (($b[0]//{})[$t]) // ""' 2>/dev/null
-}
-
-# JSON array [{tag,link}] of the whole saved archive (manual UNION snapshot), the
-# source for the dashboard's inactive "saved" list.
-saved_archive_json() {
-	[ -f "$SAVED_MAP" ] || echo '{}' > "$SAVED_MAP"
-	[ -f "$SNAP_MAP" ]  || echo '{}' > "$SNAP_MAP"
-	jq -n --slurpfile a "$SAVED_MAP" --slurpfile b "$SNAP_MAP" \
-		'[ (($a[0]//{})|to_entries[]), (($b[0]//{})|to_entries[]) ] | unique_by(.key) | map({tag:.key, link:.value})' 2>/dev/null
-}
-
-SUB_URL=$(uci -q get vpnpool.main.subscription_url)
-SUB_UA=$(uci -q get vpnpool.main.subscription_ua); [ -n "$SUB_UA" ] || SUB_UA="v2rayNG/1.8.5"
 TPROXY_PORT=$(uci -q get vpnpool.main.tproxy_port); [ -n "$TPROXY_PORT" ] || TPROXY_PORT=1603
 FWMARK=$(uci -q get vpnpool.main.fwmark); [ -n "$FWMARK" ] || FWMARK=0x400000
 RT_TABLE=$(uci -q get vpnpool.main.route_table); [ -n "$RT_TABLE" ] || RT_TABLE=142
@@ -234,6 +296,34 @@ if [ -z "$LAN_IF" ]; then
 fi
 
 # ---- service-accuracy probe set ----
+# The IP-echo services that tell the exit of the tunnel (address + country), in the order they
+# are tried: ONE list for the daemon's background lookup (exitip.sh) and the "test exit" of the
+# Diagnostics (rpcd conntest). Several, because a single one (ifconfig.co) often blocks or
+# rate-limits datacenter exits. Their JSON shapes differ: ip / ip_addr / query, country_iso /
+# country_code / country.
+exit_ip_services() {
+	printf '%s\n' "https://ifconfig.co/json" "https://ipinfo.io/json" "https://api.ip.sb/geoip" "https://api.ipify.org?format=json"
+}
+# exit_ip_lookup <local proxy port> -> "<ip> <country>" (country: two upper-case letters or empty);
+# exit 1 when no service gave an address. ONE rule of "what is an address" for exitip.sh and rpcd
+# conntest: hex digits, "." and ":" only, with a "." or ":" (an error page or a word like "cafe" is
+# not one). Through the tunnel only (socks5h: the name lookup too).
+exit_ip_lookup() {
+	local url j ip co
+	for url in $(exit_ip_services); do
+		j=$(curl -s -m 7 --proxy "socks5h://127.0.0.1:$1" "$url" 2>/dev/null)
+		[ -n "$j" ] || continue
+		ip=$(printf '%s' "$j" | jq -r '(.ip // .ip_addr // .query // "") | tostring' 2>/dev/null)
+		case "$ip" in (*[!0-9a-fA-F:.]*|'') continue ;; esac
+		case "$ip" in (*[.:]*) ;; (*) continue ;; esac
+		co=$(printf '%s' "$j" | jq -r '(.country_iso // .country_code // .country // "") | tostring | ascii_upcase' 2>/dev/null)
+		case "$co" in ([A-Z][A-Z]) ;; (*) co="" ;; esac
+		printf '%s %s\n' "$ip" "$co"
+		return 0
+	done
+	return 1
+}
+
 # THE single source of truth for "is a node good": the user-configured services the VPN
 # must actually make work THROUGH a node (often the blocked ones). Emits one normalised
 # probe URL per line — a bare host becomes http://<host>/generate_204 (tiny response, just
@@ -258,14 +348,181 @@ check_probe_urls() {
 	done
 }
 
-# subscription_interval like "6h" / "30m" / "900s" -> seconds
-interval_seconds() {
-	local v
-	v=$(uci -q get vpnpool.main.subscription_interval); [ -n "$v" ] || v=6h
-	case "$v" in
-		*h) echo $(( ${v%h} * 3600 )) ;;
-		*m) echo $(( ${v%m} * 60 )) ;;
-		*s) echo "${v%s}" ;;
-		*)  echo "$v" ;;
+# ---- THE "is it alive" criterion (one definition for every check) ----
+# A probe of a service counts as REACHABLE iff an HTTP response arrived at all: any status
+# code (200/204/301/404/5xx) proves the request went through the node and back; "000"/empty
+# = no connection (blocked / over-quota / dead exit). This is exactly what sing-box itself
+# measures for the urltest group and for the clash delay API (both record a delay for ANY
+# response), so the curl-based probes judge a node the same way the tunnel does.
+# Users: generator.uc (urltest url = first service, same normalisation), nodecheck.sh
+# (clash delay per node, ALL services), the daemon's watchdog / tunnel_healthy
+# (probe_services ... any) and rpcd ping (clash delay, first service).
+svc_code_alive() { case "$1" in [1-5][0-9][0-9]) return 0 ;; *) return 1 ;; esac; }
+clash_delay_alive() { case "$1" in *'"delay"'*) return 0 ;; *) return 1 ;; esac; }
+
+# The URL the urltest group (active pick + failover) probes: the FIRST configured service.
+primary_probe_url() { check_probe_urls | head -n1; }
+
+# probe_services <curl --proxy URL> <all|any> — probe every check_probe_urls entry through
+# the proxy with the criterion above. all: every service must answer; any: one is enough.
+probe_services() {
+	local px="$1" mode="${2:-any}" u code n=0 okn=0
+	for u in $(check_probe_urls); do
+		n=$((n + 1))
+		code=$(curl -s -o /dev/null -m6 --proxy "$px" -w '%{http_code}' "$u" 2>/dev/null)
+		if svc_code_alive "$code"; then
+			okn=$((okn + 1)); [ "$mode" = any ] && return 0
+		else
+			[ "$mode" = all ] && return 1
+		fi
+	done
+	[ "$n" -gt 0 ] && [ "$okn" -eq "$n" ]
+}
+
+# Is the router's own uplink alive (DIRECT, not through the tunnel)? A dead node can only be
+# told from a dead WAN by this: every node/tunnel verdict is void while WAN is down.
+wan_alive() {
+	local c u
+	for u in http://cp.cloudflare.com/generate_204 http://connectivitycheck.gstatic.com/generate_204; do
+		c=$(curl -s -o /dev/null -m6 -w '%{http_code}' "$u" 2>/dev/null)
+		[ "$c" = 204 ] && return 0
+	done
+	return 1
+}
+
+# ---- tag safety net for the generated config ----
+# parser.uc owns the names (RESERVED_TAGS + unique suffixes), so a repeat should never reach
+# here. If one does anyway (a new generator outbound, a source bypassing the parser), sing-box
+# check says "duplicate outbound/endpoint tag: X" WITHOUT an index and the pool would freeze on
+# the previous config forever. config_tag_guard <config.json> rewrites the file in place:
+#   - a NODE whose tag belongs to one of the generator's own outbounds -> dropped;
+#   - a NODE repeating an earlier node's tag -> dropped (the first one stays);
+#   - group member lists de-duplicated;
+#   - two of the generator's OWN outbounds with one tag -> rc 1 (nothing a node drop can fix).
+# Sets TAG_GUARD_DROPPED (count), logs the dropped names. The file is untouched when clean.
+NODE_TYPES='["vless","vmess","trojan","shadowsocks","shadowtls","hysteria","hysteria2","tuic","wireguard","awg","socks","http","anytls"]'
+TAG_GUARD_DROPPED=0
+TAG_GUARD_JSON=""
+config_tag_guard() {
+	local out names
+	TAG_GUARD_DROPPED=0; TAG_GUARD_JSON=""
+	out=$(jq -c --argjson nt "$NODE_TYPES" '
+		def isnode: ((.type) as $y | $nt | index($y)) != null;
+		([.outbounds[]? | select(isnode | not) | .tag]) as $own
+		| if ($own | length) != ($own | unique | length) then error("own outbounds repeat a tag") else . end
+		| reduce (((.outbounds // [])[] | {a:"outbounds", v:.}),
+		          ((.endpoints // [])[] | {a:"endpoints", v:.})) as $e
+		    ({seen:{}, outbounds:[], endpoints:[], dropped:[]};
+		     if ($e.v | isnode) and ((($own | index($e.v.tag)) != null) or .seen[$e.v.tag])
+		     then .dropped += [$e.v.tag]
+		     else .seen[$e.v.tag] = true | .[$e.a] += [$e.v] end) as $r
+		| {dropped: $r.dropped,
+		   cfg: (.outbounds = ($r.outbounds | map(
+		           if (.type=="urltest" or .type=="selector") and (.outbounds|type=="array")
+		           then .outbounds |= reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end)
+		           else . end))
+		        | if has("endpoints") then .endpoints = $r.endpoints else . end)}' "$1" 2>/dev/null) || return 1
+	TAG_GUARD_DROPPED=$(printf '%s' "$out" | jq '.dropped | length')
+	[ "${TAG_GUARD_DROPPED:-0}" -gt 0 ] || { TAG_GUARD_DROPPED=0; return 0; }
+	TAG_GUARD_JSON=$(printf '%s' "$out" | jq -c '.dropped')   # for build_status.json
+	names=$(printf '%s' "$out" | jq -r '.dropped | join(", ")')
+	printf '%s' "$out" | jq '.cfg' > "$1.tg" && mv -f "$1.tg" "$1" || { rm -f "$1.tg"; return 1; }
+	log "build: dropped node(s) with a repeated name before check: $names"
+	return 0
+}
+
+# ---- per-node tests (speedtest.sh, unlock.sh) ----
+# They point the dedicated 'vpnpool-test' selector (generator.uc) at the node under test
+# and send their requests through the node-test-in inbound (uci node_test_port, 1606) —
+# never through the LAN's 'proxy' selector. One test at a time (shared selector): a mkdir
+# lock, freed at once if its owner died.
+NODE_TEST_LOCK="$SB_DATA/.nodetest.lock"
+node_test_lock() {   # waits up to ~60 s
+	local i=0 p now mt
+	mkdir -p "$SB_DATA"
+	while ! mkdir "$NODE_TEST_LOCK" 2>/dev/null; do
+		p=$(cat "$NODE_TEST_LOCK/pid" 2>/dev/null)
+		if [ -n "$p" ]; then
+			kill -0 "$p" 2>/dev/null || { rm -rf "$NODE_TEST_LOCK"; continue; }
+		else
+			now=$(date +%s); mt=$(date -r "$NODE_TEST_LOCK" +%s 2>/dev/null || echo "$now")
+			[ $(( now - mt )) -ge 120 ] && { rm -rf "$NODE_TEST_LOCK"; continue; }
+		fi
+		i=$((i + 1)); [ "$i" -ge 60 ] && return 1
+		sleep 1
+	done
+	echo $$ > "$NODE_TEST_LOCK/pid"
+}
+node_test_unlock() { rm -rf "$NODE_TEST_LOCK"; }
+node_test_select() {   # $1=tag -> 0 only if sing-box switched the test selector (HTTP 204)
+	local c
+	c=$(curl -s -m5 -o /dev/null -w '%{http_code}' -X PUT "http://$CLASH_API/proxies/vpnpool-test" \
+		--data "$(jq -nc --arg n "$1" '{name:$n}')" 2>/dev/null)
+	[ "$c" = 204 ]
+}
+
+# ---- routing fail-safe / kill-switch policy (pure: decides, never acts) ----
+# route_policy <killswitch 0|1> <tunnel healthy 0|1> <paused by the user 0|1> -> up|down
+#   paused (Telegram /off)  -> down: the user explicitly switched routing off. The kill-switch
+#                              protects against FAILURES, not against the user's own explicit
+#                              "turn the VPN off" — the same holds for LuCI "off" and the
+#                              schedule's "off" (enabled=0, the daemon stops and removes the
+#                              routes). INTEGRATOR'S ASSUMPTION (14.10.2026), not an owner's
+#                              decision — to be confirmed by the owner.
+#   killswitch=1            -> up on every failure (fail-closed: a dead tunnel / failed build /
+#                              restart blocks the LAN, never leaks)
+#   killswitch=0            -> up only while the tunnel works; a dead tunnel -> down, so the
+#                              LAN falls back to DIRECT instead of a black hole (fail-safe)
+route_policy() {
+	[ "$3" = 1 ] && { echo down; return 0; }
+	[ "$1" = 1 ] && { echo up; return 0; }
+	if [ "$2" = 1 ]; then echo up; else echo down; fi
+}
+# Telegram /off sets this flag (RAM: a reboot resumes routing); the daemon applies it.
+PAUSE_FLAG="$SB_DATA/.routing_paused"
+
+# ---- subscription refresh interval ----
+INTERVAL_MIN=600   # never re-download a subscription more often than every 10 min
+# parse_interval "6h" / "30m" / "900s" / "900" -> seconds on stdout; rc 1 if malformed
+parse_interval() {
+	local n u
+	case "$1" in ''|*[!0-9hms]*) return 1 ;; esac
+	case "$1" in
+		*h) n=${1%h}; u=3600 ;;
+		*m) n=${1%m}; u=60 ;;
+		*s) n=${1%s}; u=1 ;;
+		*)  n=$1; u=1 ;;
 	esac
+	case "$n" in ''|*[!0-9]*) return 1 ;; esac
+	n=$(printf '%s' "$n" | sed 's/^0*//'); [ -n "$n" ] || n=0   # "08" is not octal here
+	echo $(( n * u ))
+}
+# Signature of the configured subscription set (the enabled URLs): a change (a subscription
+# added, edited or switched on) makes a fetch due at once regardless of the time throttle.
+sources_sig() {
+	ucode "$MODEL" subs 2>/dev/null | awk -F'\t' '$2 == 1 {print $4}' | md5sum | cut -c1-12
+}
+FETCH_STAMP="$SB_DATA/.last_fetch"   # "<epoch> <sources_sig>", written by fetch.sh
+# subscription ids to fetch on the next reload, one per line (rpcd sub_refresh queues + USR1;
+# vpnpoold do_reload takes them: fetch.sh --only <ids>)
+FETCH_ONLY="$SB_DATA/.fetch_only"
+# fetch_due -> 0 when the subscriptions should be downloaded now: never fetched since boot,
+# the subscription set changed, no fetched files, or the last attempt is >= INTERVAL_MIN old.
+fetch_due() {
+	local t s now
+	[ -f "$FETCH_STAMP" ] || return 0
+	read -r t s < "$FETCH_STAMP" 2>/dev/null
+	case "$t" in ''|*[!0-9]*) return 0 ;; esac
+	[ "$s" = "$(sources_sig)" ] || return 0
+	ls "$SB_DATA/sources/"*.raw >/dev/null 2>&1 || return 0
+	now=$(date +%s)
+	[ $(( now - t )) -ge "$INTERVAL_MIN" ]
+}
+# subscription_interval -> seconds; malformed -> 6h, below INTERVAL_MIN -> INTERVAL_MIN
+interval_seconds() {
+	local v s
+	v=$(uci -q get vpnpool.main.subscription_interval); [ -n "$v" ] || v=6h
+	s=$(parse_interval "$v") || s=21600
+	[ "$s" -ge "$INTERVAL_MIN" ] || s=$INTERVAL_MIN
+	echo "$s"
 }

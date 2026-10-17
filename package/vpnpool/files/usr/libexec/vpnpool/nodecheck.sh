@@ -11,7 +11,7 @@
 # the active selector) against the user-configured services (check_probe_urls in lib.sh)
 # and keeps a node only if it reaches EVERY one of them. The SAME service set drives the
 # generator's urltest "url" (active pick + failover) and the watchdog, so the whole stack
-# agrees on what "working" means. Failing tags go to .dead_tags.json, which generator.uc
+# agrees on what "working" means. Failing nodes (their IDS) go to .dead_ids.json, which generator.uc
 # drops from the auto/urltest pool (they stay MANUALLY selectable). A node recovers the
 # moment it passes again. On a change of the dead set we signal the daemon (USR1) to
 # rebuild so the pool updates.
@@ -19,12 +19,17 @@
 # Safety mirrors the watchdog's hard-won tuning: a node must fail STRIKES cycles in
 # a row (not one flap) before it is dropped, and the pool is never emptied.
 #
-# Env: NODECHECK_DRYRUN=1 -> compute + write .dead_tags.json but DON'T signal a
+# Every store here is keyed by the node ID (ROADMAP 2.2): the dead set, the strike counter, the
+# delay map and the user's force-keep list (keep_auto); the tag is only the name the clash API
+# knows the node by in this build.
+#
+# Env: NODECHECK_DRYRUN=1 -> compute + write .dead_ids.json but DON'T signal a
 # rebuild (used to validate the discriminator on a live router without bouncing it).
 . /usr/libexec/vpnpool/lib.sh 2>/dev/null
 CL=$(uci -q get vpnpool.main.clash_api); [ -n "$CL" ] || CL=127.0.0.1:9091
 N=/tmp/vpnpool/nodes.json
-DEAD=/tmp/vpnpool/.dead_tags.json
+DEAD=/tmp/vpnpool/.dead_ids.json
+rm -f /tmp/vpnpool/.dead_tags.json   # 1.x: the dead set by tag
 STRK=/tmp/vpnpool/.deadstrikes
 [ -f "$N" ] || exit 0
 mkdir -p /tmp/vpnpool
@@ -60,6 +65,14 @@ STRIKES=$(uci -q get vpnpool.main.dead_filter_strikes); case "$STRIKES" in (''|*
 TRIES=$(uci -q get vpnpool.main.dead_filter_tries); case "$TRIES" in (''|*[!0-9]*) TRIES=3 ;; esac
 [ "${TRIES:-0}" -ge 1 ] || TRIES=3
 
+# A node can only be judged while the router's own uplink works: with WAN down EVERY node
+# fails every probe, and counting that would strike the whole pool. No verdicts this
+# cycle — the strikes stay as they are.
+if ! wan_alive; then
+	log "nodecheck: WAN is down — skipping this sweep (no node is judged)"
+	exit 0
+fi
+
 TAB=$(printf '\t')
 [ -f "$STRK" ] || : > "$STRK"
 tmpd=/tmp/vpnpool/.nc; rm -rf "$tmpd"; mkdir -p "$tmpd"
@@ -73,8 +86,7 @@ DELAYMAP=/tmp/vpnpool/.nodedelay.json
 
 # Force-kept nodes (dashboard "Вернуть в авто" -> uci list keep_auto): the user's manual
 # override of this filter. Skip them entirely — never probe, strike or flag — so a node the
-# user pulled back can't re-enter the dead set. Tags can contain spaces, so read the list
-# with config_list_foreach (a uci-get + tr split would shred them).
+# user pulled back can't re-enter the dead set. The list holds node ids.
 KEEP="$tmpd/keep"; : > "$KEEP"
 # Read keep_auto in a SUBSHELL. /lib/functions.sh defines N as a newline char, which
 # would clobber OUR $N (the nodes.json path) — sourcing it inline once broke the probe
@@ -88,57 +100,75 @@ KEEP="$tmpd/keep"; : > "$KEEP"
 	config_list_foreach main keep_auto __kp_add 2>/dev/null
 )
 
-# Pre-encode the probe URLs ONCE into positional params (no jq per probe).
+# Pre-encode the probe URLs ONCE into positional params (no jq per probe), each paired with its
+# host ("<encoded url>|<host>": an encoded URL has no "|") - the host names the service a node
+# failed in the strike file below.
 set --
-for u in $URLS; do set -- "$@" "$(jq -rn --arg s "$u" '$s|@uri')"; done
+for u in $URLS; do
+	h=${u#*://}; h=${h%%[/?#]*}
+	set -- "$@" "$(jq -rn --arg s "$u" '$s|@uri')|$h"
+done
+# when this sweep judged the nodes (one clock read per sweep, not per node)
+SWEEP_AT=$(date +%s)
 
 # Probe SEQUENTIALLY. Running 7 nodes x 4 URLs in PARALLEL spawned ~100 procs and
 # saturated the clash API on a 16 MB router so EVERY probe timed out and every node
 # was falsely flagged dead (2026-06-12). One-at-a-time is plenty fast (each delay is
 # ~0.5 s) and leaves the tiny router responsive. Substring-match the success JSON
 # ({"delay":N}) instead of spawning jq per probe.
-jq -r '.[].tag' "$N" 2>/dev/null | while IFS= read -r t; do
-	[ -n "$t" ] || continue
-	grep -Fxq "$t" "$KEEP" 2>/dev/null && continue   # user force-kept -> exempt from filter
+jq -r '.[] | select(.id != null) | "\(.id)\t\(.tag)"' "$N" 2>/dev/null | while IFS="$TAB" read -r id t; do
+	[ -n "$id" ] && [ -n "$t" ] || continue
+	grep -Fxq "$id" "$KEEP" 2>/dev/null && continue   # user force-kept -> exempt from filter
 	enc=$(jq -rn --arg s "$t" '$s|@uri')
 	pass=0
 	lastdelay=
-	for eu in "$@"; do
+	failed=
+	for p in "$@"; do
+		eu=${p%%|*}
+		ok=0
 		# retry up to TRIES times; a single success = service reachable (break early)
 		a=0
 		while [ "$a" -lt "$TRIES" ]; do
 			r=$(curl -s -m 8 "http://$CL/proxies/$enc/delay?url=$eu&timeout=5000" 2>/dev/null)
-			case "$r" in *'"delay"'*)
+			# THE node criterion — the shared lib.sh function (a shell function, no fork)
+			if clash_delay_alive "$r"; then
 				pass=$((pass + 1))
 				# extract the numeric delay from {"delay":N...} (no jq per probe)
 				d=${r#*\"delay\":}; d=${d%%[!0-9]*}; [ -n "$d" ] && lastdelay=$d
-				break ;;
-			esac
+				ok=1
+				break
+			fi
 			a=$((a + 1))
 		done
+		[ "$ok" = 1 ] || failed="${failed:+$failed,}${p#*|}"
 	done
 	# record the measured delay for ANY node that answered (even if it didn't pass every
 	# service) so the dashboard has a real ping to show for a reachable-but-flaky node
-	[ -n "$lastdelay" ] && printf '%s%s%s\n' "$t" "$TAB" "$lastdelay" >> "$ndelayf"
-	prev=$(awk -F"$TAB" -v k="$t" '$1==k{print $2; exit}' "$STRK" 2>/dev/null); case "$prev" in (''|*[!0-9]*) prev=0 ;; esac
+	[ -n "$lastdelay" ] && printf '%s%s%s\n' "$id" "$TAB" "$lastdelay" >> "$ndelayf"
+	prev=$(awk -F"$TAB" -v k="$id" '$1==k{print $2; exit}' "$STRK" 2>/dev/null); case "$prev" in (''|*[!0-9]*) prev=0 ;; esac
 	# strict: a node must reach EVERY configured service to count as healthy this cycle
 	if [ "$pass" -ge "$NURLS" ]; then cur=0; else cur=$((prev + 1)); fi
-	printf '%s%s%s\n' "$t" "$TAB" "$cur" >> "$newstrk"
-	[ "$cur" -ge "$STRIKES" ] && printf '%s\n' "$t" >> "$deadlist"
+	# id <TAB> failed sweeps in a row <TAB> when this sweep ran <TAB> the hosts it did not reach
+	# (comma-separated, empty when it passed): status.uc shows "does not open X: N checks in a row,
+	# M min ago" from it; the readers of the first two columns (prev above, api.uc drop_marks) stay
+	printf '%s%s%s%s%s%s%s\n' "$id" "$TAB" "$cur" "$TAB" "$SWEEP_AT" "$TAB" "$failed" >> "$newstrk"
+	[ "$cur" -ge "$STRIKES" ] && printf '%s\n' "$id" >> "$deadlist"
 done
-mv "$newstrk" "$STRK"
+# atomic replacements (tmp + mv): status.sh / generator.uc / rpcd may read these any time
+mv -f "$newstrk" "$STRK"
 
 new=$(jq -R . "$deadlist" 2>/dev/null | jq -cs 'map(select(length>0))' 2>/dev/null); [ -n "$new" ] || new='[]'
 old=$(cat "$DEAD" 2>/dev/null); [ -n "$old" ] || old='[]'
-printf '%s\n' "$new" > "$DEAD"
+printf '%s\n' "$new" | write_atomic "$DEAD"
 
-# Publish tag->delay map for the dashboard ping fallback (built once from the accumulated
-# tab-separated file; tags can contain spaces/emoji so split on the literal TAB only).
+# Publish the id->delay map for the dashboard ping fallback (built once from the accumulated
+# tab-separated file).
 if [ -s "$ndelayf" ]; then
 	jq -Rn --arg tab "$TAB" '[inputs | split($tab) | select(length==2) | {(.[0]): (.[1]|tonumber?)}] | add // {}' \
-		< "$ndelayf" > "$DELAYMAP" 2>/dev/null || echo '{}' > "$DELAYMAP"
+		< "$ndelayf" 2>/dev/null | write_atomic "$DELAYMAP"
+	jq -e 'type=="object"' "$DELAYMAP" >/dev/null 2>&1 || echo '{}' | write_atomic "$DELAYMAP"
 else
-	echo '{}' > "$DELAYMAP"
+	echo '{}' | write_atomic "$DELAYMAP"
 fi
 rm -rf "$tmpd"
 

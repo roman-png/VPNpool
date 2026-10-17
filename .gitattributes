@@ -21,3 +21,7 @@ vpnpoold    text eol=lf
 *.db        binary
 *.png       binary
 *.jpg       binary
+
+# Test vectors whose exact bytes matter (one is deliberately CRLF-wrapped) — never normalise
+stand/tests/fixtures/awg/vec/* -text
+stand/tests/fixtures/awg/dec/* -text

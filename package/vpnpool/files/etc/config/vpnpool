@@ -1,15 +1,17 @@
 # vpnpool - control-plane over sing-box (analog of v2RayTun / Happ)
 # Coexists with podkop (separate sing-box instance). Editable via uci / LuCI.
-# NOTE: stage 1 skeleton - the daemon does not route any traffic yet.
 
 config vpnpool 'main'
+	# Data model version (2 = vpnpool 2.0: subscriptions are their own sections, every node
+	# store keys on the node ID). A 1.x config has none: migrate.sh moves it to 2 at install.
+	option schema '2'
 	option enabled '0'
 	option mode 'selective'
-	option subscription_url ''
-	# Extra FULL subscriptions, bulk-merged into the pool like the primary one
-	# (quota/expiry are read only from the primary). Managed via the UI.
-	# list extra_sub 'https://...'
-	option subscription_ua 'v2rayNG/1.8.5'
+	# Subscriptions: one 'config subscription' section each (below), all equal — each with its
+	# own expiry, quota and "updated". Your own nodes: list manual_node (links); AmneziaWG /
+	# WireGuard nodes are files /etc/vpnpool/awg/<id>.conf.
+	# list manual_node 'vless://...'
+	# Subscription refresh period (e.g. 30m, 6h). Minimum 10m: panels rate-limit faster polling.
 	option subscription_interval '6h'
 	# Fallback liveness URL for sing-box urltest when check_services is empty.
 	option health_url 'http://cp.cloudflare.com/generate_204'
@@ -24,25 +26,31 @@ config vpnpool 'main'
 	option failover_interval '60'
 	option failover_tolerance '50'
 	option auto_switch '1'
-	# persisted manual node pick (empty = AUTO/urltest); set by the UI "Use" button
-	option selected_node ''
-	# preferred node: soft pin with switch-back (empty = pure auto/urltest)
+	# "Connect": the preferred node (its ID) — a soft pin with failover and switch-back; empty =
+	# the automatic choice ("Back to automatic choice" clears it). Set by the UI.
 	option preferred_node ''
-	# IPv6 policy: block (fail-closed) | off | proxy
+	# The automatic choice uses only the favourite nodes (when at least one is in the pool).
+	option favorites_only '0'
+	# Managed by the UI, by node ID: list hidden (subscription nodes you removed; "Return" brings
+	# them back), list auto_exclude (nodes left out of the automatic choice; the others take part,
+	# new ones too), list auto_member (1.x: only these take part; empty = all),
+	# list keep_auto (kept in the automatic choice although the service check fails them).
+	# Favourites live in /etc/vpnpool/favorites.map.json (with their links, so they outlive
+	# their subscription).
+	# IPv6 policy: block (fail-closed: LAN IPv6 to the internet is rejected) | off
 	option ipv6 'block'
-	# Kill-switch: fail-closed for IPv4 in full-tunnel (exclude) mode (opt-in)
+	# Kill-switch (opt-in): routing is NEVER taken down when the tunnel dies (fail-closed:
+	# the LAN is blocked, not leaked); in full-tunnel (exclude) mode every LAN port is
+	# marked. Off: a dead tunnel takes routing down and the LAN falls back to direct.
 	option killswitch '0'
 	# DNS-leak guard: route LAN DNS through the tunnel (opt-in)
 	option dns_protect '0'
 	# Per-client routing: all | exclude (listed bypass) | include (only listed).
 	# Clients are IPv4 addresses, e.g.:  list client '192.168.1.50'
 	option client_mode 'all'
-	# Saved nodes: links promoted from the subscription into a persistent store so
-	# they stay usable after the subscription expires (managed via the UI ⭐ button).
-	# list saved_node 'vless://...'
-	# Auto-snapshot: periodically persist the currently-reachable nodes into the
-	# saved store (bounded to auto_snapshot_max) so a working fallback survives
-	# subscription expiry. Opt-in.
+	# Add working nodes to the favourites automatically: periodically keep the currently
+	# reachable nodes (the fastest auto_snapshot_max) as automatic favourites, so a working
+	# fallback survives a subscription's expiry. Your own favourites are never touched. Opt-in.
 	option auto_snapshot '0'
 	option auto_snapshot_max '20'
 	# Scheduler (HH:MM, router local time): off/on the service + refresh subscription
@@ -98,13 +106,26 @@ config vpnpool 'main'
 	option route_priority '106'
 	option tproxy_port '1603'
 	option test_port '1605'
+	# per-node speed / unlock tests (own selector, never the LAN's)
+	option node_test_port '1606'
 	option clash_api '127.0.0.1:9091'
-	option singbox_config '/etc/vpnpool/sing-box.json'
 	option log_level 'warn'
 	# lan_if empty = auto-detect (portable). coexist: auto|on|off — yield traffic
 	# already marked by podkop/other proxies so we don't double-intercept it.
 	option lan_if ''
 	option coexist 'auto'
+	# sing-box binary. Empty / the stock path = automatic: the stock /usr/bin/sing-box, and
+	# the AmneziaWG build /usr/bin/sing-box-awg (engine.sh install) while AmneziaWG nodes exist.
+	# Another path pins that binary for everything.
+	# option singbox_bin '/usr/bin/sing-box'
+
+# A subscription (added by the UI; name = sub_<key>):
+# config subscription 'sub_0123456789ab'
+#	option name 'My provider'
+#	option url 'https://...'
+#	option enabled '1'
+#	option mode 'all'          # all = take every node | pick = only the node IDs listed in pick
+#	list pick '0123456789ab'
 
 # Selective routing lists. Starter set mirrors podkop; fully editable.
 config routing 'routing'
@@ -113,8 +134,3 @@ config routing 'routing'
 	# auto_domain: domains auto-detected as blocked-for-direct by adaptive routing
 	# (always routed through the proxy when adaptive_routing=1). Managed via the UI.
 	# list auto_domain 'example.com'
-
-# Manual VLESS nodes (in addition to the subscription). Example:
-# config node
-#	option link 'vless://...#name'
-#	option enabled '1'

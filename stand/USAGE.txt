@@ -1,0 +1,112 @@
+vpnpool stand — how to run it
+=============================
+(README.md files are git-ignored in this repo, so the instructions live here.)
+
+What it is
+  An OpenWrt rootfs container (default 24.10.4, opkg) with the real uci / ubus / rpcd /
+  ucode / jq userland, stock upstream sing-box 1.12.x overlaid on /usr/bin/sing-box, and the
+  package scripts mounted READ-ONLY at their real paths. Variant: 25.12.4 (apk).
+
+Build (from the repo root; one heavy docker task at a time on the shared machine)
+  docker build -f stand/Dockerfile    -t vpnpool-stand .
+  docker build -f stand/Dockerfile.ui -t vpnpool-stand-ui .
+  OpenWrt 25.12.4:
+    docker build -f stand/Dockerfile --build-arg OPENWRT_VER=25.12.4 -t vpnpool-stand:25.12 .
+    docker build -f stand/Dockerfile.ui --build-arg BASE_IMAGE=vpnpool-stand:25.12 -t vpnpool-stand-ui:25.12 .
+  Another sing-box build:
+    --build-arg SINGBOX_VER=1.12.25            (upstream release tag)
+    --build-arg SINGBOX_URL=https://.../x.tar.gz (any linux-amd64 tarball with a sing-box binary)
+  Or swap the engine at run time without rebuilding (e.g. our AWG build):
+    docker run ... -v /path/to/dir:/opt/engine:ro -e SINGBOX_BIN=/opt/engine/sing-box vpnpool-stand
+
+Automated tests (offline: --network none; every HTTP call hits the curl test double)
+  stand/tests/run-in-docker.sh                      all suites
+  stand/tests/run-in-docker.sh parser build         selected suites
+  T_VERBOSE=1 stand/tests/run-in-docker.sh rpcd     show PASS lines and XFAIL reasons
+  IMAGE=vpnpool-stand:25.12 stand/tests/run-in-docker.sh
+  REPO_DIR=/path/to/a/copy stand/tests/run-in-docker.sh   run against a COPY (negative controls)
+  Result line (the only thing to read):  TESTS: passed=N failed=M xfail=K total=T xpass=X
+  Exit code is non-zero if failed>0 or xpass>0.
+  XFAIL <case> [2.1] = a KNOWN defect, the id is the item of ROADMAP-2.0. When the fix lands the
+  case turns XPASS and fails the run: remove the mark in the same change.
+
+  Suites: parser (links, AWG .conf, vpn:// vectors) | build (poison subscriptions) |
+          rpcd (every ACL method: ok / bad input / no daemon) | sched | adaptive | fetch |
+          status (300 nodes: time + processes per poll) |
+          daemon (fail-safe / kill-switch, reload order, watchdog, pause, reload queue, preferred
+                  pin, nodecheck WAN guard, node tests, route.sh on real nft) |
+          tgbot (/on /off, direct poll fallback, own-token sweep, init.d bot instance) |
+          uitext (UI text guard) |
+          awgdecode (vpn:// decoder, --json and legacy) | engine (engine.sh + install.sh VPNPOOL_AWG) |
+          awg (AmneziaWG in vpnpool: engine choice, deferred nodes, config per engine version
+               checked AND run on both engines, vpn:// -> engine field by field, start guard
+               with the real sing-box, analyze/add/import/delete of AWG nodes)
+  The container gets --cap-add NET_ADMIN (its own network namespace only): the daemon suite
+  applies the real nft table / ip rule there. vpnpoold and tgbot.sh are sourced with
+  VPNPOOLD_NO_MAIN=1 / TGBOT_NO_MAIN=1 (functions only) and driven with stubbed probes.
+
+  The engine suite needs the REAL x86_64 engine release asset (else engine/real-asset-mounted
+  FAILS; CI downloads it in build.yml):
+    gh release download v1.14.3-awg.1 -R roman-png/vpnpool-engine -p vpnpool-engine_1.14.3-awg.1_x86_64 -D <dir>
+    ENGINE_ASSET_DIR=<dir> stand/tests/run-in-docker.sh engine        (mounted at /engine-assets)
+  Same variable for negative-controls.sh (its engine-* controls expect exact red cases).
+  The awg suite needs it too (it copies the asset to /usr/bin/sing-box-awg and removes it).
+  Offline tricks there: rule-sets from a local uhttpd (VPNPOOL_SRS_BASE), a dummy default route
+  so an AWG endpoint can bind UDP. jq in the image has no regex (no test()/gsub()).
+  awgdecode vectors: python -I stand/tests/fixtures/awg/gen-dec.py stand/tests/fixtures/awg/dec
+  (deterministic; made-up keys, documentation IPs).
+
+  Each suite must run at least the number of cases in stand/tests/min-cases.txt (raise it when
+  you add cases). Invariants (rc 0, reply is an object, time bound) are separate plain cases,
+  never inside an xfail case.
+  stand/tests/negative-controls.sh   break/fix a COPY; exactly the expected cases must flip
+                                     (NC_DRY=1: only check that every needle is still there)
+  stand/tests/deploy-tar-test.sh     scripts/deploy.sh archive vs real busybox tar (keeps / intact)
+
+UI text guard
+  stand/tests/ui-text-guard.sh                     check against stand/tests/ui-text-baseline.txt
+                                                   (fails on NEW lines AND on stale baseline lines)
+  stand/tests/ui-text-guard.sh --update-baseline   after FIXING strings (refuses to grow the baseline)
+  Stop-list: stand/tests/ui-text-stoplist.txt
+  Reads _() in views AND shared modules (resources/vpnpool/*.js), DICT of i18n.js, menu titles,
+  ACL descriptions and po/**/*.po (a po string already seen in an earlier source counts once).
+
+Translations (standard LuCI po: package/luci-app-vpnpool/po/templates/vpnpool.pot, po/ru/vpnpool.po)
+  stand/tests/ui-i18n.sh            check: pot = the sources, every msgid translated, same
+                                    %-placeholders, no msgid outside the BMP. "I18N: … failed=0"
+  stand/tests/ui-i18n.sh sync       after adding/changing _() strings: rewrite the pot, merge
+                                    into po/ru (new msgids empty) -> translate them -> check
+  stand/tests/ui-i18n.sh lmo <out>  po/ru -> .lmo (stand/tests/po2lmo.py, port of LuCI's po2lmo)
+  msgids are whitespace-normalized like LuCI's _() does (trim, runs of spaces -> one space).
+  The package luci-i18n-vpnpool-ru is built by luci.mk in the SDK (CI build job).
+
+UI components (vpnpool/common.js + the stand-only page view/vpnpool/_demo.js)
+  stand/tests/ui-components.sh      node: syntax + unit tests of common.js + their negative
+                                    controls; po check + lmo; LuCI stand: page under login,
+                                    module served, ru catalog loaded, menu, ubus paths.
+                                    "UI-COMPONENTS: passed=N failed=0"
+  IMAGE=vpnpool-stand-ui:25.12 stand/tests/ui-components.sh     same on OpenWrt 25.12
+  PORT=18081 KEEP=1 stand/tests/ui-components.sh  leave it running for a browser:
+    http://localhost:18081/cgi-bin/luci/admin/services/vpnpool/_demo (root / vpnpool);
+    window.vpDemo.selfTest() in the console = platform probe; docker rm -f vpnpool-ui-components
+  node stand/tests/ui-common.test.js [--negative]   the unit tests alone (fake DOM that follows
+                                    LuCI's rule "E(tag, attrs, 'string') = innerHTML", so a
+                                    string reaching innerHTML is caught)
+  BACKEND_DIR=<dir> node stand/tests/ui-common.test.js   codes/methods/ACL of another backend:
+                                    <dir>/rpcd, <dir>/api.uc, <dir>/acl.json (e.g. git show
+                                    stage3:<path> > <dir>/<name>); T_CODES=1 prints the codes found
+
+LuCI stand
+  stand/tests/ui-smoke.sh       starts vpnpool-stand-ui on 127.0.0.1:18080, logs in, opens
+                                admin/services/vpnpool, calls vpnpool.status through /ubus, stops.
+  Interactive (from stand/):
+    docker compose --profile ui up -d stand-ui     -> http://localhost:8080/  login root / vpnpool
+    (8080 busy: STAND_UI_PORT=18080 docker compose --profile ui up -d stand-ui)
+    docker compose --profile ui down
+
+Interactive shell (from stand/)
+  docker compose up -d stand
+  docker exec -it vpnpool-stand sh
+    sh /work/bin/stand-build-config.sh             real build.sh on the uci fixture
+    /work/bin/stand-rpcd-call.sh status            rpcd method, direct + via ubus
+  docker compose down                              always stop + remove your containers

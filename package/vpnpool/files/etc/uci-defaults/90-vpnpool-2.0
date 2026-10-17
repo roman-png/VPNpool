@@ -1,0 +1,7 @@
+#!/bin/sh
+# vpnpool 2.0: move a 1.x configuration to the 2.0 data model (subscriptions as sections, node
+# ids in every store). Run by the package's postinst (default_postinst, opkg and apk alike) and
+# at the first boot; removed by it only when this exits 0 — a failed run is tried again at the
+# next boot (and at every service start, see /etc/init.d/vpnpool). Details: migrate.sh.
+[ -x /usr/libexec/vpnpool/migrate.sh ] || exit 0
+/usr/libexec/vpnpool/migrate.sh

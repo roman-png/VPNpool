@@ -26,12 +26,18 @@
 # into /tmp on every boot via a WAN-up hotplug hook. One-liner:
 #   VPNPOOL_RAM_SINGBOX=1 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
 #
-# AmneziaWG nodes: set VPNPOOL_AWG=1 to replace the stock sing-box with the AmneziaWG
-# fork (hoaxisr/amnezia-box, sing-box 1.13.13 + AWG2). Stock sing-box cannot do AmneziaWG.
-# Prebuilt per-arch (aarch64 / mipsel); flash routers get it in /usr/bin/sing-box (held so a
-# feed upgrade can't revert it), RAM routers fetch it into /tmp via the WAN-up hook. NOTE:
-# podkop (if installed) shares /usr/bin/sing-box and will also run on the fork. One-liner:
+# AmneziaWG nodes: set VPNPOOL_AWG=1 to ALSO install the AmneziaWG-capable sing-box build
+# (vpnpool-engine) as a separate file /usr/bin/sing-box-awg. Stock sing-box cannot do
+# AmneziaWG; it stays the standard package (podkop and the package manager keep using it).
+# If an older vpnpool (1.4.x) replaced /usr/bin/sing-box with its AmneziaWG fork build, the
+# standard package is put back once the new build is in place (podkop is restarted).
+# Builds: aarch64, armv7 with FPU, mips/mipsel 24kc/34kc/74kc/1004kc, x86_64 - other routers
+# are told so and keep working without AmneziaWG. The download is checked (sha256, version, a
+# test config) before it replaces anything. Small-flash routers (VPNPOOL_RAM_SINGBOX=1) keep
+# it in RAM next to sing-box, only on routers with 256 MB of RAM or more (MemTotal >= 200 MB,
+# VPNPOOL_ENGINE_RAM_MIN_MB). One-liner:
 #   VPNPOOL_AWG=1 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
+# Update it later: VPNPOOL_AWG=update (same one-liner), or /usr/libexec/vpnpool/engine.sh update
 #
 # Env overrides:
 #   VPNPOOL_VERSION=v1.5.0   install a specific release tag instead of latest
@@ -39,7 +45,8 @@
 #   VPNPOOL_PKG_DIR=/tmp/x   install the vpnpool + luci-app-vpnpool files already
 #                            copied to this directory (no GitHub download at all)
 #   VPNPOOL_RAM_SINGBOX=1    16 MB flash mode: sing-box lives in RAM (see above)
-#   VPNPOOL_AWG=1            replace sing-box with the AmneziaWG fork (see above)
+#   VPNPOOL_AWG=1            add the AmneziaWG sing-box build (see above); =update updates it
+#   VPNPOOL_ENGINE_VERSION=x that AmneziaWG build version instead of the pinned one
 set -eu
 
 REPO="roman-png/VPNpool"
@@ -47,10 +54,11 @@ TAG="${VPNPOOL_VERSION:-latest}"
 PKG_DIR="${VPNPOOL_PKG_DIR:-}"
 RAM_SINGBOX="${VPNPOOL_RAM_SINGBOX:-0}"
 AWG="${VPNPOOL_AWG:-0}"
-# AmneziaWG sing-box fork (prebuilt). Pinned; verified by sha256 from the release.
-AWG_REPO="hoaxisr/amnezia-box"
-AWG_TAG="v1.13.13-awg2.1"
-AWG_URL=""; AWG_SHA=""        # resolved per-arch by awg_resolve()
+case "$AWG" in 0|1|update) ;; *) AWG=1 ;; esac
+# AmneziaWG sing-box build: installed and checked by the package's own helper (pinned
+# version, sha256, version + AWG check, atomic replace) - /usr/libexec/vpnpool/engine.sh
+ENGINE=/usr/libexec/vpnpool/engine.sh
+AWG_DONE=0
 TMP="/tmp/vpnpool-install"
 
 HOOK="/etc/hotplug.d/iface/99-vpnpool-singbox-ram"
@@ -164,44 +172,51 @@ download() {
 	return 0
 }
 
-# --- AmneziaWG fork: resolve the prebuilt binary URL + sha256 for this router's arch ---
-# Sets AWG_URL/AWG_SHA on success; returns 1 (and warns) if no prebuilt fits the arch.
-awg_resolve() {
-	local a asset base sums
-	asset=""
-	for a in $(pm_arches); do
-		case "$a" in
-			aarch64*) asset="sing-box-1.13.13-awg2.1-entware-aarch64"; break ;;
-			mipsel*)  asset="sing-box-1.13.13-awg2.1-entware-mipsel";  break ;;
-		esac
-	done
-	if [ -z "$asset" ]; then
-		say "AWG: no prebuilt fork for this arch ($(pm_arches | tr '\n' ' '))- keeping stock sing-box (no AmneziaWG)"
-		return 1
-	fi
-	base="https://github.com/$AWG_REPO/releases/download/$AWG_TAG"
-	AWG_URL="$base/$asset"
-	AWG_SHA=""
-	sums="$TMP/awg.sums"
-	if download "$base/checksums.txt" "$sums" 2>/dev/null; then
-		AWG_SHA="$(grep -F "$asset" "$sums" 2>/dev/null | awk '{print $1}' | head -n1)"
-	fi
-	[ -n "$AWG_SHA" ] || say "AWG: warning - could not fetch checksum (will install without sha256 verification)"
-	return 0
+# --- AmneziaWG build (engine.sh from the just-installed package) -------------
+# engine.sh prints one JSON line {ok, code, ...}; its code becomes a plain message here.
+awg_explain() {
+	case "$1" in
+		E_ARCH)          echo "there is no AmneziaWG build for this router's processor${2:+ ($2)}" ;;
+		E_RAM_TOTAL)     echo "this router has too little memory to keep the AmneziaWG build in RAM" ;;
+		E_SPACE)         echo "not enough free space for the AmneziaWG build (about 50 MB is needed)" ;;
+		E_MEM)           echo "not enough free memory right now to check the AmneziaWG build" ;;
+		E_DOWNLOAD|E_SHA_UNKNOWN) echo "could not download the AmneziaWG build (check the internet connection and retry)" ;;
+		E_SHA)           echo "the downloaded AmneziaWG build is damaged; nothing was changed, retry later" ;;
+		E_VERSION|E_CHECK) echo "the downloaded AmneziaWG build does not work on this router; nothing was changed" ;;
+		E_NOT_INSTALLED) echo "the AmneziaWG build is not installed yet (use VPNPOOL_AWG=1)" ;;
+		E_BUSY)          echo "the AmneziaWG build is being installed by another run; retry in a minute" ;;
+		E_NO_DOWNLOADER) echo "this router has no download tool (uclient-fetch or wget)" ;;
+		*)               echo "could not install the AmneziaWG build" ;;
+	esac
 }
-
-# Download the AWG fork binary to $1 and verify sha256 (if known). Returns 1 on failure.
-awg_fetch_to() {
-	local dest="$1" got
-	download "$AWG_URL" "$dest" || { say "AWG: download failed"; return 1; }
-	if [ -n "$AWG_SHA" ]; then
-		got="$(sha256sum "$dest" 2>/dev/null | awk '{print $1}')"
-		if [ "$got" != "$AWG_SHA" ]; then
-			say "AWG: sha256 mismatch (want $AWG_SHA got $got) - aborting"; rm -f "$dest"; return 1
+# awg_engine <install|update> [--ram] -> 0 if the build is in place and working
+awg_engine() {
+	[ -f "$ENGINE" ] || { say "AmneziaWG: this vpnpool version cannot install the AmneziaWG build"; return 1; }
+	say "AmneziaWG: installing the AmneziaWG sing-box build (about 45 MB download)..."
+	res="$(sh "$ENGINE" "$@" 2>/dev/null | tail -n1)"
+	if printf '%s' "$res" | grep -q '"ok":true'; then
+		v="$(printf '%s' "$res" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
+		if printf '%s' "$res" | grep -q '"changed":false'; then
+			say "AmneziaWG: build $v is already installed and up to date"
+		else
+			say "AmneziaWG: build $v installed"
 		fi
+		# an older vpnpool had put the old AmneziaWG build in place of the standard sing-box
+		if printf '%s' "$res" | grep -q '"stock_restored":true'; then
+			say "the standard sing-box is back in place of the old AmneziaWG build"
+			printf '%s' "$res" | grep -q '"podkop_restarted":true' && say "podkop was restarted on the standard sing-box"
+		elif printf '%s' "$res" | grep -q '"stock_restored":false'; then
+			say "warning: the old AmneziaWG build still stands in place of the standard sing-box and could not be replaced now."
+			say "         The new AmneziaWG build works anyway. To put the standard sing-box back later, run:"
+			say "         /usr/libexec/vpnpool/engine.sh restore-stock"
+		fi
+		AWG_DONE=1
+		return 0
 	fi
-	chmod +x "$dest"
-	return 0
+	code="$(printf '%s' "$res" | sed -n 's/.*"code":"\([^"]*\)".*/\1/p')"
+	pa="$(printf '%s' "$res" | sed -n 's/.*"pm_arch":"\([^"]*\)".*/\1/p')"
+	say "AmneziaWG: $(awg_explain "$code" "$pa"). vpnpool works without it; AmneziaWG servers wait until it is installed."
+	return 1
 }
 
 say "package manager: $PM (.$EXT packages)"
@@ -215,22 +230,25 @@ if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ ! -f /etc/ssl/certs/ca-bundl
 		say "warning: could not install CA bundle (HTTPS download may fail)"
 fi
 
-# Our package files, per format:
-#   .apk: vpnpool-1.5.0-r1.apk        luci-app-vpnpool-1.5.0-r1.apk
-#   .ipk: vpnpool_1.5.0-r1_all.ipk    luci-app-vpnpool_1.5.0-r1_all.ipk
+# Our package files, per format (+ the Russian translation of the web UI, built by LuCI's
+# luci.mk; its version is the date of the translation, not the app's):
+#   .apk: vpnpool-1.5.0-r1.apk        luci-app-vpnpool-1.5.0-r1.apk      luci-i18n-vpnpool-ru-<v>.apk
+#   .ipk: vpnpool_1.5.0-r1_all.ipk    luci-app-vpnpool_1.5.0-r1_all.ipk  luci-i18n-vpnpool-ru_<v>_all.ipk
+# The translation is always installed with the web UI (it is small): LuCI shows it when its
+# language is Russian, or "auto" with a Russian browser (as the UI's own dictionary did).
 if [ "$PM" = apk ]; then
-	BASE_GLOB="vpnpool-[0-9]*.apk"; LUCI_GLOB="luci-app-vpnpool-[0-9]*.apk"
-	ASSET_RE='/(vpnpool|luci-app-vpnpool)-[0-9][^/]*\.apk$'
+	BASE_GLOB="vpnpool-[0-9]*.apk"; LUCI_GLOB="luci-app-vpnpool-[0-9]*.apk"; I18N_GLOB="luci-i18n-vpnpool-ru-[0-9]*.apk"
+	ASSET_RE='/(vpnpool|luci-app-vpnpool|luci-i18n-vpnpool-ru)-[0-9][^/]*\.apk$'
 else
-	BASE_GLOB="vpnpool_*.ipk"; LUCI_GLOB="luci-app-vpnpool_*.ipk"
-	ASSET_RE='/(vpnpool|luci-app-vpnpool)_[^/]*\.ipk$'
+	BASE_GLOB="vpnpool_*.ipk"; LUCI_GLOB="luci-app-vpnpool_*.ipk"; I18N_GLOB="luci-i18n-vpnpool-ru_*.ipk"
+	ASSET_RE='/(vpnpool|luci-app-vpnpool|luci-i18n-vpnpool-ru)_[^/]*\.ipk$'
 fi
 
 if [ -n "$PKG_DIR" ]; then
 	# --- offline: files already copied to the router ---------------------------
 	[ -d "$PKG_DIR" ] || die "VPNPOOL_PKG_DIR=$PKG_DIR is not a directory"
 	say "using local package files from $PKG_DIR"
-	for f in "$PKG_DIR"/$BASE_GLOB "$PKG_DIR"/$LUCI_GLOB; do
+	for f in "$PKG_DIR"/$BASE_GLOB "$PKG_DIR"/$LUCI_GLOB "$PKG_DIR"/$I18N_GLOB; do
 		[ -f "$f" ] && cp "$f" "$TMP/"
 	done
 else
@@ -275,6 +293,15 @@ fi
 # The conffile /etc/config/vpnpool is kept by both opkg and apk.
 PKG_BASE="$(ls "$TMP"/$BASE_GLOB 2>/dev/null | head -n1)"
 PKG_LUCI="$(ls "$TMP"/$LUCI_GLOB 2>/dev/null | head -n1)"
+PKG_I18N="$(ls "$TMP"/$I18N_GLOB 2>/dev/null | head -n1)"
+[ -n "$PKG_LUCI" ] || PKG_I18N=""   # the translation needs the web UI
+# the Russian translation of the web UI; a failure only leaves the UI in English
+install_i18n() {   # $1 = extra opkg flag (--nodeps in the small-flash flow)
+	[ -n "$PKG_I18N" ] || return 0
+	if [ "$PM" = apk ]; then pm_add_files "$PKG_I18N" >/dev/null 2>&1
+	else opkg install ${1:-} --force-reinstall "$PKG_I18N" >/dev/null 2>&1; fi \
+		|| say "warning: the Russian translation of the web interface was not installed (the interface stays in English)"
+}
 [ -n "$PKG_BASE" ] || die "vpnpool .$EXT package not found"
 
 write_ram_hook() {
@@ -291,29 +318,25 @@ write_ram_hook() {
 		echo '#!/bin/sh'
 		echo "# vpnpool small-flash boot hook ($PM): sing-box lives in RAM, reinstalled on WAN up."
 		echo '[ "$ACTION" = "ifup" -a "$INTERFACE" = "wan" ] && {'
-		if [ -n "$AWG_URL" ]; then
-			# AWG variant: fetch the fork binary (not a package) into RAM. Falls back to the
-			# stock feed sing-box if the fork download/sha fails, so the tunnel still comes up.
-			cat <<EOF
-    logger -t vpnpool "WAN up: fetching AmneziaWG sing-box fork into RAM"
-    mkdir -p /tmp/usr/bin
-    if uclient-fetch -T 30 -qO /tmp/usr/bin/sing-box "$AWG_URL" \\
-       && { [ -z "$AWG_SHA" ] || echo "$AWG_SHA  /tmp/usr/bin/sing-box" | sha256sum -c >/dev/null 2>&1; }; then
-        logger -t vpnpool "AWG sing-box fork in RAM"
-    else
-        logger -t vpnpool "AWG fork fetch failed - falling back to stock sing-box"
-        $PM update
-EOF
-			printf '%s\n' "$SB_RAM" | sed 's/^/        /'
-			echo '    fi'
-		else
-			echo '    logger -t vpnpool "WAN up: installing sing-box into RAM"'
-			echo "    $PM update"
-			printf '%s\n' "$SB_RAM" | sed 's/^/    /'
-		fi
+		echo '    logger -t vpnpool "WAN up: installing sing-box into RAM"'
+		echo "    $PM update"
+		printf '%s\n' "$SB_RAM" | sed 's/^/    /'
 		cat <<'EOF'
     chmod +x /tmp/usr/bin/sing-box 2>/dev/null
     ln -sf /tmp/usr/bin/sing-box /usr/bin/sing-box
+EOF
+		if [ "$AWG" != 0 ]; then
+			# AmneziaWG build into RAM as well, through the same checked pipeline as the
+			# "install now" step below (engine.sh: memory threshold, sha256, version, AWG check,
+			# atomic). The stock sing-box above stays: if this fails, vpnpool simply runs
+			# without its AmneziaWG servers.
+			cat <<EOF
+    ${VPNPOOL_ENGINE_VERSION:+VPNPOOL_ENGINE_VERSION=$VPNPOOL_ENGINE_VERSION }sh $ENGINE install --ram >/tmp/vpnpool-engine.log 2>&1 \\
+        && logger -t vpnpool "AmneziaWG build in RAM" \\
+        || logger -t vpnpool "AmneziaWG build not installed: \$(tail -n1 /tmp/vpnpool-engine.log)"
+EOF
+		fi
+		cat <<'EOF'
     /etc/init.d/vpnpool start
     logger -t vpnpool "sing-box in RAM, vpnpool started"
 }
@@ -325,8 +348,6 @@ EOF
 if [ "$RAM_SINGBOX" = 1 ]; then
 	# === 16 MB flash flow: sing-box lives in RAM, vpnpool stays in flash ========
 	say "small-flash mode: sing-box will live in RAM (/tmp), reinstalled on every boot"
-	# AmneziaWG fork: resolve the per-arch prebuilt up front so the WAN-up hook fetches it.
-	[ "$AWG" = 1 ] && { awg_resolve || AWG=0; }
 
 	say "installing zram-swap (more usable memory for the package manager)..."
 	if pm_add zram-swap >/dev/null 2>&1; then
@@ -358,6 +379,7 @@ if [ "$RAM_SINGBOX" = 1 ]; then
 		opkg install --nodeps --force-reinstall "$PKG_BASE" || die "failed to install vpnpool"
 		[ -n "$PKG_LUCI" ] && { opkg install --nodeps --force-reinstall "$PKG_LUCI" || say "warning: luci-app-vpnpool install failed (CLI still works)"; }
 	fi
+	install_i18n --nodeps
 
 	# Don't autostart at boot — sing-box isn't present until the WAN-up hook runs.
 	/etc/init.d/vpnpool disable >/dev/null 2>&1 || true
@@ -367,24 +389,18 @@ if [ "$RAM_SINGBOX" = 1 ]; then
 
 	say "installing sing-box into RAM now (so it works without a reboot)..."
 	sb_ok=0
-	if [ -n "$AWG_URL" ]; then
-		mkdir -p /tmp/usr/bin
-		if awg_fetch_to /tmp/usr/bin/sing-box; then
-			sb_ok=1
-			say "AmneziaWG sing-box fork installed in RAM."
-		else
-			say "warning: AWG fork fetch failed; falling back to stock sing-box in RAM"
-			eval "$SB_RAM" || sb_ok=0
-		fi
-	else
-		eval "$SB_RAM" || sb_ok=0
-	fi
+	eval "$SB_RAM" || sb_ok=0
 	if [ "$sb_ok" = 1 ]; then
 		chmod +x /tmp/usr/bin/sing-box 2>/dev/null
 		ln -sf /tmp/usr/bin/sing-box /usr/bin/sing-box
 		say "sing-box in RAM: $(/usr/bin/sing-box version 2>/dev/null | head -1)"
 	else
 		say "warning: could not install sing-box into RAM now; it will be installed on the next WAN-up / reboot"
+	fi
+	# AmneziaWG build next to it in RAM; the stock sing-box stays as the fallback
+	if [ "$AWG" != 0 ]; then
+		awg_mode=install; [ "$AWG" = update ] && awg_mode=update
+		awg_engine "$awg_mode" --ram || true
 	fi
 else
 	# === normal flow: sing-box installed into flash from the standard feeds =====
@@ -397,16 +413,12 @@ else
 		pm_add_files "$PKG_BASE" || die "failed to install vpnpool (dependencies missing? run 'opkg update')"
 		[ -n "$PKG_LUCI" ] && { pm_add_files "$PKG_LUCI" || say "warning: luci-app-vpnpool install failed (CLI still works)"; }
 	fi
+	install_i18n
 
-	# AmneziaWG fork: replace the just-installed stock sing-box in flash and hold it so a
-	# feed upgrade can't revert it. podkop (if present) shares this binary and rides along.
-	if [ "$AWG" = 1 ]; then
-		if awg_resolve && awg_fetch_to /usr/bin/sing-box; then
-			pm_hold sing-box || true
-			say "AmneziaWG sing-box fork installed (held): $(/usr/bin/sing-box version 2>/dev/null | head -1)"
-		else
-			say "AWG: keeping stock sing-box (no AmneziaWG support)"
-		fi
+	# AmneziaWG build: a separate file /usr/bin/sing-box-awg; the stock sing-box is untouched.
+	if [ "$AWG" != 0 ]; then
+		awg_mode=install; [ "$AWG" = update ] && awg_mode=update
+		awg_engine "$awg_mode" || true
 	fi
 fi
 
@@ -415,7 +427,7 @@ rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null || true
 /etc/init.d/rpcd reload >/dev/null 2>&1 || true
 
 rm -rf "$TMP"
-[ "$AWG" = 1 ] && [ -n "$AWG_URL" ] && say "AmneziaWG: enabled (fork sing-box). Import an .conf or vpn:// link on the Sources tab."
+[ "$AWG_DONE" = 1 ] && say "AmneziaWG: ready. Add an AmneziaWG .conf or a vpn:// link in vpnpool."
 say "installed: vpnpool $(pm_installed_ver vpnpool)${PKG_LUCI:+, luci-app-vpnpool $(pm_installed_ver luci-app-vpnpool)}"
 if [ "$RAM_SINGBOX" = 1 ]; then
 	say "done (small-flash mode). Open LuCI -> Services -> VPN Pool, set your subscription URL."

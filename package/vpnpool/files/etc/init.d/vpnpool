@@ -1,6 +1,6 @@
 #!/bin/sh /etc/rc.common
-# vpnpool procd service (stage 1 skeleton).
-# Supervises the control-plane daemon. Does NOT touch podkop/zapret/routing yet.
+# vpnpool procd service: the control-plane daemon (vpnpoold — sing-box, routing, refresh)
+# and, optionally, the Telegram control bot as a second instance.
 
 USE_PROCD=1
 START=99
@@ -13,14 +13,20 @@ TGBOT=/usr/libexec/vpnpool/tgbot.sh
 # (reliable stop/restart, no orphaned long-poller, no pidfile races — see the note in
 # vpnpoold). Conditional on telegram_control=1 + token + chat. Kept independent of the
 # main `enabled` toggle so the bot can still receive a remote /on when routing is off.
+# The token/chat/via-proxy SIGNATURE is an instance parameter: when one of them changes,
+# `reload` makes procd restart the bot with the new values (the bot reads them at start).
+# Only a hash is passed — the token itself never appears in procd's instance data.
 start_tgbot_instance() {
-	local ctl tok chat
+	local ctl tok chat via sig
 	config_get_bool ctl main telegram_control 0
 	config_get tok main telegram_token
 	config_get chat main telegram_chat
+	config_get via main telegram_via_proxy 1
 	[ "$ctl" = "1" ] && [ -n "$tok" ] && [ -n "$chat" ] || return 0
+	sig=$(printf '%s|%s|%s' "$tok" "$chat" "$via" | md5sum | cut -c1-12)
 	procd_open_instance tgbot
 	procd_set_param command "$TGBOT"
+	procd_set_param env VPNPOOL_TG_SIG="$sig"
 	procd_set_param respawn 3600 5 0
 	procd_set_param stdout 1
 	procd_set_param stderr 1
@@ -28,10 +34,22 @@ start_tgbot_instance() {
 }
 
 start_service() {
+	# A 1.x configuration (sysupgrade kept it, the package's uci-defaults run failed, ...) is moved
+	# to the 2.0 data model before anything reads it; on schema 2 this returns at once.
+	[ -x /usr/libexec/vpnpool/migrate.sh ] && /usr/libexec/vpnpool/migrate.sh >/dev/null 2>&1
 	config_load vpnpool
 
-	local enabled
+	local enabled schema
 	config_get_bool enabled main enabled 0
+	config_get schema main schema
+	# The migration failed (status shows migration.state "failed" and the reason): the 2.0 daemon
+	# can't read a 1.x config (no subscriptions -> an empty pool), so it is NOT started — no
+	# routing is installed, the LAN goes direct (with the kill-switch on too: nothing runs that
+	# could block it). The next start tries the migration again; the bot still starts.
+	if [ "$enabled" = "1" ] && [ "$schema" != 2 ]; then
+		logger -t vpnpool "the 1.x configuration could not be moved to 2.0 (see /etc/vpnpool/migrate.log): daemon not started"
+		enabled=0
+	fi
 	if [ "$enabled" = "1" ]; then
 		procd_open_instance vpnpoold
 		procd_set_param command "$PROG"
@@ -39,6 +57,9 @@ start_service() {
 		procd_set_param stdout 1
 		procd_set_param stderr 1
 		procd_set_param pidfile /var/run/vpnpool.pid
+		# TERM handler: routes down first, then sing-box (up to ~13 s) — more than procd's
+		# default 5 s before SIGKILL
+		procd_set_param term_timeout 15
 		procd_close_instance
 	else
 		logger -t vpnpool "disabled in /etc/config/vpnpool (option enabled '0'); daemon not starting"
@@ -47,17 +68,29 @@ start_service() {
 	start_tgbot_instance
 }
 
-# On a config-change reload procd re-runs start_service and diffs instances: the daemon
-# instance is left running if its params are unchanged, while the tgbot instance is
-# started/stopped to match telegram_control. So toggling the bot in the UI never bounces
-# the tunnel. rpcd's set_option calls `/etc/init.d/vpnpool reload` for telegram_control.
-reload_service() {
-	start_service
+# `reload` (no reload_service here) = rc.common's start = procd "service set": procd diffs the
+# instances — an unchanged daemon keeps running, an instance no longer listed is stopped
+# (enabled=0 -> the daemon gets TERM, the bot stays), a changed one (bot signature) is
+# restarted. NOTE: a reload_service that called start_service directly sent NOTHING to procd
+# (no procd_open_service / close_service around it) — 1.x reloads were silent no-ops.
+# Users: /usr/libexec/vpnpool/power.sh on|off (LuCI switch, schedule, Telegram /on), rpcd
+# set_option (telegram_control / token / chat / via_proxy).
+
+# restart = rc.common's own (stop, then start) plus a marker for the daemon: a restart is not
+# an "off", so with the kill-switch on the daemon keeps the block while it is replaced
+# (INTEGRATOR'S ASSUMPTION, 15.10.2026). A plain stop leaves no marker and removes routing.
+restart() {
+	mkdir -p /var/run && : > /var/run/vpnpool.restarting
+	trap '' TERM
+	stop "$@"
+	trap - TERM
+	start "$@"
 }
 
 stop_service() {
 	# Routing/sing-box teardown is done by vpnpoold's own TERM handler; procd stops both
-	# instances (daemon + tgbot) on stop/restart.
+	# instances (daemon + tgbot) on stop/restart. The user's "off" (LuCI, schedule) does NOT
+	# use stop — it sets enabled=0 + reload, so the Telegram bot keeps running for /on.
 	return 0
 }
 

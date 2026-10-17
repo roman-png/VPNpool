@@ -1,6 +1,6 @@
 name: Build .ipk + .apk
 
-# Builds the packages (vpnpool + luci-app-vpnpool) with the official OpenWrt SDK for
+# Builds the packages (vpnpool + luci-app-vpnpool + luci-i18n-vpnpool-ru) with the official OpenWrt SDK for
 # both package-manager generations:
 #   - OpenWrt 24.10 SDK -> .ipk (opkg, OpenWrt <= 24.10)
 #   - OpenWrt 25.12 SDK -> .apk (apk,  OpenWrt 25.12+)
@@ -12,6 +12,8 @@ on:
     branches: [ main ]
     paths:
       - 'package/**'
+      - 'stand/**'
+      - 'scripts/deploy.sh'
       - '.github/workflows/build.yml'
   pull_request:
   release:
@@ -22,8 +24,121 @@ permissions:
   contents: write
 
 jobs:
+  # Stand tests (stand/tests): the package scripts run on a real OpenWrt rootfs (uci/ubus/
+  # rpcd/ucode/jq + stock sing-box) in an offline container. Packages are built only if the
+  # runner's summary line reports failed=0 and xpass=0 (an xfail that started passing must
+  # have its mark removed in the same change).
+  tests:
+    name: stand tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40   # full run ~7 min; a hang outside the runner's own time bounds must not hold the runner 6 h
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # package shell scripts are run by path: a lost exec bit in git silently skips them on Linux
+      # (the Windows stand mount can't see it)
+      - name: Exec bits of the package scripts
+        run: |
+          set -o pipefail
+          sh stand/tests/exec-bits.sh 2>&1 | tee exec-bits.log
+          grep -E '^EXEC-BITS: checked=[1-9][0-9]* failed=0$' exec-bits.log
+
+      - name: Build stand image (OpenWrt 24.10.4 + sing-box 1.12.x)
+        run: docker build -f stand/Dockerfile -t vpnpool-stand .
+
+      # Web UI: unit tests of the shared module (with their negative controls) and the
+      # translation check (pot = the sources, every msgid translated, same placeholders).
+      - name: UI unit tests + translation check
+        run: |
+          set -o pipefail
+          node stand/tests/ui-common.test.js 2>&1 | tee ui-unit.log
+          grep -E '^UNIT: passed=[1-9][0-9]* failed=0$' ui-unit.log
+          node stand/tests/ui-common.test.js --negative 2>&1 | tee ui-unit-neg.log
+          grep -E '^NEG: passed=[1-9][0-9]* failed=0( skipped=[0-9]+)?$' ui-unit-neg.log
+          node stand/tests/ui-pages.test.js 2>&1 | tee ui-pages.log
+          grep -E '^PAGES: passed=[1-9][0-9]* failed=0 checked=[1-9][0-9]*$' ui-pages.log
+          node stand/tests/ui-pages.test.js --negative 2>&1 | tee ui-pages-neg.log
+          grep -E '^PAGES-NEG: passed=[1-9][0-9]* failed=0$' ui-pages-neg.log
+          node stand/tests/ui-nodes.test.js 2>&1 | tee ui-nodes.log
+          grep -E '^NODES: passed=[1-9][0-9]* failed=0 checked=[1-9][0-9]*$' ui-nodes.log
+          node stand/tests/ui-nodes.test.js --negative 2>&1 | tee ui-nodes-neg.log
+          grep -E '^NODES-NEG: passed=[1-9][0-9]* failed=0$' ui-nodes-neg.log
+          node stand/tests/ui-overview.test.js 2>&1 | tee ui-overview.log
+          grep -E '^OVERVIEW: passed=[1-9][0-9]* failed=0 checked=[1-9][0-9]*$' ui-overview.log
+          node stand/tests/ui-overview.test.js --negative 2>&1 | tee ui-overview-neg.log
+          grep -E '^OVERVIEW-NEG: passed=[1-9][0-9]* failed=0$' ui-overview-neg.log
+          node stand/tests/ui-diag.test.js 2>&1 | tee ui-diag.log
+          grep -E '^DIAG: passed=[1-9][0-9]* failed=0 checked=[1-9][0-9]*$' ui-diag.log
+          node stand/tests/ui-diag.test.js --negative 2>&1 | tee ui-diag-neg.log
+          grep -E '^DIAG-NEG: passed=[1-9][0-9]* failed=0$' ui-diag-neg.log
+          sh stand/tests/ui-i18n.sh check 2>&1 | tee ui-i18n.log
+          grep -E '^I18N: msgids=[1-9][0-9]* .* failed=0$' ui-i18n.log
+          grep -qx 'VERDICT ok' ui-i18n.log
+
+      - name: Fetch the AWG engine release asset (x86_64) for the engine suite
+        run: |
+          set -eu
+          v=1.14.3-awg.1; a="vpnpool-engine_${v}_x86_64"
+          mkdir -p "$RUNNER_TEMP/engine"
+          cd "$RUNNER_TEMP/engine"
+          curl -fsSL --retry 3 -o "$a" "https://github.com/roman-png/vpnpool-engine/releases/download/v$v/$a"
+          echo "1a145e0ceffb7d8dc0936657d0364e7a112ae1b4ec8bbbcc6e82a379eecdbc19  $a" | sha256sum -c
+
+      - name: Run stand tests
+        env:
+          ENGINE_ASSET_DIR: ${{ runner.temp }}/engine
+        run: |
+          set -o pipefail
+          sh stand/tests/run-in-docker.sh 2>&1 | tee stand-tests.log
+          # verdict from the summary line, never from the absence of the word "FAIL"
+          grep -E '^TESTS: passed=[0-9]+ failed=0 xfail=[0-9]+ total=[1-9][0-9]* xpass=0$' stand-tests.log
+
+      - name: Deploy archive check (busybox tar keeps / and existing dirs intact)
+        run: |
+          set -o pipefail
+          sh stand/tests/deploy-tar-test.sh 2>&1 | tee deploy-tar.log
+          grep -E '^DEPLOY-TAR: passed=[1-9][0-9]* failed=0$' deploy-tar.log
+
+      - name: Build LuCI stand image + UI smoke (login, vpnpool page, ubus status)
+        run: |
+          docker build -f stand/Dockerfile.ui -t vpnpool-stand-ui .
+          set -o pipefail
+          sh stand/tests/ui-smoke.sh 2>&1 | tee ui-smoke.log
+          grep -E '^UI-SMOKE: passed=[1-9][0-9]* failed=0$' ui-smoke.log
+
+      - name: UI components on the LuCI stand (module served, ru catalog, ubus paths)
+        run: |
+          set -o pipefail
+          sh stand/tests/ui-components.sh 2>&1 | tee ui-components.log
+          grep -E '^UI-COMPONENTS: passed=[1-9][0-9]* failed=0$' ui-components.log
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stand-tests-log
+          path: |
+            stand-tests.log
+            ui-smoke.log
+            ui-components.log
+            ui-unit.log
+            ui-unit-neg.log
+            ui-pages.log
+            ui-pages-neg.log
+            ui-nodes.log
+            ui-nodes-neg.log
+            ui-overview.log
+            ui-overview-neg.log
+            ui-diag.log
+            ui-diag-neg.log
+            ui-i18n.log
+            deploy-tar.log
+          if-no-files-found: ignore
+
   build:
     name: ${{ matrix.arch }}
+    needs: tests
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -60,18 +175,21 @@ jobs:
           PACKAGES: vpnpool luci-app-vpnpool
 
       # .ipk: vpnpool_1.5.0-r1_all.ipk     .apk: vpnpool-1.5.0-r1.apk
+      # + the Russian translation built by luci.mk from package/luci-app-vpnpool/po/ru:
+      # .ipk: luci-i18n-vpnpool-ru_<ver>_all.ipk   .apk: luci-i18n-vpnpool-ru-<ver>.apk
       # Fails the job if a package is missing, so a silent SDK skip can't go green.
       - name: Collect packages
         run: |
           mkdir -p artifacts
           if [ "${{ matrix.ext }}" = apk ]; then
-            find bin \( -name 'vpnpool-[0-9]*.apk' -o -name 'luci-app-vpnpool-[0-9]*.apk' \) -exec cp {} artifacts/ \;
+            find bin \( -name 'vpnpool-[0-9]*.apk' -o -name 'luci-app-vpnpool-[0-9]*.apk' -o -name 'luci-i18n-vpnpool-ru-[0-9]*.apk' \) -exec cp {} artifacts/ \;
           else
-            find bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' \) -exec cp {} artifacts/ \;
+            find bin \( -name 'vpnpool_*.ipk' -o -name 'luci-app-vpnpool_*.ipk' -o -name 'luci-i18n-vpnpool-ru_*.ipk' \) -exec cp {} artifacts/ \;
           fi
           ls -l artifacts
           n=$(ls artifacts/*.${{ matrix.ext }} 2>/dev/null | wc -l)
-          [ "$n" -eq 2 ] || { echo "expected 2 .${{ matrix.ext }} packages, got $n"; exit 1; }
+          [ "$n" -eq 3 ] || { echo "expected 3 .${{ matrix.ext }} packages, got $n"; exit 1; }
+          ls artifacts | grep -q '^luci-i18n-vpnpool-ru' || { echo "the translation package luci-i18n-vpnpool-ru was not built"; exit 1; }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -80,7 +198,7 @@ jobs:
           path: artifacts/*.${{ matrix.ext }}
 
       # Our packages are arch-independent (PKGARCH:=all): every job of one format
-      # produces the SAME two filenames. Attach from ONE job per format only,
+      # produces the SAME three filenames. Attach from ONE job per format only,
       # otherwise the upload steps collide on duplicate asset names.
       - name: Attach to release
         if: github.event_name == 'release' && matrix.attach

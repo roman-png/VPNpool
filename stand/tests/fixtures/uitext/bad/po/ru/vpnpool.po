@@ -1,0 +1,12 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"X-Generator: tproxy header field is metadata, not UI text\n"
+
+#: the msgid is the view string (counted once, under the view); the msgstr is new UI text
+msgid "Restart the urltest group"
+msgstr "Перезапустить группу "
+"urltest"
+
+msgid "Plain text"
+msgstr "Простой текст"

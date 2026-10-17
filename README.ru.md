@@ -1,4 +1,4 @@
-# VPNpool — менеджер подписки VLESS / Reality с автопереключением для OpenWrt
+# VPNpool — менеджер подписки VLESS / Reality / Hysteria2 / AmneziaWG с автопереключением для OpenWrt
 
 <p align="right"><a href="README.md">English</a> · <b>Русский 🇷🇺</b></p>
 
@@ -7,7 +7,7 @@
   <a href="https://github.com/roman-png/VPNpool/releases/latest"><img alt="Последний релиз" src="https://img.shields.io/github/v/release/roman-png/VPNpool?label=release"></a>
   <img alt="OpenWrt 23.05 / 24.10 / 25.12 (opkg + apk)" src="https://img.shields.io/badge/OpenWrt-23.05%20%7C%2024.10%20%7C%2025.12-blue">
   <img alt="Движок: sing-box" src="https://img.shields.io/badge/engine-sing--box-success">
-  <img alt="Протоколы: VLESS VMess Trojan Shadowsocks AmneziaWG" src="https://img.shields.io/badge/protocols-VLESS%20%C2%B7%20VMess%20%C2%B7%20Trojan%20%C2%B7%20SS%20%C2%B7%20AmneziaWG-informational">
+  <img alt="Протоколы: VLESS VMess Trojan Shadowsocks Hysteria2 TUIC AmneziaWG" src="https://img.shields.io/badge/protocols-VLESS%20%C2%B7%20VMess%20%C2%B7%20Trojan%20%C2%B7%20SS%20%C2%B7%20Hysteria2%20%C2%B7%20TUIC%20%C2%B7%20AmneziaWG-informational">
   <img alt="Лицензия: GPL-3.0" src="https://img.shields.io/badge/License-GPL--3.0-blue.svg">
 </p>
 
@@ -36,7 +36,7 @@ sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.
 | 🔀 **Автопереключение** | urltest + сквозной сторож: упавший активный узел заменяется сам |
 | 🚦 **Без «чёрной дыры»** | LAN никогда не уходит в мёртвый туннель — нет рабочих узлов, интернет идёт напрямую |
 | 📡 **Подписки** | Автообновление, несколько подписок в одном пуле, перебор User-Agent клиентов |
-| 🧩 **Протоколы** | VLESS (Reality + Vision), VMess, Trojan, Shadowsocks, JSON sing-box, **AmneziaWG** |
+| 🧩 **Протоколы** | VLESS (Reality + Vision), VMess, Trojan, Shadowsocks, Hysteria2, TUIC, JSON sing-box, **AmneziaWG 1.x–3.1** |
 | 🧭 **Маршрутизация** | Только выбранные сайты или всё, кроме них; 26 готовых списков; правила по устройствам |
 | 🛡️ **Защита от утечек** | IPv6-заслон, kill-switch, защита DNS, анти-DPI фрагментацией TLS |
 | 🤖 **Telegram** | Уведомления и бот с кнопками; работает, даже где Telegram заблокирован |
@@ -47,7 +47,11 @@ sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.
 
 ## 📸 Скриншоты
 
-| Дашборд | Источники |
+Вкладки 2.0: **Обзор** (состояние, трафик по устройствам), **Узлы** (одна кнопка «+ Добавить» для ссылок,
+адресов подписок, настроек AmneziaWG, файлов и QR-картинок; узлы по подпискам; «Подключиться» / «Вернуть
+автовыбор», избранное, скрытые), **Маршруты**, **Настройки**, **Диагностика**. Снимки ниже — ещё от 1.x.
+
+| Дашборд (1.x) | Источники (1.x, теперь часть «Узлов») |
 |---|---|
 | ![Вкладка «Дашборд» vpnpool: живые пинги узлов, активный узел, трафик](docs/screenshots/dashboard.jpg) | ![Вкладка «Источники» vpnpool: подписки, ручные узлы и AmneziaWG](docs/screenshots/sources.jpg) |
 | **Маршрутизация** | **Настройки** |
@@ -58,7 +62,8 @@ sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.
 ## 🚀 Установка
 
 **Нужно:** OpenWrt **25.12+** (apk) или **23.05 / 24.10** (opkg), **≥ 128 МБ ОЗУ**,
-~40 МБ свободной флеш под sing-box — или [16 МБ флеш с sing-box в ОЗУ](#-роутеры-с-16-мб-флеш).
+~40 МБ свободной флеш под sing-box (+ ~45 МБ под [движок AmneziaWG](#-движок-amneziawg), если нужен AmneziaWG) — или
+[16 МБ флеш с sing-box в ОЗУ](#-роутеры-с-16-мб-флеш).
 Наши пакеты не зависят от архитектуры; sing-box и модули ядра берутся из фидов вашего роутера.
 
 | Вариант | Команда |
@@ -75,13 +80,13 @@ sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.
 
 | Переменная | Что делает |
 |---|---|
-| `VPNPOOL_AWG=1` | Меняет sing-box на [форк с AmneziaWG](https://github.com/hoaxisr/amnezia-box) (пребилды aarch64 / mipsel, сверка sha256) и закрепляет его от обновлений: `opkg flag hold` или точная версия в `/etc/apk/world` на apk |
+| `VPNPOOL_AWG=1` | Дополнительно ставит движок AmneziaWG ([vpnpool-engine](https://github.com/roman-png/vpnpool-engine), сверка sha256) отдельным файлом `/usr/bin/sing-box-awg`; стоковый sing-box остаётся как был. `VPNPOOL_AWG=update` обновляет движок |
 | `VPNPOOL_RAM_SINGBOX=1` | 16 МБ флеш: sing-box в ОЗУ, переустанавливается при каждой загрузке |
-| `VPNPOOL_VERSION=v1.5.0` | Конкретный релиз вместо `latest` (`.apk` — начиная с v1.5.0) |
+| `VPNPOOL_VERSION=v2.0.0` | Конкретный релиз вместо `latest` (`.apk` — начиная с v1.5.0) |
 | `VPNPOOL_PKG_DIR=/tmp/vpnpool` | Поставить файлы пакетов, уже скопированные в этот каталог, — без скачивания с GitHub |
 
 Загрузка повторяется до 4 раз и откатывается на [зеркало GitHub Pages](https://roman-png.github.io/VPNpool).
-⚠ podkop использует тот же `/usr/bin/sing-box` — с вариантом AWG он тоже будет работать на форке.
+podkop по-прежнему работает на стоковом `/usr/bin/sing-box`: движок AmneziaWG — отдельный файл.
 
 </details>
 
@@ -92,12 +97,13 @@ sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.
 
 ```sh
 # OpenWrt 25.12+ (apk)
-apk update && apk add --allow-untrusted ./vpnpool-*.apk ./luci-app-vpnpool-*.apk
+apk update && apk add --allow-untrusted ./vpnpool-*.apk ./luci-app-vpnpool-*.apk ./luci-i18n-vpnpool-ru-*.apk
 # OpenWrt 23.05 / 24.10 (opkg)
-opkg update && opkg install ./vpnpool_*_all.ipk ./luci-app-vpnpool_*_all.ipk
+opkg update && opkg install ./vpnpool_*_all.ipk ./luci-app-vpnpool_*_all.ipk ./luci-i18n-vpnpool-ru_*_all.ipk
 ```
 
-`--allow-untrusted` нужен, потому что отдельный файл не покрыт подписью фида.
+`--allow-untrusted` нужен, потому что отдельный файл не покрыт подписью фида. Пакет
+`luci-i18n-vpnpool-ru` — русский интерфейс (язык берётся из настроек LuCI).
 
 </details>
 
@@ -140,15 +146,15 @@ CI собирает оба формата под aarch64_cortex-a53, x86_64 и m
 
 ## ⚙️ Быстрый старт
 
-1. **Источники** → вставьте URL подписки → **Обновить сейчас**.
+1. **Узлы** → **+ Добавить** → вставьте URL подписки → **Проверить** → **Добавить**.
 2. **Настройки → Проверка узлов** → перечислите сервисы, которые должны работать (по умолчанию `www.youtube.com`).
 3. **Маршрутизация** → выберите режим и списки / домены для прокси.
-4. **Дашборд** → **Включить**. Зелёная ★ — активный узел.
+4. **Обзор** → **Включить**. На вкладке **Узлы** видно, какой узел используется.
 5. **Диагностика** → **Проверить выход через VPN** — покажет IP и страну выхода.
 
 ```sh
 # то же из консоли
-uci set vpnpool.main.subscription_url='https://example.com/sub'
+uci set vpnpool.sub1=subscription; uci set vpnpool.sub1.url='https://example.com/sub'
 uci set vpnpool.main.enabled='1'; uci commit vpnpool
 /etc/init.d/vpnpool enable; /etc/init.d/vpnpool restart
 ```
@@ -160,14 +166,18 @@ uci set vpnpool.main.enabled='1'; uci commit vpnpool
 **Подписки и узлы**
 - Автообновляемая подписка (base64 или JSON sing-box); перебор 9 User-Agent клиентов, пока какой-то не вернёт узлы
 - Несколько подписок в одном пуле; офлайн-кэш, если панель недоступна
-- Ручные узлы, вставка пачкой или импорт `.txt`, импорт из списка ссылок с выбором нужного
-- ⭐ Сохранённые узлы переживают истечение подписки; автоснимок доступных узлов
-- Ссылка на узел + **QR без интернета**, экспорт подпиской; трафик и срок подписки
-- Поиск, фильтр и сортировка для подписок на сотни узлов
+- Одна кнопка **+ Добавить** для всего: ссылки, адреса подписок, AmneziaWG `.conf` / `vpn://`, файл или
+  картинка с QR (расшифровка в браузере); предпросмотр по каждой строке — что добавится и почему нет
+- Подписка приносит все узлы или только выбранные; у каждой свой срок, остаток трафика и время
+  обновления; **Обновить** обновляет одну подписку
+- ⭐ Избранное переживает истечение подписки; скрытые узлы лежат в **Скрытых** и возвращаются одной кнопкой
+- Ссылка на узел + **QR без интернета**, экспорт подпиской
+- Поиск по имени или серверу и сворачиваемые группы для подписок на сотни узлов
 
 **Проверка и автопереключение**
 - 🎯 Один критерий «рабочего» узла: открывает **все** указанные сервисы — по нему работают urltest, failover и сторож
-- 🔀 Автопереключение; 📌 предпочтительный узел с возвратом; ⚙ выбор узлов для авто-пула
+- 🔀 Автопереключение; **Подключиться** — предпочесть узел, **Вернуть автовыбор** — отпустить; узлы можно
+  исключить из автовыбора (новые узлы подписок попадают в него сами)
 - 🩺 Сквозной сторож перезапускает зависший sing-box; мёртвые хосты отсеиваются заранее
 - 🚦 Безопасная маршрутизация: правила поднимаются только после реальной проверки, повтор каждые 15 с
 - ⚡ Тест скорости и 🎬 проверка доступа по узлу (YouTube / ChatGPT / Netflix / Instagram / Telegram / Google)
@@ -176,7 +186,9 @@ uci set vpnpool.main.enabled='1'; uci commit vpnpool
 - Импорт `.conf` или ссылки AmneziaVPN `vpn://` — расшифровывается на роутере, наружу ничего не уходит
 - Все поля AWG (Jc/Jmin/Jmax, S1–S4, H1–H4 с диапазонами, I1–I5, PSK, MTU)
 - Тот же пул, та же проверка сервисов и автопереключение, что у VLESS
-- Нужен форк sing-box с AWG (`VPNPOOL_AWG=1`); на стоковом sing-box интерфейс AWG скрыт
+- AmneziaWG 1.x, 2.0 и 3.1 (защита заголовков, диапазоны таймеров, случайные хвосты): движок AmneziaWG
+  (`VPNPOOL_AWG=1`, см. [ниже](#-движок-amneziawg)); без него AWG-узлы сохраняются и ждут движок — сборку
+  остальных узлов они не ломают
 
 **Маршрутизация**
 - Через VPN **только** выбранные списки/домены — или **всё, кроме** них
@@ -190,7 +202,9 @@ uci set vpnpool.main.enabled='1'; uci commit vpnpool
 - Каждый конфиг проходит `sing-box check`; битый узел отбрасывается, битая сборка откатывается
 - Живой трафик по узлам и устройствам; расписание включения и обновления
 - Уведомления в Telegram + двусторонний бот (кнопки `/menu`), ходит через VPN
-- Вкладка диагностики, резервная копия / восстановление, интерфейс RU/EN автоматически
+- «Обзор»: состояние словами, IP и страна выхода, тревоги со ссылкой туда, где это чинится
+- «Диагностика» (проверки, журнал с фильтром и скачиванием, технические параметры, версия движка),
+  резервная копия / восстановление (в том числе копий 1.x), русский / английский по языку LuCI
 
 ---
 
@@ -242,8 +256,8 @@ chmod +x /etc/hotplug.d/iface/99-vpnpool-singbox-ram
 ```
 
 Хук должен быть **один**: два хука одновременно на роутере со 128 МБ портят бинарь
-(`sing-box: Bus error`). С `VPNPOOL_AWG=1` хук качает форк с AWG и при неудаче откатывается
-на стоковый sing-box. Проверено на Xiaomi Mi Router 4A Gigabit (16 МБ / 128 МБ, OpenWrt 24.10);
+(`sing-box: Bus error`). С `VPNPOOL_AWG=1` хук кладёт в ОЗУ и движок AmneziaWG (только на роутерах
+с ОЗУ от 256 МБ) и при неудаче оставляет стоковый sing-box. Проверено на Xiaomi Mi Router 4A Gigabit (16 МБ / 128 МБ, OpenWrt 24.10);
 путь через apk — на официальном образе OpenWrt 25.12.4.
 
 </details>
@@ -260,8 +274,9 @@ LuCI (5 вкладок) ── ubus/rpcd ── vpnpoold (ucode + shell, procd)
                                   │ загрузка (перебор UA) → разбор → сборка → sing-box check
                                   │ проверка сервисов (Clash delay API) → живые/мёртвые
                                   ▼
-                          sing-box (движок)
-   вход   : tproxy 127.0.0.1:1603  +  локальный SOCKS/HTTP :1605 (тесты, бот)
+            sing-box (стоковый; /usr/bin/sing-box-awg, если в пуле есть AmneziaWG)
+   вход   : tproxy 127.0.0.1:1603  +  локальный SOCKS/HTTP :1605 (проверка выхода, бот)
+            + :1606 (проверка узлов по одному)
    выход  : urltest "auto" (пинг + failover) + селектор + узлы + direct
    endpoints[]: пиры AmneziaWG / WireGuard (sing-box >= 1.13)
    правила: SNI → списки SRS / домены → proxy (или direct в режиме «всё, кроме»)
@@ -284,32 +299,37 @@ fake-IP и без перехвата dnsmasq.
 |---|---|---|
 | `enabled` | `0` | Запуск службы (переключатель в LuCI) |
 | `mode` | `selective` | `selective` — через VPN только списки; `exclude` — всё, кроме них |
-| `subscription_url` | — | Основная подписка (из неё берутся трафик и срок) |
 | `subscription_interval` | `6h` | Период автообновления |
 | `check_services` | `www.youtube.com` | **Главный** критерий рабочего узла, по хосту в строке |
 | `health_url` | `http://cp.cloudflare.com/generate_204` | Запасная проверка, если `check_services` пуст |
 | `failover_interval` / `failover_tolerance` | `60` / `50` | Интервал urltest (с) и допуск (мс) |
 | `auto_switch` | `1` | `0` закрепляет селектор на первом узле |
-| `selected_node` / `preferred_node` | — | Жёсткий ручной выбор / мягкий 📌 с возвратом |
+| `preferred_node` | — | «Подключиться»: мягкое предпочтение (id узла) с переключением при сбое и возвратом; пусто — автовыбор |
+| `favorites_only` | `0` | Автовыбор только среди избранных узлов |
 | `dead_filter` / `dead_filter_strikes` / `dead_filter_tries` | `1` / `3` / `3` | Фильтр авто-пула по сервисам, провалов до исключения, повторов за цикл |
 | `ipv6` | `block` | `block` — IPv6 закрыт; `off` — IPv6 не трогаем |
 | `killswitch` / `dns_protect` | `0` / `0` | Закрытый IPv4 в режиме `exclude` / DNS LAN через туннель |
 | `client_mode` | `all` | `all` / `exclude` / `include` по устройствам |
 | `antidpi` | `off` | `off` / `on` (`tls_fragment`) / `aggressive` (+ `tls_record_fragment`) |
 | `adaptive_routing` / `adaptive_max_per_run` | `0` / `8` | Поиск доменов, заблокированных напрямую |
-| `auto_snapshot` / `auto_snapshot_max` | `0` / `20` | Автосохранение доступных узлов |
+| `auto_snapshot` / `auto_snapshot_max` | `0` / `20` | Автоматически добавлять рабочие узлы в избранное |
 | `sched_enabled`, `sched_on`, `sched_off`, `sched_refresh` | `0`, — | Расписание на день (ЧЧ:ММ) |
 | `telegram_enabled`, `telegram_token`, `telegram_chat` | `0`, — | Уведомления |
 | `telegram_control` / `telegram_via_proxy` | `0` / `1` | Двусторонний бот / Telegram через туннель |
 | `speedtest_url` / `speedtest_min_mem_kb` | Cloudflare / `8192` | Адрес теста скорости / запас свободной памяти |
 | `dns_strategy` | `prefer_ipv4` | Порядок разрешения имён для проверок sing-box |
 | `fwmark` / `route_table` / `route_priority` | `0x400000` / `142` / `106` | Непересекающиеся ресурсы маршрутизации |
-| `tproxy_port` / `test_port` / `clash_api` | `1603` / `1605` / `127.0.0.1:9091` | Входы и управляющий API |
+| `tproxy_port` / `test_port` / `node_test_port` / `clash_api` | `1603` / `1605` / `1606` / `127.0.0.1:9091` | Входы (tproxy, проверка выхода и бот, проверка узлов) и управляющий API |
 | `lan_if` / `coexist` / `log_level` | авто / `auto` / `warn` | Устройство LAN, уступка podkop, уровень лога sing-box |
+| `schema` | `2` | Версия формата этого файла (ставит миграция 1.x → 2.0; не править) |
 
-Списки, которые ведёт приложение: `source`, `extra_sub`, `manual_node`, `imported_node`,
-`saved_node`, `active_saved`, `excluded_node`, `auto_member`, `keep_auto`, `client`,
-`client_dev`, `probe_ua`; в `config routing 'routing'` — `community`, `domain`, `auto_domain`.
+Списки, которые ведёт приложение: `manual_node` (ваши ссылки), `hidden`, `auto_exclude` (исключены
+из автовыбора; остальные участвуют, новые тоже), `auto_member` (1.x: участвуют только эти),
+`keep_auto` (id узлов), `client`, `client_dev`, `probe_ua`; в `config routing 'routing'` —
+`community`, `domain`, `auto_domain`. Каждая подписка — своя секция `config subscription` с
+`url`, `name`, `enabled` и `mode` (`all` — все узлы, `pick` — только id из `list pick`).
+Избранное — `/etc/vpnpool/favorites.map.json`. Настройки 1.x при установке переводятся в этот
+вид (копия старых — в `/etc/vpnpool/backup-1.x/`).
 Узлы AmneziaWG — файлы `/etc/vpnpool/awg/*.conf`.
 
 </details>
@@ -324,7 +344,7 @@ fake-IP и без перехвата dnsmasq.
 | Безопасная маршрутизация | ✅ | — | — | — |
 | Предпочтительный узел с возвратом | ✅ | — | — | — |
 | AmneziaWG в том же пуле | ✅ `.conf` + `vpn://` | — | — | — |
-| Трафик подписки, сохранённые узлы, тесты скорости / доступа | ✅ | — | — | — |
+| Трафик подписки, избранное, тесты скорости / доступа | ✅ | — | — | — |
 | Двусторонний Telegram-бот | ✅ | — | — | — |
 | Адаптивная маршрутизация, анти-DPI | ✅ | — | — | — |
 | Готовые списки SRS | ✅ 26 | ✅ | свои | свои |
@@ -338,7 +358,7 @@ fake-IP и без перехвата dnsmasq.
 
 - **Это VPN-сервис?** Нет — подписка, сервер или конфиг AmneziaWG ваши.
 - **Чем отличается от podkop?** podkop маршрутизирует выборочно, но узел выбираете вы; vpnpool выбирает и переключает узлы сам. Они работают рядом.
-- **Нужен другой sing-box?** Только для AmneziaWG (`VPNPOOL_AWG=1`).
+- **Нужен другой sing-box?** Только для AmneziaWG (`VPNPOOL_AWG=1` ставит движок AmneziaWG рядом со стоковым).
 - **200 узлов на дешёвом роутере?** Нормально: мёртвые хосты отсеиваются, проверки идут по очереди, тяжёлые тесты смотрят на свободную память.
 - **Подписка истекла / все узлы лежат?** LAN остаётся на прямом подключении; маршрутизация вернётся в течение 15 с после ответа узла.
 - **Без LuCI?** Да — `uci` и Telegram-бот.
@@ -353,7 +373,7 @@ fake-IP и без перехвата dnsmasq.
 |---|---|
 | В логе *«keeping LAN on DIRECT»* | Ни один узел не прошёл проверку — проверьте подписку и *Настройки → Проверка узлов* |
 | Всё пингуется, сайты не открываются | Узел достаёт до CDN, но не до ваших сервисов — смотрите список **«Вне авто-пула»** |
-| Нет раздела AmneziaWG | Стоковый sing-box — переустановите с `VPNPOOL_AWG=1` |
+| AmneziaWG-узел «ждёт движок» | Движок AmneziaWG не установлен — запустите установщик с `VPNPOOL_AWG=1` (движок виден в «Диагностике») |
 | `sing-box: Bus error` после перезагрузки (16 МБ) | Два хука загрузки — оставьте один |
 | Не скачиваются списки доменов | Они берутся с GitHub Releases — сначала пустите GitHub через прокси |
 | Бот отвечает через раз | Работают два поллера — остановите ручной `tgbot.sh` |
@@ -372,6 +392,20 @@ kill -USR2 $(cat /var/run/vpnpool.pid)   # заново скачать подп�
 </details>
 
 ---
+
+## 🧬 Движок AmneziaWG
+
+Стоковый sing-box не умеет AmneziaWG, поэтому у vpnpool своя сборка: [vpnpool-engine](https://github.com/roman-png/vpnpool-engine)
+— upstream sing-box с патчем AmneziaWG (amneziawg-go 3.1); релизы неизменяемые, с суммами sha256.
+
+- **Установка / обновление:** `VPNPOOL_AWG=1` (или `=update`) в установщике либо
+  `/usr/libexec/vpnpool/engine.sh install|update|status|restore-stock`. Перед заменой проверяются sha256,
+  версия и настоящий конфиг AmneziaWG; при любой ошибке рабочий бинарь остаётся.
+- **Где:** `/usr/bin/sing-box-awg`, отдельный файл. vpnpool запускает его, только когда в пуле есть
+  AmneziaWG-узлы; podkop и остальное работают на стоковом `/usr/bin/sing-box`.
+- **Архитектуры:** aarch64, arm_cortex-a7, mipsel_24kc, mips_24kc, x86_64.
+- **Память:** бинарь ~45 МБ. На роутерах с 16 МБ флеша он живёт в ОЗУ (нужно от 256 МБ ОЗУ; скачивается
+  заново при загрузке), установщик заранее проверяет место и память.
 
 ## 🗺️ Планы
 
