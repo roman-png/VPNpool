@@ -68,6 +68,10 @@ jobs:
           grep -E '^OVERVIEW: passed=[1-9][0-9]* failed=0 checked=[1-9][0-9]*$' ui-overview.log
           node stand/tests/ui-overview.test.js --negative 2>&1 | tee ui-overview-neg.log
           grep -E '^OVERVIEW-NEG: passed=[1-9][0-9]* failed=0$' ui-overview-neg.log
+          node stand/tests/ui-diag.test.js 2>&1 | tee ui-diag.log
+          grep -E '^DIAG: passed=[1-9][0-9]* failed=0 checked=[1-9][0-9]*$' ui-diag.log
+          node stand/tests/ui-diag.test.js --negative 2>&1 | tee ui-diag-neg.log
+          grep -E '^DIAG-NEG: passed=[1-9][0-9]* failed=0$' ui-diag-neg.log
           sh stand/tests/ui-i18n.sh check 2>&1 | tee ui-i18n.log
           grep -E '^I18N: msgids=[1-9][0-9]* .* failed=0$' ui-i18n.log
           grep -qx 'VERDICT ok' ui-i18n.log
@@ -126,6 +130,8 @@ jobs:
             ui-nodes-neg.log
             ui-overview.log
             ui-overview-neg.log
+            ui-diag.log
+            ui-diag-neg.log
             ui-i18n.log
             deploy-tar.log
           if-no-files-found: ignore
