@@ -100,9 +100,16 @@ KEEP="$tmpd/keep"; : > "$KEEP"
 	config_list_foreach main keep_auto __kp_add 2>/dev/null
 )
 
-# Pre-encode the probe URLs ONCE into positional params (no jq per probe).
+# Pre-encode the probe URLs ONCE into positional params (no jq per probe), each paired with its
+# host ("<encoded url>|<host>": an encoded URL has no "|") - the host names the service a node
+# failed in the strike file below.
 set --
-for u in $URLS; do set -- "$@" "$(jq -rn --arg s "$u" '$s|@uri')"; done
+for u in $URLS; do
+	h=${u#*://}; h=${h%%[/?#]*}
+	set -- "$@" "$(jq -rn --arg s "$u" '$s|@uri')|$h"
+done
+# when this sweep judged the nodes (one clock read per sweep, not per node)
+SWEEP_AT=$(date +%s)
 
 # Probe SEQUENTIALLY. Running 7 nodes x 4 URLs in PARALLEL spawned ~100 procs and
 # saturated the clash API on a 16 MB router so EVERY probe timed out and every node
@@ -115,7 +122,10 @@ jq -r '.[] | select(.id != null) | "\(.id)\t\(.tag)"' "$N" 2>/dev/null | while I
 	enc=$(jq -rn --arg s "$t" '$s|@uri')
 	pass=0
 	lastdelay=
-	for eu in "$@"; do
+	failed=
+	for p in "$@"; do
+		eu=${p%%|*}
+		ok=0
 		# retry up to TRIES times; a single success = service reachable (break early)
 		a=0
 		while [ "$a" -lt "$TRIES" ]; do
@@ -125,10 +135,12 @@ jq -r '.[] | select(.id != null) | "\(.id)\t\(.tag)"' "$N" 2>/dev/null | while I
 				pass=$((pass + 1))
 				# extract the numeric delay from {"delay":N...} (no jq per probe)
 				d=${r#*\"delay\":}; d=${d%%[!0-9]*}; [ -n "$d" ] && lastdelay=$d
+				ok=1
 				break
 			fi
 			a=$((a + 1))
 		done
+		[ "$ok" = 1 ] || failed="${failed:+$failed,}${p#*|}"
 	done
 	# record the measured delay for ANY node that answered (even if it didn't pass every
 	# service) so the dashboard has a real ping to show for a reachable-but-flaky node
@@ -136,7 +148,10 @@ jq -r '.[] | select(.id != null) | "\(.id)\t\(.tag)"' "$N" 2>/dev/null | while I
 	prev=$(awk -F"$TAB" -v k="$id" '$1==k{print $2; exit}' "$STRK" 2>/dev/null); case "$prev" in (''|*[!0-9]*) prev=0 ;; esac
 	# strict: a node must reach EVERY configured service to count as healthy this cycle
 	if [ "$pass" -ge "$NURLS" ]; then cur=0; else cur=$((prev + 1)); fi
-	printf '%s%s%s\n' "$id" "$TAB" "$cur" >> "$newstrk"
+	# id <TAB> failed sweeps in a row <TAB> when this sweep ran <TAB> the hosts it did not reach
+	# (comma-separated, empty when it passed): status.uc shows "does not open X: N checks in a row,
+	# M min ago" from it; the readers of the first two columns (prev above, api.uc drop_marks) stay
+	printf '%s%s%s%s%s%s%s\n' "$id" "$TAB" "$cur" "$TAB" "$SWEEP_AT" "$TAB" "$failed" >> "$newstrk"
 	[ "$cur" -ge "$STRIKES" ] && printf '%s\n' "$id" >> "$deadlist"
 done
 # atomic replacements (tmp + mv): status.sh / generator.uc / rpcd may read these any time

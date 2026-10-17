@@ -163,6 +163,16 @@ let unlock = read_json(CONF + '/unlock.map.json', {});
 if (type(unlock) != 'object') unlock = {};
 let ndelay = read_json(SB + '/.nodedelay.json', {});
 if (type(ndelay) != 'object') ndelay = {};
+// the last check of each node by the node checker (nodecheck.sh -> .deadstrikes, one line per
+// node: id, failed checks in a row, when, the hosts it did not reach) -> node.check
+let ncheck = {};
+for (let l in split(readfile(SB + '/.deadstrikes') ?? '', '\n')) {
+	let f = split(l, '\t');
+	if (!is_id(f[0]) || !match(f[1] ?? '', /^[0-9]+$/)) continue;
+	let at = match(f[2] ?? '', /^[0-9]+$/) ? +f[2] : null;
+	ncheck[f[0]] = { fails: +f[1], at: at,
+		failed: filter(split(f[3] ?? '', ','), (h) => match(h, /^[A-Za-z0-9.:-]{1,253}$/)) };   // a host name / address, nothing else
+}
 let nodes = [], pool_ids = {}, by_sub = {};
 for (let n in nodes_in) {
 	if (type(n) != 'object') continue;
@@ -196,6 +206,7 @@ for (let n in nodes_in) {
 		saved: type(f) == 'object',
 		active_saved: sk[0] == 'favorite',
 		unlock: id ? (unlock[id] ?? null) : null,
+		check: id ? (ncheck[id] ?? null) : null,
 		group: legacy_group(n, sk[0], sk[1]),
 		hints: n.random_trailers ? [ 'awg_random_trailers' ] : null
 	});
@@ -281,6 +292,20 @@ for (let s in SUBS) {
 	push(subscriptions, e);
 }
 
+// ---- the tunnel and its exit (the daemon's background checks, vpnpoold) ----
+// tunnel: "<state> <since>" (watchdog: starting | up | down | wan_down) — only while the daemon
+// runs (a stale file of a killed one says nothing); exit: the IP + country exitip.sh found through
+// the tunnel, only while that node is still the active one
+let now_tag = (px.proxy?.now && px.proxy.now != 'auto') ? px.proxy.now : (px.auto?.now ?? '');
+let tunnel = null;
+let tf = running ? split(trim(readfile(SB + '/.tunnel') ?? ''), ' ') : [];
+if (tf[0] in [ 'starting', 'up', 'down', 'wan_down' ] && match(tf[1] ?? '', /^[0-9]+$/))
+	tunnel = { state: tf[0], since: +tf[1] };
+let exj = running ? read_json(SB + '/exit.json', null) : null;
+let exit_info = (type(exj) == 'object' && exj.ok === true && length(now_tag) && exj.node == now_tag)
+	? { ip: '' + exj.ip, country: (type(exj.country) == 'string' && length(exj.country)) ? exj.country : null,
+	    node: exj.node, at: exj.at ?? null } : null;
+
 // ---- busy workers / progress ----
 let busy = {
 	fetch: proc_running('usr/libexec/vpnpool/fetch.sh'),
@@ -334,6 +359,8 @@ printf('%J\n', {
 	mode: o('mode', 'selective'),
 	active: px.proxy?.now ?? '',
 	auto_now: px.auto?.now ?? '',
+	tunnel: tunnel,
+	exit: exit_info,
 	preferred: length(pref_id) ? { id: pref_id, tag: tag_of[pref_id] ?? fav[pref_id]?.tag ?? null, in_pool: !!pool_ids[pref_id] } : null,
 	subscriptions: subscriptions,
 	favorites: favorites,
