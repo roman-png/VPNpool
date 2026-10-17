@@ -1244,6 +1244,117 @@ expect_jq "applied" "$R" '.ok==true and .code=="applied"'
 expect_true "auto:false" jq -e --arg i "$ID2" '.[$i].auto==false' /etc/vpnpool/favorites.map.json
 end
 
+# ---------------- ui4: one subscription's "Update", the Diagnostics log and parameters, token bounds ----------------
+# sub_refresh {id}: the id is queued for the daemon (vpnpoold fetches only the queued ones) + USR1
+FONLY=/tmp/vpnpool/.fetch_only
+s_sub_refresh() { sub_section sp 'https://sub.example.com/s'; sub_section se 'https://extra.example.com/l'; }
+c_sub_refresh() {
+	expect_jq "started" "$R" '.code=="started" and .daemon=="signalled"'
+	expect_eq "exactly this subscription queued for the daemon" "$(cat "$FONLY" 2>/dev/null)" sp
+}
+M sub_refresh '{"id":"sp"}' USR1 - c_sub_refresh '{"id":"nope"}' -
+begin "rpcd/sub_refresh/unknown-is-not-found-nothing-queued"
+reset_state; s_sub_refresh; daemon_start; rcall sub_refresh '{"id":"nope"}'
+expect_jq "not_found" "$R" '.ok==false and .code=="not_found"'
+expect_true "nothing queued" [ ! -s "$FONLY" ]
+expect_eq "no signal" "$(signals_seen USR1)" 0
+end
+begin "rpcd/sub_refresh/turned-off-subscription-refused"
+reset_state; s_sub_refresh; uci set vpnpool.se.enabled=0; uci commit vpnpool; daemon_start
+rcall sub_refresh '{"id":"se"}'
+expect_jq "disabled" "$R" '.ok==false and .code=="disabled"'
+expect_true "nothing queued" [ ! -s "$FONLY" ]
+rcall sub_refresh '{"id":"sp"}'
+expect_jq "the enabled one is started (positive control)" "$R" '.ok==true and .code=="started"'
+end
+begin "rpcd/sub_refresh/bad-id-refused"
+reset_state; s_sub_refresh; daemon_start; rcall sub_refresh '{"id":"sp;rm -rf /"}'
+expect_jq "invalid, the field named" "$R" '.ok==false and .code=="invalid" and .errors.id=="bad_value"'
+expect_true "nothing queued" [ ! -s "$FONLY" ]
+end
+begin "rpcd/sub_refresh/no-daemon-said-nothing-fetched"
+reset_state; s_sub_refresh; daemon_stop; rcall sub_refresh '{"id":"sp"}'
+expect_jq "daemon_not_running" "$R" '.ok==false and .code=="daemon_not_running" and .daemon=="not_running"'
+expect_true "nothing queued (no daemon would take it)" [ ! -s "$FONLY" ]
+end
+
+# logs {lines, source}: the service's lines of the system log (a stand logread) / the engine's log
+LOGREAD=/opt/stand/tests-bin/logread
+s_logs() {
+	{
+		echo '#!/bin/sh'
+		echo "echo 'Fri Oct 17 10:00:00 2026 daemon.info dnsmasq[1]: not ours'"
+		i=1; while [ $i -le 8 ]; do echo "echo 'Fri Oct 17 10:00:0$i 2026 user.notice vpnpool: line $i'"; i=$((i + 1)); done
+		echo "echo 'Fri Oct 17 10:00:09 2026 user.notice vpnpool[42]: telegram https://api.telegram.org/bot123456:AAsecretTOKEN_x/sendMessage failed'"
+		echo "echo 'Fri Oct 17 10:00:10 2026 kern.info kernel: not ours either'"
+	} > "$LOGREAD"; chmod +x "$LOGREAD"
+}
+c_logs() {
+	expect_jq "the last 5 lines of the service, oldest first" "$R" '.source=="service" and (.lines|length)==5 and .lines[0]=="Fri Oct 17 10:00:05 2026 line 5" and .lines[3]=="Fri Oct 17 10:00:08 2026 line 8"'
+	expect_jq "other programs' lines are not in it" "$R" '[.lines[] | select(contains("not ours"))] | length == 0'
+	expect_jq "a bot token is masked" "$R" '.lines[4] | (contains("bot123456:***") and (contains("AAsecretTOKEN") | not))'
+}
+M logs '{"lines":5}' - - c_logs '{"lines":0}' -
+s_logs; rcall logs '{}'
+begin "rpcd/logs/default-200-lines-at-most"
+expect_jq "every line of the service (9 < 200)" "$R" '.ok==true and (.lines|length)==9'
+end
+rcall logs '{"lines":501}'
+begin "rpcd/logs/more-than-500-refused"
+expect_jq "invalid, too_large" "$R" '.ok==false and .code=="invalid" and .errors.lines=="too_large"'
+rcall logs '{"lines":500}'
+expect_jq "500 is accepted (positive control)" "$R" '.ok==true'
+rcall logs '{"source":"other"}'
+expect_jq "unknown source refused" "$R" '.ok==false and .errors.source=="bad_value"'
+end
+mkdir -p /tmp/vpnpool; printf '\033[36mINFO\033[0m [1] engine started\nWARN [2] second\n' > /tmp/vpnpool/sing-box.log
+rcall logs '{"lines":10,"source":"engine"}'
+begin "rpcd/logs/engine-log-without-colour-codes"
+expect_jq "two lines, colour codes dropped" "$R" '.source=="engine" and .lines==["INFO [1] engine started","WARN [2] second"]'
+end
+# a very long log: the reply stays within what rpcd passes on (lines cut, ~160 KB)
+awk 'BEGIN { s = ""; while (length(s) < 900) s = s "x"; for (i = 1; i <= 600; i++) print "INFO " i " " s }' > /tmp/vpnpool/sing-box.log
+rcall logs '{"lines":500,"source":"engine"}'
+begin "rpcd/logs/long-lines-cut-and-bounded"
+expect_eq "ubus rc" "$RC" 0
+expect_jq "the newest line is the last one" "$R" '.lines[-1] | startswith("INFO 600 ")'
+expect_jq "every line cut to 400 characters" "$R" '[.lines[] | length] | max <= 400'
+expect_le "reply size" "$(printf '%s' "$R" | wc -c)" 200000
+expect_jq "control: lines were dropped to fit (fewer than 500)" "$R" '(.lines|length) < 500 and (.lines|length) > 300'
+end
+rm -f "$LOGREAD" /tmp/vpnpool/sing-box.log
+
+# diag: the technical parameters and the engine (shown only on the Diagnostics page)
+reset_state; uci set vpnpool.main.tproxy_port=1703; uci set vpnpool.main.fwmark=0x500000; uci commit vpnpool
+rcall diag '{}'
+PIN=$(sed -n 's/^ENGINE_PINNED="\([^"]*\)".*/\1/p' /usr/libexec/vpnpool/engine.sh)
+begin "rpcd/diag/technical-parameters-and-engine"
+expect_true "control: the pinned engine version read from engine.sh" [ -n "$PIN" ]
+expect_jq "ports, mark, table from the config" "$R" '.params.tproxy_port=="1703" and .params.fwmark=="0x500000" and .params.route_table=="142" and .params.test_port=="1605" and (.params.clash_api|length)>0'
+expect_jq "the LAN interface (auto-detected) and the coexistence mode" "$R" '(.params.lan_if|length)>0 and .params.lan_if_auto==true and .params.coexist=="auto"'
+expect_jq "the engine that runs: version + AmneziaWG yes/no" "$R" '(.engine.version|length)>0 and (.engine.awg|type)=="boolean" and (.engine.awg31|type)=="boolean"'
+expect_jq "the AmneziaWG build: installed yes/no, the pinned version" "$R" "(.engine.awg_engine.installed|type)==\"boolean\" and .engine.target_version==\"$PIN\" and (.engine.update_available|type)==\"boolean\""
+expect_jq "logs: an array" "$R" '.logs|type=="array"'
+end
+
+# review ui3 Ж2: the token bounds of tg_test at the edges (and the bot number in set_config)
+tg_typed "{\"token\":\"12345678901234567890:$(rep_ch b 100)\",\"chat\":\"42\"}"
+begin "rpcd/tg_test/longest-token-accepted"
+expect_jq "sent (positive control: the bound is not too tight)" "$R" '.ok==true and .code=="sent"'
+expect_eq "one request with that token" "$(mock_calls "bot12345678901234567890:$(rep_ch b 100)/sendMessage")" 1
+end
+tg_typed "{\"token\":\"123456789012345678901:abc\",\"chat\":\"42\"}"
+begin "rpcd/tg_test/21-digit-bot-number-refused"
+expect_jq "invalid bad_token" "$R" '.ok==false and .code=="invalid" and .errors.telegram_token=="bad_token"'
+expect_eq "no request" "$(gcount . /tmp/curlmock/calls.log)" 0
+end
+reset_state; daemon_start
+rcall set_config '{"settings":{"telegram_token":"123456789012345678901:abc"}}'
+begin "rpcd/set_config/21-digit-bot-number-refused"
+expect_jq "invalid bad_token" "$R" '.ok==false and .code=="invalid" and .errors.telegram_token=="bad_token"'
+expect_eq "nothing stored" "$(uci -q get vpnpool.main.telegram_token)" ""
+end
+
 # ---------------- coverage: ACL <-> rpcd list <-> this suite ----------------
 begin "rpcd/coverage-acl-methods"
 jq -r '.["luci-app-vpnpool"] | (.read.ubus.vpnpool + .write.ubus.vpnpool)[]' "$ACL" | sort -u > "$FXR/acl"

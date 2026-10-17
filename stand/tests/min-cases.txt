@@ -2,13 +2,13 @@
 # (stopped early, lost cases) fails the run. Raise when you add cases; never lower to hide a loss.
 parser 166
 build 51
-rpcd 293
+rpcd 324
 sched 6
 adaptive 4
-fetch 13
+fetch 15
 status 23
 uitext 6
-daemon 48
+daemon 50
 tgbot 22
 awgdecode 74
 engine 71
