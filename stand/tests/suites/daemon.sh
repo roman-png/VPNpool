@@ -532,11 +532,15 @@ sc_exit() {
 	WD_HEALTHY=1
 	exit_info_check A 1000; exit_info_check A 1100           # the same node 100 s later: no second lookup
 	exit_info_check B 1150                                    # the node changed: a lookup
+	exit_info_check C 1170                                    # changed again 20 s later: not more often than once a minute
 	echo '{"ok":false,"ip":""}' > "$SB_DATA/exit.json"
 	exit_info_check B 1460                                    # found nothing, 5 min later: again
 	echo '{"ok":true,"ip":"198.51.100.7"}' > "$SB_DATA/exit.json"
 	exit_info_check B 1770                                    # found, 5 min later: not again
+	echo '{"ok":false,"ip":""}' > "$SB_DATA/exit.json"
+	exit_info_check B 1800                                    # the answer was read once (not re-read every tick)
 	exit_info_check B 3300                                    # found, 30 min later: again
+	exit_info_check C 3320                                    # a change 20 s after a lookup: waits
 	WD_HEALTHY=0; exit_info_check C 4000                      # the tunnel does not work: never
 	WD_HEALTHY=""; exit_info_check C 4001                     # not judged (warm-up): never
 	exit_info_check "" 4002
@@ -552,14 +556,16 @@ end
 # (3) exitip.sh: through the tunnel only, the first service with an address, country upper case
 reset_state; mock_on
 echo '{"ip":"<b>blocked</b>"}' > "$DS/ex_junk"
-echo '{"ip":"198.51.100.7","country":"de"}' > "$DS/ex_ok"
+echo '{"ip":"cafe","country":"de"}' > "$DS/ex_word"
+echo '{"ip":"198.51.100.7","country_code":"de"}' > "$DS/ex_ok"
 mock_rule 'P GET https://ifconfig.co/json' 200 "$DS/ex_junk"
-mock_rule 'P GET https://ipinfo.io/json' 200 "$DS/ex_ok"
+mock_rule 'P GET https://ipinfo.io/json' 200 "$DS/ex_word"
+mock_rule 'P GET https://api.ip.sb/geoip' 200 "$DS/ex_ok"
 sh /usr/libexec/vpnpool/exitip.sh NodeA >/dev/null 2>&1
 begin "daemon/exitip-first-address-through-the-tunnel"
 expect_true "ip, country, node, time" jq -e '.ok==true and .ip=="198.51.100.7" and .country=="DE" and .node=="NodeA" and (.at|type)=="number"' /tmp/vpnpool/exit.json
 expect_eq "no direct request" "$(gcount '^GET ' /tmp/curlmock/calls.log)" 0
-expect_eq "stops at the first address" "$(mock_calls 'api.ip.sb')" 0
+expect_eq "an error page and a word are not addresses; stops at the first address" "$(mock_calls 'api.ipify.org')" 0
 expect_true "no lock left" test ! -e /tmp/vpnpool/.exitip-running
 end
 mock_on; : > /tmp/curlmock/calls.log   # nothing answers

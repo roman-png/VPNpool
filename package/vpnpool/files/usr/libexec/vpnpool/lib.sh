@@ -277,6 +277,15 @@ if [ -z "$LAN_IF" ]; then
 fi
 
 # ---- service-accuracy probe set ----
+# The IP-echo services that tell the exit of the tunnel (address + country), in the order they
+# are tried: ONE list for the daemon's background lookup (exitip.sh) and the "test exit" of the
+# Diagnostics (rpcd conntest). Several, because a single one (ifconfig.co) often blocks or
+# rate-limits datacenter exits. Their JSON shapes differ: ip / ip_addr / query, country_iso /
+# country_code / country.
+exit_ip_services() {
+	printf '%s\n' "https://ifconfig.co/json" "https://ipinfo.io/json" "https://api.ip.sb/geoip" "https://api.ipify.org?format=json"
+}
+
 # THE single source of truth for "is a node good": the user-configured services the VPN
 # must actually make work THROUGH a node (often the blocked ones). Emits one normalised
 # probe URL per line — a bare host becomes http://<host>/generate_204 (tiny response, just

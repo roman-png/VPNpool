@@ -20,12 +20,13 @@ trap 'rm -f "$LOCK"' EXIT INT TERM
 
 TP=$(uci -q get vpnpool.main.test_port); [ -n "$TP" ] || TP=1605
 IP=""; CO=""
-for url in "https://ifconfig.co/json" "https://ipinfo.io/json" "https://api.ip.sb/geoip" "https://api.ipify.org?format=json"; do
+for url in $(exit_ip_services); do
 	J=$(curl -s -m 7 --proxy "socks5h://127.0.0.1:$TP" "$url" 2>/dev/null)
 	[ -n "$J" ] || continue
 	IP=$(printf '%s' "$J" | jq -r '(.ip // .ip_addr // .query // "") | tostring' 2>/dev/null)
-	# an IPv4 / IPv6 address only (an error page is not an address)
+	# an IPv4 / IPv6 address only (an error page or a word like "cafe" is not an address)
 	case "$IP" in (*[!0-9a-fA-F:.]*|'') IP=""; continue ;; esac
+	case "$IP" in (*[.:]*) ;; (*) IP=""; continue ;; esac
 	CO=$(printf '%s' "$J" | jq -r '(.country_iso // .country_code // .country // "") | tostring' 2>/dev/null)
 	case "$CO" in ([A-Za-z][A-Za-z]) ;; (*) CO="" ;; esac
 	break

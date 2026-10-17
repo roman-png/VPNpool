@@ -241,7 +241,7 @@ measure_status
 begin "status/tunnel-exit-and-node-checks"
 expect_jq "positive control: daemon up, auto on Node001" "$SOUT" '.running==true and .auto_now=="Node001"'
 expect_jq "tunnel state + since" "$SOUT" '.tunnel=={"state":"up","since":1700000000}'
-expect_jq "exit of the active node" "$SOUT" '.exit.ip=="198.51.100.7" and .exit.country=="DE" and .exit.node=="Node001" and .exit.at==1700000100'
+expect_jq "exit of the active node" "$SOUT" '.exit.ok==true and .exit.ip=="198.51.100.7" and .exit.country=="DE" and .exit.node=="Node001" and .exit.at==1700000100'
 expect_jq "a failing node: fails in a row, when, which hosts" "$SOUT" "(.nodes[] | select(.id==\"$ID1\") | .check)=={\"fails\":3,\"at\":1700000200,\"failed\":[\"www.youtube.com\",\"chat.example\"]}"
 expect_jq "a passing node" "$SOUT" "(.nodes[] | select(.id==\"$ID2\") | .check)=={\"fails\":0,\"at\":1700000200,\"failed\":[]}"
 expect_jq "a line of the older two-column form" "$SOUT" "(.nodes[] | select(.id==\"$ID3\") | .check)=={\"fails\":2,\"at\":null,\"failed\":[]}"
@@ -264,7 +264,7 @@ echo 'sideways 12' > /tmp/vpnpool/.tunnel
 measure_status
 begin "status/failed-exit-lookup-and-unknown-tunnel-state"
 expect_jq "node checks still read (positive control)" "$SOUT" "(.nodes[] | select(.id==\"$ID1\") | .check.fails)==3"
-expect_jq "no exit" "$SOUT" '.exit==null'
+expect_jq "the failure of this node's lookup is said (not 'not looked up yet')" "$SOUT" '.exit.ok==false and .exit.ip==null and .exit.node=="Node001"'
 expect_jq "unknown state -> null" "$SOUT" '.tunnel==null'
 end
 # the daemon is down: the files of a killed run say nothing
