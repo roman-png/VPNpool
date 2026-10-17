@@ -149,6 +149,11 @@ ctl build-config-not-installed build fail 'build/clean-subscription ;build/poiso
 	"$LIBX/build.sh" 'mv "$SB_CONF.new" "$SB_CONF"' 'rm -f "$SB_CONF.new"'
 # add / add_node write but never signal (and say n/a instead of not_running)
 ctl rpcd-add_node-no-signal rpcd fail 'rpcd/add_node/ok ;rpcd/add_node/no-daemon-reported ;rpcd/add_sub/ok ;rpcd/add_sub/no-daemon-reported ;rpcd/add/ok ;rpcd/add/no-daemon-reported ' \
+	"$RPCD" '		case "$a" in USR1|USR2) d=$(signal_word "$a") ;; esac' '		case "$a" in USR1|USR2)  d=$(signal_word "$a") ;; esac' \
+	"$RPCD" '		case "$a" in USR1|USR2) d=$(signal_word "$a") ;; esac' '		case "$a" in USR1|USR2) d=n/a ;; esac'
+# (the first pair re-spaces apply_api's same line, so the mutation lands in apply_add) and the
+# node / sub / favourite methods through apply_api: every one reports the daemon it signalled
+ctl rpcd-api-no-signal rpcd fail 'rpcd/set_url/ok ;rpcd/set_url/no-daemon-reported ;rpcd/del_subscription/ok ;rpcd/del_subscription/no-daemon-reported ;rpcd/del_source/ok ;rpcd/del_source/no-daemon-reported ;rpcd/import_select/ok ;rpcd/import_select/no-daemon-reported ;rpcd/delete_node/ok ;rpcd/delete_node/no-daemon-reported ;rpcd/delete_nodes/ok ;rpcd/delete_nodes/no-daemon-reported ;rpcd/restore_node/ok ;rpcd/restore_node/no-daemon-reported ;rpcd/refilter_node/ok ;rpcd/refilter_node/no-daemon-reported ;rpcd/activate_saved/ok ;rpcd/activate_saved/no-daemon-reported ;rpcd/deactivate_saved/ok ;rpcd/deactivate_saved/no-daemon-reported ;rpcd/del_sub/ok ;rpcd/del_sub/no-daemon-reported ;rpcd/hide/ok ;rpcd/hide/no-daemon-reported ;rpcd/unhide/ok ;rpcd/unhide/no-daemon-reported ;rpcd/auto_exclude/ok ;rpcd/auto_exclude/no-daemon-reported ;rpcd/auto_include/ok ;rpcd/auto_include/no-daemon-reported ;rpcd/sub_set/ok ;rpcd/sub_set/no-daemon-reported ;rpcd/sub_del/ok ;rpcd/sub_del/no-daemon-reported ;rpcd/connect/favourite-not-in-a-source-joins-the-pool ' \
 	"$RPCD" '		case "$a" in USR1|USR2) d=$(signal_word "$a") ;; esac' '		case "$a" in USR1|USR2) d=n/a ;; esac'
 ctl sched-old-block-kept sched fail 'sched/disabled-removes-block-keeps-user-jobs ' \
 	"$LIBX/sched.sh" 'inblk && $0 == e { inblk = 0; n = 0; next }' 'inblk && $0 == e { inblk = 0; for (i = 1; i <= n; i++) print buf[i]; print; n = 0; next }'
@@ -165,7 +170,7 @@ ctl adaptive-ttl-ignored adaptive fail 'adaptive/verdict-cache-ttl ' \
 ctl fetch-userinfo-lost fetch fail 'fetch/all-sources-ok ;fetch/primary-fails-extra-ok-keeps-primary-nodes ' \
 	"$LIBX/fetch.sh" '		| {expire: ($u.expire // null),' '		| {expire: null,'
 # stage 2 (2.5 / 2.11): fetch
-ctl fetch-no-per-source-cache fetch fail 'fetch/primary-fails-extra-ok-keeps-primary-nodes ;fetch/status-per-source ;fetch/all-fail-serves-cache ;fetch/removed-source-dropped-from-cache ;fetch/fetch-due-throttle ' \
+ctl fetch-no-per-source-cache fetch fail 'fetch/primary-fails-extra-ok-keeps-primary-nodes ;fetch/status-per-source ;fetch/all-fail-serves-cache ;fetch/removed-source-dropped-from-cache ;fetch/fetch-due-throttle ;fetch/oversized-answer-not-used ' \
 	"$LIBX/fetch.sh" 'if [ -s "$cached" ]; then' 'if false; then'
 ctl fetch-url-in-clear fetch fail 'fetch/token-masked-in-log ' \
 	"$LIBX/fetch.sh" 'log "fetch: $(mask_url "$url") -> $best nodes' 'log "fetch: $url -> $best nodes'
@@ -465,7 +470,7 @@ ctl ui2-overview-tunnel-ignored ui-overview fail 'FAIL - state in words for ever
 	"$VIEW/dashboard.js" "if (tn === 'down') return" "if (false) return"
 ctl ui2-overview-exit-dead-tunnel ui-overview fail 'FAIL - exit: only while the tunnel works' \
 	"$VIEW/dashboard.js" 'exit: !(live && tunnelUp && tag) ? null' 'exit: !(live && tag) ? null'
-ctl ui2-overview-pause-on ui-overview fail 'FAIL - a pause from Telegram' \
+ctl ui2-overview-pause-on ui-overview fail 'FAIL - a pause from Telegram;FAIL - state in words for every state the daemon reports' \
 	"$VIEW/dashboard.js" 'function vpnOn(st) { return !!(st && st.enabled && !st.paused); }' 'function vpnOn(st) { return !!(st && st.enabled); }'
 ctl ui2-failed-sites-mixed ui-overview fail 'FAIL - alerts in words' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js 'else { exact = false; (conf = conf || checkSites(st)).forEach(add); }' 'else exact = false;'
@@ -661,7 +666,7 @@ ctl awgb-looks-base64-bs-s parser fail 'parser/base64-blob-with-line-breaks ' \
 ctl awgb-uuid-bs-s parser fail 'parser/vless-id-with-letter-s ' \
 	"$LIBX/parser.uc" 'if (!length(uuid) || match(uuid, /[[:space:]:]/)) return' 'if (!length(uuid) || match(uuid, /[\s:]/)) return'
 # engine choice + cache
-ctl awgb-engine-never-chosen awg fail 'awg/select-engine-awg-nodes ;awg/select-stock-path-configured-is-automatic ;awg/build-engine-awg-in-config ;awg/status-engine-block ;awg/fork-stock-our-engine-wins ;awg/no-private-key-in-the-engine-log ;awg/chain-amnezia5-every-field ;awg/chain-amnezia5-runs ;awg/guard-no-default-route-is-not-the-node ;awg/guard-node-works-once-the-route-is-back ;awg/guard-port-in-use-keeps-the-change ;awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-mark-expires ;awg/guard-mark-ends-when-the-node-changes ;awg/guard-rolls-back-with-the-binary-of-the-config ;awg/guard-rollback-without-a-binary-record ;awg/guard-limit-two-repairs ;awg/add-with-engine-no-warning ' \
+ctl awgb-engine-never-chosen awg fail 'awg/select-engine-awg-nodes ;awg/select-stock-path-configured-is-automatic ;awg/build-engine-awg-in-config ;awg/status-engine-block ;awg/fork-stock-our-engine-wins ;awg/no-private-key-in-the-engine-log ;awg/chain-amnezia5-every-field ;awg/chain-amnezia5-runs ;awg/guard-no-default-route-is-not-the-node ;awg/guard-node-works-once-the-route-is-back ;awg/guard-node-dies-at-start-set-aside ;awg/daemon-finds-the-engine-process ;awg/guard-mark-expires ;awg/guard-mark-ends-when-the-node-changes ;awg/guard-rolls-back-with-the-binary-of-the-config ;awg/guard-rollback-without-a-binary-record ;awg/guard-limit-two-repairs ;awg/add-with-engine-no-warning ' \
 	"$LIBX/common.uc" '		if (ac.present && ac.awg) cap = ac;' '		if (false) cap = ac;'
 ctl awgb-cap-not-cached awg fail 'awg/engine-cap-cached-by-mtime-size ' \
 	"$LIBX/common.uc" "	if (!force && type(c) == 'object' && c.sig == sig && c.awg31 != null) return c;" '	;'
@@ -748,7 +753,7 @@ ctl awgb2-ui-no-awg31-text ui-unit fail 'every code the backend answers with has
 # parser: hidden ids, picks, the source index, one id = one node
 ctl s6-parser-hide-ignored parser fail 'parser/hide-skips-the-id-in-every-input ' \
 	"$LIBX/parser.uc" '	let hidden = !!(id && HIDE && HIDE[id]);' '	let hidden = false;'
-ctl s6-parser-pick-ignored parser fail 'parser/pick-only-for-the-next-file-before-dedup ' \
+ctl s6-parser-pick-ignored parser fail 'parser/pick-only-for-the-next-file-before-dedup ;parser/pick-skips-a-node-without-id ' \
 	"$LIBX/parser.uc" '		PICK = f.pick;' '		PICK = null;'
 ctl s6-parser-src-wrong parser fail 'parser/pick-only-for-the-next-file-before-dedup ' \
 	"$LIBX/parser.uc" '	if (WITH_SRC) ob._src = cur_src;' '	if (WITH_SRC) ob._src = 0;'
@@ -856,9 +861,9 @@ ctl s6-migrate-hard-pin-lost migrate fail 'migrate/hard-pin-becomes-the-preferre
 	"$LIBX/migrate.uc" "if (length(M.selected_node ?? '')) pref = id_of_tag('selected_node', M.selected_node);" ';'
 ctl s6-migrate-no-running-node-list migrate fail 'migrate/tag-stores-become-ids ;migrate/unmatched-kept-and-reported ' \
 	"$LIBX/migrate.uc" "know_outbounds(read_json(RUN + '/nodes.json', []));" ';'
-ctl s6-migrate-unmatched-silent migrate fail 'migrate/unmatched-kept-and-reported ' \
+ctl s6-migrate-unmatched-silent migrate fail 'migrate/unmatched-kept-and-reported ;migrate/awg-same-key-other-settings-kept ' \
 	"$LIBX/migrate.uc" 'function unmatched(store, value) { push(report.unmatched, { store: store, value: value }); }' 'function unmatched(store, value) { }'
-ctl s6-migrate-awg-not-renamed migrate fail 'migrate/awg-files-renamed-with-their-name ;migrate/rerun-after-an-interruption ' \
+ctl s6-migrate-awg-not-renamed migrate fail 'migrate/awg-files-renamed-with-their-name ;migrate/rerun-after-an-interruption ;migrate/awg-same-key-other-settings-kept ' \
 	"$LIBX/migrate.uc" "	push(awg_plan, { from: path, to: AWG + '/' + r.id + '.conf', body: named ? raw : ('# Name = ' + r.tag + '\n' + raw) });" '	;'
 ctl s6-migrate-awg-no-name migrate fail 'migrate/awg-files-renamed-with-their-name ' \
 	"$LIBX/migrate.uc" "body: named ? raw : ('# Name = ' + r.tag + '\n' + raw) });" 'body: raw });'
@@ -923,13 +928,13 @@ ctl s6-migrate-awg-dup-deleted migrate fail 'migrate/awg-same-key-other-settings
 	"$LIBX/migrate.uc" '		if (body_of(readfile(a.to)) == body_of(a.body)) { unlink(a.from); moved('"'"'awg_duplicate_removed'"'"'); }' '		if (true) { unlink(a.from); moved('"'"'awg_duplicate_removed'"'"'); }'
 ctl s6-migrate-old-backup-reused migrate fail 'migrate/second-1x-config-gets-its-own-backup ' \
 	"$LIBX/migrate.sh" '[ -f "$BKDIR/.in-progress" ] && BK=$(cat "$BKDIR/.in-progress" 2>/dev/null)' 'BK=$(ls "$BKDIR"/vpnpool-1.x-*.tar.gz 2>/dev/null | head -n1)'
-ctl s6-migrate-commit-before-files migrate fail 'migrate/runs-and-journals ' \
+ctl s6-migrate-commit-before-files migrate fail 'migrate/runs-and-journals ;migrate/subscriptions-become-sections ;migrate/imported-nodes-become-favourites-in-the-pool ;migrate/saved-nodes-become-favourites ;migrate/subscription-ua-first-in-the-client-list ;migrate/excluded-becomes-hidden ;migrate/hard-pin-becomes-the-preferred-node ;migrate/tag-stores-become-ids ;migrate/awg-files-renamed-with-their-name ;migrate/unmatched-kept-and-reported ;migrate/1x-leftovers-gone ;migrate/idempotent ;migrate/the-migrated-config-builds ;migrate/first-fetch-primary-down-keeps-its-nodes ;migrate/rerun-after-an-interruption ;migrate/second-1x-config-gets-its-own-backup ;migrate/awg-same-key-other-settings-kept ;migrate/waits-for-the-other-run ;migrate/uci-defaults-runs-it-and-reports ' \
 	"$LIBX/migrate.uc" "write_atomic(CONF + '/favorites.map.json', sprintf('%J', fav), 0600);" "u.set('vpnpool', 'main', 'schema', SCHEMA); u.commit('vpnpool'); exit(1);"
 ctl s6-initd-starts-on-1x migrate fail 'migrate/failed-migration-daemon-not-started ' \
 	package/vpnpool/files/etc/init.d/vpnpool '	if [ "$enabled" = "1" ] && [ "$schema" != 2 ]; then' '	if false; then'
 ctl s6-status-migration-failure-hidden migrate fail 'migrate/failure-visible-in-status ' \
 	"$LIBX/status.uc" "let migration = (o('schema', '') != '2' && type(migfail) == 'object')" 'let migration = (false)'
-ctl s6-upgrade-never-migrates upgrade fail 'migrated (schema 2) ;the service is started again after the migration ;the call right before the first one on the migrated config ' \
+ctl s6-upgrade-never-migrates upgrade fail 'FAIL - migrated (schema 2);FAIL - the service is started again after the migration;FAIL - the call right before the first one on the migrated config' \
 	package/vpnpool/files/etc/uci-defaults/90-vpnpool-2.0 '[ -x /usr/libexec/vpnpool/migrate.sh ] || exit 0' 'exit 0'
 # ---- ui4: "Update" of one subscription (fetch.sh --only, the daemon's queue, rpcd sub_refresh)
 ctl ui4-fetch-only-ignored fetch fail 'fetch/only-one-subscription ;fetch/only-the-others-from-their-own-cache ' \
