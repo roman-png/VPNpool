@@ -244,9 +244,30 @@ test('"Check again" reads diag again and redraws; an unreadable diag is said', a
 	t2.env.handlers.diag = () => ({ ok: false, code: 'script_failed', daemon: 'n/a', error: 'script_failed' });
 	t2.env.handlers.logs = () => logFixture(3);
 	const r2 = t2.v.render(await t2.v.load()); t2.env.mc.appendChild(r2);
+	await t2.env.flush();
 	ok(r2.querySelector('.vp-diag-checks').textContent.includes('did not give the diagnostics'), 'the page says diag is missing');
 	ok(toasts(t2, 'danger').includes(t2.common.CODE_TEXT.script_failed), 'the error toast');
 	eq(r2.querySelector('.vp-log').textContent.split('\n').length, 3, 'the log still works');
+});
+
+test('the log first, diag after the page is drawn, the log poll only once diag answered', async (t) => {
+	let answer;
+	t.env.handlers.logs = (p) => logFixture(5, p.source);
+	t.env.handlers.diag = () => new Promise(r => { answer = r; });
+	const data = await t.v.load();
+	eq(t.env.rpcLog.map(x => x[0]), [ 'logs' ], 'load reads the log only (diag is slow: not in the same request)');
+	const root = t.v.render(data);
+	t.env.mc.appendChild(root);
+	await t.env.flush();
+	eq(t.env.rpcLog.map(x => x[0]), [ 'logs', 'diag' ], 'diag asked once the page is drawn');
+	ok(root.querySelector('.vp-diag-checks').textContent.includes('Checking the router'), 'while diag runs: said');
+	eq(root.querySelector('.vp-log').textContent.split('\n').length, 5, 'the log is already shown');
+	eq(t.env.pollFns.length, 0, 'no log poll while diag runs (it would go in the same request)');
+	answer(diagFixture());
+	await t.env.flush();
+	eq(t.env.pollFns.length, 1, 'the log poll starts once diag answered');
+	ok(rowsOf(root.querySelector('.vp-diag-checks'))['The service is running'], 'the checks are drawn');
+	eq(toasts(t, 'info').length, 0, 'no "checked again" toast on open');
 });
 
 test('only diag, logs and conntest; no own rpc, no old dictionary module', async (t) => {
@@ -285,13 +306,18 @@ const MUTATIONS = [
 	{ name: 'the filter ignored', from: "if (!f) return all;", to: "return all;", expect: [ 'log: more than 40 lines, filter and count, download of what is shown, source and size, polled' ] },
 	{ name: 'download of the whole log, not what is shown', from: "var lines = this.shownLines();\n\t\tif (!lines.length) { common.toast(", to: "var lines = (this.log && this.log.lines) || [];\n\t\tif (!lines.length) { common.toast(", expect: [ 'log: more than 40 lines, filter and count, download of what is shown, source and size, polled' ] },
 	{ name: 'the source not asked', from: "return common.call('logs', { lines: n, source: src }", to: "return common.call('logs', { lines: n }", expect: [ 'log: more than 40 lines, filter and count, download of what is shown, source and size, polled' ] },
-	{ name: 'diag polled on a timer', from: "poll.add(L.bind(this.loadLog, this), 10);", to: "poll.add(L.bind(function() { this.loadLog(); return common.call('diag', {}); }, this), 10);", expect: [ 'log: more than 40 lines, filter and count, download of what is shown, source and size, polled' ] },
+	{ name: 'diag polled on a timer', from: "poll.add(L.bind(self.loadLog, self), 10);", to: "poll.add(L.bind(function() { self.loadLog(); return common.call('diag', {}); }, self), 10);", expect: [ 'log: more than 40 lines, filter and count, download of what is shown, source and size, polled' ] },
 	{ name: 'the update command offered without the engine', from: "if (a.installed && g.update_available) {", to: "if (g.update_available || !a.installed) {", expect: [ 'engine: AmneziaWG yes/no and how to install or update, in every case' ] },
 	{ name: 'AmneziaWG 3.1 not told apart', from: "g.awg31 ? _('supported, including 3.1') : _('supported (without 3.1)')", to: "_('supported, including 3.1')", expect: [ 'engine: AmneziaWG yes/no and how to install or update, in every case' ] },
 	{ name: 'the exit result not shown', from: "\t\t\tout.textContent = t;\n", to: "\n", expect: [ '"Check the exit through the VPN": country and address; a failure says why' ] },
-	{ name: '"Check again" does not redraw', from: "\t\t\tself.diag = d;\n\t\t\tself.paint();", to: "\t\t\tself.diag = d;", expect: [ '"Check again" reads diag again and redraws; an unreadable diag is said' ] },
+	{ name: '"Check again" does not redraw', from: "self.diag = d; self.diagFailed = false;\n\t\t\tself.paint();", to: "self.diag = d; self.diagFailed = false;", expect: [ '"Check again" reads diag again and redraws; an unreadable diag is said' ] },
 	// two layers: the values go in as text nodes, and every child is in an array
 	{ name: 'a foreign value as markup', from: [ [ "[ (value && value.nodeType) ? value : txt(shown(value)) ]", "(value && value.nodeType) ? value : shown(value)" ], [ 'var E = common.E;', '' ] ], expect: [ 'checks, the engine and every technical parameter from diag; foreign values are text' ] },
+	{ name: 'diag read together with the log', from: "return common.call('logs', { lines: LOG_DEFAULT, source: 'service' }, { quiet: true }).catch(function() { return null; });",
+		to: "return Promise.all([ common.call('diag', {}), common.call('logs', { lines: LOG_DEFAULT, source: 'service' }, { quiet: true }) ]).then(function(r) { return r[1]; }, function() { return null; });",
+		expect: [ 'the log first, diag after the page is drawn, the log poll only once diag answered' ] },
+	{ name: 'the log poll starts before diag answered', from: "this.runDiag(false).then(function() {\n\t\t\tpoll.add(L.bind(self.loadLog, self), 10);", to: "poll.add(L.bind(self.loadLog, self), 10); this.runDiag(false).then(function() {\n\t\t\t",
+		expect: [ 'the log first, diag after the page is drawn, the log poll only once diag answered' ] },
 	{ name: 'a failed log read not said', from: "self.logError = (e && e.text) || common.codeText('failed');", to: "self.logError = null;", expect: [ 'log: more than 40 lines, filter and count, download of what is shown, source and size, polled' ] }
 ];
 

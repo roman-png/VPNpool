@@ -1,7 +1,7 @@
 #!/bin/sh
 # vpnpool: emit a JSON diagnostics snapshot for the Diagnostics tab.
 # service/sing-box state, coexistence with podkop/zapret, routing artifacts,
-# direct egress (ISP) IP/country, sing-box version, and recent log lines.
+# direct egress (ISP) IP/country, the engine, the technical parameters (the log: rpcd logs).
 . /usr/libexec/vpnpool/lib.sh
 
 bool() { [ "$1" = "0" ] && echo false || echo true; }
@@ -31,7 +31,10 @@ SBVER=$("$(sb_bin)" version -n 2>/dev/null | head -1)
 COMM_N=$(uci -q get vpnpool.routing.community | tr ' ' '\n' | grep -c .)
 CACHE=false; CACHE_KB=0
 if [ -f /tmp/vpnpool/cache.db ]; then CACHE=true; CACHE_KB=$(( $(wc -c < /tmp/vpnpool/cache.db) / 1024 )); fi
-LOGS=$(log_lines service 40 | jq -R . | jq -s . 2>/dev/null)
+# The log is the rpcd method `logs` (lib.sh log_lines): logread is not run here — the page asks
+# for both at once, and a slow system log would hold the whole diagnostics up. "logs" stays an
+# empty list for older pages.
+LOGS='[]'
 
 # Technical parameters (read-only, shown only on the Diagnostics page): ports, marks and tables
 # the routing uses (they must not collide with podkop / other services), the engine binary and
