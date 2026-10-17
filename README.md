@@ -16,9 +16,6 @@ subscription as a pool, checks every node against the services *you* need, and s
 to a working one by itself. AmneziaWG nodes join the same pool. Managed from LuCI, a
 Telegram bot or plain `uci`.
 
-<p align="center">
-  <img alt="vpnpool Overview in LuCI: the VPN works, the node, the exit and its country, delay, speed, traffic per device" src="docs/screenshots/overview.jpg" width="820">
-</p>
 
 ```sh
 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
@@ -45,20 +42,7 @@ sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.
 
 ---
 
-## 📸 Screenshots
 
-Taken on a live router (Cudy TR3000, OpenWrt 24.10) with an AmneziaWG 3.1 node; addresses replaced
-with documentation ones. The interface follows the LuCI language (here Russian) and theme.
-
-| **Overview** — the state in words, the exit, traffic per device | **Nodes** — "+ Add", groups by subscription, Connect / back to automatic |
-|---|---|
-| ![vpnpool Overview tab: VPN works, node, exit IP and country, delay, speed, devices](docs/screenshots/overview.jpg) | ![vpnpool Nodes tab: add button, node card with its state, hidden nodes](docs/screenshots/nodes.jpg) |
-| **Routes** — what goes through the VPN, lists, your sites, devices | **Settings** — automatic switching, checked sites, protection, Telegram, backup |
-| ![vpnpool Routes tab: only selected sites, ready lists by groups, your sites, devices](docs/screenshots/routes.jpg) | ![vpnpool Settings tab: automatic choice, checked sites, kill-switch, Telegram, backup](docs/screenshots/settings.jpg) |
-| **Diagnostics** — checks, the log, the engine, technical parameters | **On a phone** |
-| ![vpnpool Diagnostics tab: checks, log with a filter, engine version, technical parameters](docs/screenshots/diagnostics.jpg) | ![vpnpool Overview on a phone](docs/screenshots/overview-mobile.jpg) ![vpnpool Nodes on a phone](docs/screenshots/nodes-mobile.jpg) |
-
----
 
 ## 🚀 Install
 
