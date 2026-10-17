@@ -184,7 +184,7 @@ ctl build-flash-always-written build fail 'build/unchanged-pool-no-flash-write '
 # stage 2 (2.3 / 2.4 / 2.8 / 2.10): daemon
 ctl daemon-killswitch-ignored daemon fail 'daemon/route-policy-table ;daemon/reload-killswitch-dead-tunnel-keeps-routes ;daemon/startup-killswitch-routes-at-once ;daemon/startup-guard-killswitch-blocks-before-first-build ;daemon/pause-flag-down-then-up ' \
 	"$LIBX/lib.sh" '[ "$1" = 1 ] && { echo up; return 0; }' '[ "$1" = 1 ] && { echo down; return 0; }'
-ctl daemon-reload-drops-routes-first daemon fail 'daemon/reload-killswitch-dead-tunnel-keeps-routes ;daemon/reload-healthy-keeps-routes ;daemon/reload-dead-tunnel-failsafe-down ;daemon/periodic-refresh-through-failsafe ;daemon/signal-during-route-up-no-desync ' \
+ctl daemon-reload-drops-routes-first daemon fail 'daemon/reload-killswitch-dead-tunnel-keeps-routes ;daemon/reload-healthy-keeps-routes ;daemon/reload-dead-tunnel-failsafe-down ;daemon/periodic-refresh-through-failsafe ;daemon/signal-during-route-up-no-desync ;daemon/reload-fetches-only-the-queued-subscriptions ;daemon/full-refetch-takes-the-queue-along ' \
 	"$LIBX/vpnpoold" '		start_singbox   # routes stay as they are while it restarts' '		"$LIBEXEC/route.sh" down; start_singbox'
 ctl daemon-startup-keeps-stale-table daemon fail 'daemon/startup-dead-tunnel-clears-stale-routes ;daemon/startup-guard-clears-stale-table-before-first-build ' \
 	"$LIBX/vpnpoold" 'if [ "$ROUTED" != 0 ] || [ -n "${2:-}" ]; then' 'if [ "$ROUTED" != 0 ] || [ "${2:-}" = reapply ]; then'
@@ -966,7 +966,7 @@ ctl ui4-tg-test-longest-refused rpcd fail 'rpcd/tg_test/longest-token-accepted '
 ctl ui4-diag-param-dropped ui-diag fail 'FAIL - checks, the engine and every technical parameter from diag' \
 	"$VIEW/diagnostics.js" "row(_('Mark of the routed traffic'), p.fwmark, 'fwmark')," ''
 ctl ui4-diag-polls-diag ui-diag fail 'FAIL - log: more than 40 lines' \
-	"$VIEW/diagnostics.js" 'poll.add(L.bind(this.loadLog, this), 10);' "poll.add(L.bind(function() { this.loadLog(); return common.call('diag', {}); }, this), 10);"
+	"$VIEW/diagnostics.js" 'poll.add(L.bind(self.loadLog, self), 10);' "poll.add(L.bind(function() { self.loadLog(); return common.call('diag', {}); }, self), 10);"
 ctl ui4-nodes-group-update-all ui-nodes fail 'FAIL - subscription "Update": only that subscription' \
 	"$VIEW/nodes.js" 'return this.handleSubRefresh(G.g.sub);' 'return this.handleRefresh();'
 ctl ui4-pages-found-not-merged ui-pages fail 'FAIL - routing: a site found automatically while the page was open' \

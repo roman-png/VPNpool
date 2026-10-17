@@ -79,11 +79,11 @@ function stamp() {
 function utf8b64(s) { return btoa(unescape(encodeURIComponent(s))); }
 
 return view.extend({
+	// the log first (quick); diag only after the page is drawn: LuCI sends calls of the same moment
+	// in ONE request, and the slow diag (a ping, a request outside) would hold the log up with it —
+	// past the request timeout when the system log is slow too
 	load: function() {
-		return Promise.all([
-			common.call('diag', {}).catch(function() { return null; }),
-			common.call('logs', { lines: LOG_DEFAULT, source: 'service' }, { quiet: true }).catch(function() { return null; })
-		]);
+		return common.call('logs', { lines: LOG_DEFAULT, source: 'service' }, { quiet: true }).catch(function() { return null; });
 	},
 
 	// ---- checks
@@ -104,15 +104,21 @@ return view.extend({
 		];
 	},
 
-	handleCheck: function() {
+	// diag: on open and on "Check again" (never on a timer); a failed read keeps what is shown
+	runDiag: function(again) {
 		var self = this;
 		this.checkBtn.disabled = true;
 		return common.call('diag', {}).then(function(d) {
-			self.diag = d;
+			self.diag = d; self.diagFailed = false;
 			self.paint();
-			common.toast(_('Checked again.'));
-		}, function() { return null; }).then(function() { self.checkBtn.disabled = false; });
+			if (again) common.toast(_('Checked again.'));
+		}, function() {
+			self.diagFailed = true;
+			if (!self.diag) self.paint();
+			return null;
+		}).then(function() { self.checkBtn.disabled = false; });
 	},
+	handleCheck: function() { return this.runDiag(true); },
 
 	handleExit: function() {
 		var self = this, out = this.exitOut;
@@ -251,7 +257,8 @@ return view.extend({
 	paint: function() {
 		var d = this.diag;
 		if (!d) {
-			dom.content(this.checksBox, [ E('p', { 'class': 'vp-hint' }, [ txt(_('The router did not give the diagnostics. Press "Check again".')) ]) ]);
+			dom.content(this.checksBox, [ E('p', { 'class': 'vp-hint' }, [ txt(this.diagFailed
+				? _('The router did not give the diagnostics. Press "Check again".') : _('Checking the router…')) ]) ]);
 			dom.content(this.engineBox, [ txt('') ]);
 			dom.content(this.paramsBox, [ txt('') ]);
 			return;
@@ -261,11 +268,12 @@ return view.extend({
 		dom.content(this.paramsBox, this.paramsBody(d));
 	},
 
-	render: function(data) {
+	render: function(log) {
+		var self = this;
 		injectCss();
-		this.diag = (data && data[0]) || null;
-		this.log = (data && data[1]) || null;
-		this.logError = (data && data[1]) ? null : _('The log could not be read.');
+		this.diag = null; this.diagFailed = false;
+		this.log = log || null;
+		this.logError = log ? null : _('The log could not be read.');
 		this.checksBox = E('div', { 'class': 'vp-diag-checks' });
 		this.engineBox = E('div', { 'class': 'vp-diag-engine' });
 		this.paramsBox = E('div', { 'class': 'vp-diag-params' });
@@ -281,8 +289,11 @@ return view.extend({
 		]);
 		this.paint();
 		this.paintLog();
-		poll.add(L.bind(this.loadLog, this), 10);
-		poll.start();
+		// the log is polled once diag has answered (not in the same request, see load)
+		this.runDiag(false).then(function() {
+			poll.add(L.bind(self.loadLog, self), 10);
+			poll.start();
+		});
 		return root;
 	},
 
