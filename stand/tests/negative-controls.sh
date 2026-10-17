@@ -325,7 +325,7 @@ ctl build-status-not-written build fail 'build/status-file-success ;build/status
 # fetch: a failed run forgets the last successful fetch time
 ctl fetch-status-forgets-last-ok fetch fail 'fetch/status-per-source ;fetch/term-records-interrupted ' \
 	"$LIBX/fetch.sh" 'else ($p[$r[0]].last_ok_at // null) end' 'else null end'
-ctl uitext-new-technical-string uitext fail 'uitext/real-app-no-new-violations ;uitext/baseline-gates-new-violations ;uitext/stale-baseline-line-fails ' \
+ctl uitext-new-technical-string uitext fail 'uitext/real-app-no-new-violations ;uitext/stale-baseline-line-fails ' \
 	"$VIEW/nodes.js" "_('Cancel')" "_('Cancel via rpcd')"
 # ui0: the guard reads the shared modules (vpnpool/common.js) and po, counts a po msgid once
 ctl uitext-views-only uitext fail 'uitext/positive-control-bad-fixture-caught ' \
@@ -334,9 +334,11 @@ ctl uitext-views-only uitext fail 'uitext/positive-control-bad-fixture-caught ' 
 #  counting a po msgid twice now shows only on the fixture)
 ctl uitext-po-counted-twice uitext fail 'uitext/positive-control-bad-fixture-caught ' \
 	stand/tests/ui-text-guard.uc '(catalog && seen_text[text])' '(false)'
+# any baseline at all covers every violation (the gate test now runs on the fixture's baseline)
+ctl uitext-baseline-covers-all uitext fail 'uitext/baseline-gates-new-violations ' 	stand/tests/ui-text-guard.uc 'for (let v in cur) if (!base[v]) {' 'for (let v in cur) if (!base[v] && !length(keys(base))) {'
 ctl uitext-po-header-scanned uitext fail 'uitext/positive-control-bad-fixture-caught ' \
 	stand/tests/ui-text-guard.uc "if (!(substr(cur, 0, 6) == 'msgstr' && id == ''))" 'if (true)'
-ctl uitext-common-js-technical uitext fail 'uitext/real-app-no-new-violations ;uitext/baseline-gates-new-violations ;uitext/stale-baseline-line-fails ' \
+ctl uitext-common-js-technical uitext fail 'uitext/real-app-no-new-violations ;uitext/stale-baseline-line-fails ' \
 	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js "_('More actions')" "_('More actions (watchdog)')"
 # ui0: po completeness (ui-i18n.sh check)
 ctl i18n-untranslated ui-i18n fail 'FAIL untranslated ru: More actions' \
@@ -976,7 +978,7 @@ ctl ui4-pages-found-not-merged ui-pages fail 'FAIL - routing: a site found autom
 ctl ui4-pages-text-as-archive ui-pages fail 'FAIL - settings: a text copy of an older version' \
 	"$VIEW/settings.js" 'if (!isGzip(bytes)) return self.importText(textOf(bytes), tooBig);' ''
 # the guard has no exception for the Diagnostics page: a technical word in its text is caught
-ctl ui4-diag-technical-label uitext fail 'uitext/real-app-no-new-violations ;uitext/baseline-gates-new-violations ;uitext/stale-baseline-line-fails ' \
+ctl ui4-diag-technical-label uitext fail 'uitext/real-app-no-new-violations ;uitext/stale-baseline-line-fails ' \
 	"$VIEW/diagnostics.js" "_('Port that receives the routed traffic')" "_('tproxy port that receives the routed traffic')"
 wait
 for n in $NC_ORDER; do
