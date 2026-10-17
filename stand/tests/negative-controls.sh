@@ -73,6 +73,8 @@ ctl() {
 		            line=$(grep '^PAGES: ' "$d.log" | tail -1) ;;
 		ui-nodes)   REPO_DIR="$d" node "$HERE/ui-nodes.test.js" > "$d.log" 2>&1
 		            line=$(grep '^NODES: ' "$d.log" | tail -1) ;;
+		ui-overview) REPO_DIR="$d" node "$HERE/ui-overview.test.js" > "$d.log" 2>&1
+		            line=$(grep '^OVERVIEW: ' "$d.log" | tail -1) ;;
 		*)          REPO_DIR="$d" sh "$HERE/run-in-docker.sh" "$suite" > "$d.log" 2>&1
 		            line=$(grep '^TESTS: ' "$d.log" | tail -1) ;;
 	esac
@@ -437,6 +439,14 @@ ctl ui2-status-exit-other-node status fail 'status/exit-of-another-node-not-show
 	"$LIBX/status.uc" '&& length(now_tag) && exj.node == now_tag)' '&& length(now_tag))'
 ctl ui2-status-tunnel-stale status fail 'status/daemon-down-no-tunnel-no-exit ' \
 	"$LIBX/status.uc" "let tf = running ? split(" "let tf = true ? split("
+ctl ui2-overview-legacy-call ui-overview fail 'FAIL - "Connected to X" and "Back to automatic choice";FAIL - only the 2.0 methods' \
+	"$VIEW/dashboard.js" "common.call('auto_select'" "common.call('set_preferred'"
+ctl ui2-overview-tunnel-ignored ui-overview fail 'FAIL - state in words for every state the daemon reports' \
+	"$VIEW/dashboard.js" "if (tn === 'down') return" "if (false) return"
+ctl ui2-nodes-check-words-dropped ui-nodes fail 'FAIL - a node that fails the check: which site' \
+	"$VIEW/nodes.js" 'state = deadText(st, n);' 'state = deadText(st);'
+ctl ui2-ci-overview-dropped ui-unit fail 'FAIL - packaging: translation in installer, feeds and CI' \
+	.github/workflows/build.yml '          node stand/tests/ui-overview.test.js --negative 2>&1 | tee ui-overview-neg.log' '          true'
 ctl ui2-status-check-dropped status fail 'status/tunnel-exit-and-node-checks ;status/failed-exit-lookup-and-unknown-tunnel-state ' \
 	"$LIBX/status.uc" 'check: id ? (ncheck[id] ?? null) : null,' 'check: null,'
 # runner: a suite that silently stops early must fail the run (min-cases.txt), not shrink total
@@ -766,8 +776,8 @@ ctl s6-daemon-pin-cleared-during-rebuild daemon fail 'daemon/preferred-gone-clea
 	"$LIBX/vpnpoold" '		[ -f "$SB_DATA/.reload_running" ] && return 0' '		:'
 ctl s6-daemon-pin-cleared-for-favourite daemon fail 'daemon/preferred-gone-cleared-except-rebuild-or-favourite ' \
 	"$LIBX/vpnpoold" "		jq -e --arg i \"\$pref\" 'has(\$i)' \"\$CONF_DIR/favorites.map.json\" >/dev/null 2>&1 && return 0" '		:'
-ctl s6-nodecheck-strikes-by-tag daemon fail 'daemon/nodecheck-wan-up-strikes-dead-node ' \
-	"$LIBX/nodecheck.sh" '	printf '"'"'%s%s%s\n'"'"' "$id" "$TAB" "$cur" >> "$newstrk"' '	printf '"'"'%s%s%s\n'"'"' "$t" "$TAB" "$cur" >> "$newstrk"'
+ctl s6-nodecheck-strikes-by-tag daemon fail 'daemon/nodecheck-wan-up-strikes-dead-node ;daemon/nodecheck-strikes-say-when-and-which-host ' \
+	"$LIBX/nodecheck.sh" '	printf '"'"'%s%s%s%s%s%s%s\n'"'"' "$id" "$TAB" "$cur"' '	printf '"'"'%s%s%s%s%s%s%s\n'"'"' "$t" "$TAB" "$cur"'
 ctl s6-speedtest-unresolved daemon fail 'daemon/node-tests-use-test-selector-only ;daemon/node-test-unknown-node-touches-nothing ' \
 	"$LIBX/speedtest.sh" 'R=$(node_resolve "$ARG") || {' 'R=$(printf '"'"'%s\t%s'"'"' "$ARG" "$ARG") || {'
 ctl s6-unlock-map-by-tag daemon fail 'daemon/node-tests-use-test-selector-only ' \

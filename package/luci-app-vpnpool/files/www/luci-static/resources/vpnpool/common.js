@@ -849,6 +849,60 @@ function bytesToB64(bytes) {
 	return btoa(s);
 }
 
+// ---- facts several screens show (the Overview and the Nodes tab): ONE computation each ----
+function fmtBytes(n) {
+	n = +n || 0;
+	if (n < 1024) return _('%d B').format(n);
+	if (n < 1048576) return _('%s KB').format((n / 1024).toFixed(1));
+	if (n < 1073741824) return _('%s MB').format((n / 1048576).toFixed(1));
+	return _('%s GB').format((n / 1073741824).toFixed(2));
+}
+function fmtDate(ts) { return new Date(ts * 1000).toLocaleDateString(); }
+function ago(ts) {
+	var s = Math.floor(Date.now() / 1000 - ts);
+	if (s < 90) return _('just now');
+	if (s < 3600) return _('%d min ago').format(Math.round(s / 60));
+	if (s < 86400) return _('%d h ago').format(Math.round(s / 3600));
+	return fmtDate(ts);
+}
+// the checked sites of the settings, as hosts ("www.youtube.com")
+function checkSites(st) {
+	return String(((st && st.settings) || {}).check_services || '').split(/[\s,]+/).filter(Boolean)
+		.map(function(s) { return s.replace(/^[a-z]+:\/\//i, '').replace(/[\/?#].*$/, ''); }).filter(Boolean);
+}
+// whole days until a moment (seconds); negative = it has passed
+function daysLeft(ts) { return Math.floor((ts * 1000 - Date.now()) / 86400000); }
+// What is known about one subscription (a status.uc subscriptions[] entry), as short parts
+// [{ t: text, k: '' | 'warn' | 'error', alert: text for the Overview's alerts or undefined }]:
+// on/off, every node / picked, expiry, the quota left, "updated", a failed update, picked nodes
+// gone from it. The thresholds are the ones the daemon warns at in Telegram (vpnpoold
+// periodic_refresh: quota <= 10 % left), plus an expiry within 7 days.
+function subFacts(s) {
+	var out = [];
+	if (!s || typeof s !== 'object') return out;
+	var name = s.name || _('Subscription');
+	if (!s.enabled) out.push({ t: _('turned off'), k: 'warn' });
+	out.push({ t: s.mode === 'pick' ? _('picked nodes: %d').format(s.picked || 0) : _('every node') });
+	if (s.expire) {
+		var days = daysLeft(s.expire);
+		if (days < 0) out.push({ t: _('expired on %s').format(fmtDate(s.expire)), k: 'error',
+			alert: s.enabled ? _('The subscription %s has expired: its nodes may stop working.').format(name) : undefined });
+		else out.push({ t: _('valid until %s (%d days left)').format(fmtDate(s.expire), days), k: days < 7 ? 'warn' : '',
+			alert: (days < 7 && s.enabled) ? _('The subscription %s expires in %d days (%s).').format(name, days, fmtDate(s.expire)) : undefined });
+	}
+	if (s.total > 0) {
+		var left = Math.max(0, s.total - (s.used || 0));
+		var low = left <= s.total * 0.1;
+		out.push({ t: _('%s of %s left').format(fmtBytes(left), fmtBytes(s.total)), k: low ? 'warn' : '',
+			alert: (low && s.enabled) ? _('The subscription %s has little traffic left: %s of %s.').format(name, fmtBytes(left), fmtBytes(s.total)) : undefined });
+	}
+	if (s.updated_at) out.push({ t: _('updated %s').format(ago(s.updated_at)) });
+	if (s.result === 'failed') out.push({ t: _('the last update failed'), k: 'error',
+		alert: s.enabled ? _('The subscription %s could not be updated the last time.').format(name) : undefined });
+	if (s.pick_missing > 0) out.push({ t: _('picked nodes gone from it: %d').format(s.pick_missing), k: 'warn' });
+	return out;
+}
+
 return baseclass.extend({
 	METHODS: METHODS,
 	CODE_TEXT: CODE_TEXT,
@@ -1407,5 +1461,14 @@ return baseclass.extend({
 	},
 
 	b64ToBytes: b64ToBytes,
-	bytesToB64: bytesToB64
+	bytesToB64: bytesToB64,
+
+	/** Sizes, dates, "N min ago" in the user's words (shared by the screens). */
+	fmtBytes: fmtBytes,
+	fmtDate: fmtDate,
+	ago: ago,
+	/** The checked sites of the settings (status.settings.check_services) as host names. */
+	checkSites: checkSites,
+	/** What is known about one subscription: [{ t, k, alert }] (see subFacts above). */
+	subFacts: subFacts
 });

@@ -131,19 +131,24 @@ function deferredText(reason) {
 	if (reason === 'start_failed') return _('Set aside: the VPN engine could not start with it');
 	return _('Waits: it cannot work right now');
 }
-/// the checked sites of the settings, as hosts ("www.youtube.com")
-function checkSites(st) {
-	return String(((st && st.settings) || {}).check_services || '').split(/[\s,]+/).filter(Boolean)
-		.map(function(s) { return s.replace(/^[a-z]+:\/\//i, '').replace(/[\/?#].*$/, ''); }).filter(Boolean);
-}
 // why a node failed the service check, in words. The check is strict (a node must open EVERY
-// checked site) and the backend does not say which site failed: with one site it is named, with
-// several the words say "one of them", with none it is the general connection check.
-function deadText(st) {
-	var s = checkSites(st);
-	if (s.length === 1) return _('Does not open %s, so it is left out of the automatic choice').format(s[0]);
-	if (s.length > 1) return _('Does not open one of the checked sites (%s), so it is left out of the automatic choice').format(s.join(', '));
-	return _('Fails the connection check, so it is left out of the automatic choice');
+// checked site). The node checker's last sweep (status node.check: failed checks in a row, when,
+// the hosts it did not reach) names the sites and says "3 checks in a row, 10 min ago"; without it
+// (a check of an older version) one checked site is named, several are "one of them", none is the
+// general connection check.
+function deadText(st, n) {
+	var c = (n && n.check && typeof n.check === 'object') ? n.check : null;
+	var failed = c ? arr(c.failed).filter(Boolean) : [];
+	var s = common.checkSites(st), head;
+	if (failed.length) head = _('Does not open %s').format(failed.join(', '));
+	else if (s.length === 1) head = _('Does not open %s').format(s[0]);
+	else if (s.length > 1) head = _('Does not open one of the checked sites (%s)').format(s.join(', '));
+	else head = _('Fails the connection check');
+	if (c && c.fails > 0) {
+		var d = N_(c.fails, '%d check in a row', '%d checks in a row').format(c.fails) + (c.at ? ', ' + common.ago(c.at) : '');
+		return _('%s: %s. It is left out of the automatic choice.').format(head, d);
+	}
+	return _('%s, so it is left out of the automatic choice').format(head);
 }
 // the lines of a paste numbered as analyze numbers them (a leading byte-order mark and the blank
 // lines around the text dropped, then one line per newline)
@@ -481,6 +486,12 @@ return view.extend({
 		this.update(st);
 		poll.add(L.bind(this.refresh, this), 5);
 		poll.start();
+		// "+ Add" of the Overview's wizard leads here with #add: open the dialog once
+		var loc = window.location;
+		if (loc && loc.hash === '#add') {
+			try { window.history.replaceState(null, '', loc.pathname + loc.search); } catch (e) {}
+			window.setTimeout(function() { self.handleAdd(); }, 0);
+		}
 		return root;
 	},
 
@@ -723,7 +734,7 @@ return view.extend({
 		else if (busy === 'unlock') state = _('Checking the services…');
 		else if (inUse) { state = n.preferred ? _('In use: chosen by you') : _('In use: automatic choice'); kind = 'ok'; }
 		else if (n.preferred) { state = _('Chosen by you, but not in use now: the automatic choice works instead'); kind = 'warn'; }
-		else if (n.dead && !n.kept) { state = deadText(st); kind = 'error'; }
+		else if (n.dead && !n.kept) { state = deadText(st, n); kind = 'error'; }
 		else if (why === 'excluded') state = _('Excluded by you from the automatic choice');
 		else if (why === 'not_member') state = _('Not on the list of nodes for the automatic choice');
 		else if (why === 'favorites_only') state = _('Not in the automatic choice: "favourites only" is on');

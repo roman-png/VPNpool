@@ -52,6 +52,13 @@ if command -v node >/dev/null 2>&1; then
 	node "$(hostpath "$HERE/ui-nodes.test.js")" --negative > "$TMPD/nneg" 2>&1
 	N=$(grep -E '^NODES-NEG: passed=[0-9]+ failed=[0-9]+$' "$TMPD/nneg")
 	case "$N" in "NODES-NEG: passed="[1-9]*" failed=0") ok "negative controls of the Nodes tab tests ($N)" ;; *) bad "negative controls of the Nodes tab: ${N:-no summary line}"; grep '^FAIL' "$TMPD/nneg" ;; esac
+	# the Overview tab: behaviour of the real view on the fakes (+ its own mutations)
+	node "$(hostpath "$HERE/ui-overview.test.js")" > "$TMPD/ov" 2>&1
+	U=$(grep -E '^OVERVIEW: passed=[0-9]+ failed=[0-9]+ checked=[0-9]+$' "$TMPD/ov")
+	case "$U" in "OVERVIEW: passed="[1-9]*" failed=0 checked="[1-9]*) ok "tests of the Overview tab ($U)" ;; *) bad "tests of the Overview tab: ${U:-no summary line}"; grep '^FAIL' "$TMPD/ov" ;; esac
+	node "$(hostpath "$HERE/ui-overview.test.js")" --negative > "$TMPD/oneg" 2>&1
+	N=$(grep -E '^OVERVIEW-NEG: passed=[0-9]+ failed=[0-9]+$' "$TMPD/oneg")
+	case "$N" in "OVERVIEW-NEG: passed="[1-9]*" failed=0") ok "negative controls of the Overview tab tests ($N)" ;; *) bad "negative controls of the Overview tab: ${N:-no summary line}"; grep '^FAIL' "$TMPD/oneg" ;; esac
 else
 	bad "node not found: syntax and unit tests of common.js did not run"
 fi
@@ -163,6 +170,15 @@ for pg in routing settings; do
 	cmp -s "$TMPD/served" "$RES/view/vpnpool/$pg.js" && ok "LuCI serves view/vpnpool/$pg.js (byte-identical)" || bad "LuCI serves view/vpnpool/$pg.js"
 done
 check_tr 'Routes' 'Маршруты'
+# --- ui2: the Overview (dashboard.js) is served, translated, and status carries what it shows
+CODE=$(curl -s -o "$TMPD/pg" -w '%{http_code}' -b "$CK" "$B/cgi-bin/luci/admin/services/vpnpool/dashboard")
+[ "$CODE" = 200 ] && grep -q "vpnpool/dashboard" "$TMPD/pg" && ok "page dashboard -> 200, loads view vpnpool/dashboard" || bad "page dashboard -> HTTP $CODE"
+curl -s -o "$TMPD/served" "$B/luci-static/resources/view/vpnpool/dashboard.js"
+cmp -s "$TMPD/served" "$RES/view/vpnpool/dashboard.js" && ok "LuCI serves view/vpnpool/dashboard.js (byte-identical)" || bad "LuCI serves view/vpnpool/dashboard.js"
+check_tr 'VPN works' 'VPN работает'
+check_tr "$(printf '%%d check in a row\002%s' 2)" '%d проверок подряд'
+ubus status > "$TMPD/st1"
+grep -q '"tunnel":' "$TMPD/st1" && grep -q '"exit":' "$TMPD/st1" && ok "status has the tunnel and exit fields of the Overview" || bad "status without tunnel / exit: $(head -c 200 "$TMPD/st1")"
 check_tr 'Revert' 'Отменить'
 check_tr 'There are unsaved changes.' 'Есть несохранённые изменения.'
 ubusj() { curl -s -H 'Content-Type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"call\",\"params\":[\"$SID\",\"vpnpool\",\"$1\",$2]}" "$B/ubus"; }

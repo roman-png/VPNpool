@@ -194,7 +194,8 @@ function makeEnv(opts) {
 
 function load(src, env) {
 	const fn = new Function('baseclass', 'rpc', 'ui', 'dom', 'E', '_', 'window', 'console', 'Date', 'document', src);
-	const C = fn(env.baseclass, env.rpc, env.ui, env.dom, env.D.E, s => s, env.win, env.consoleQuiet, env.FakeDate, env.doc);
+	// Date: the fake clock's now() AND a constructor (common.js formats dates too)
+	const C = fn(env.baseclass, env.rpc, env.ui, env.dom, env.D.E, s => s, env.win, env.consoleQuiet, env.DateC, env.doc);
 	return new C();
 }
 
