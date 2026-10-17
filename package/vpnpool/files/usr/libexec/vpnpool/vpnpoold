@@ -557,9 +557,23 @@ install_traps() {
 # do_reload <reload|refetch>: [fetch] -> build -> restart sing-box (routes untouched) ->
 # check the tunnel -> re-apply routing by the policy.
 do_reload() {
+	local ids
 	if [ "$1" = refetch ]; then
+		rm -f "$FETCH_ONLY"   # every subscription is fetched now, the asked ones too
 		log "refetch: fetching sources"
 		run_child "$LIBEXEC/fetch.sh" || log "fetch failed (cached copies are used where present)"
+	elif [ -s "$FETCH_ONLY" ]; then
+		# "Update" of one subscription (rpcd sub_refresh: its id queued + USR1): fetch only the
+		# queued ones, the others keep what they have. Taken atomically: an id queued while this
+		# runs goes into a new file with its own USR1.
+		mv -f "$FETCH_ONLY" "$FETCH_ONLY.run" 2>/dev/null
+		ids=$(sort -u "$FETCH_ONLY.run" 2>/dev/null | grep -E '^[A-Za-z0-9_]+$' | tr '\n' ' ')
+		rm -f "$FETCH_ONLY.run"
+		if [ -n "$ids" ]; then
+			log "reload: fetching subscription(s) $ids"
+			# shellcheck disable=SC2086
+			run_child "$LIBEXEC/fetch.sh" --only $ids || log "fetch failed (cached copies are used where present)"
+		fi
 	fi
 	save_prev   # what runs now: the start guard goes back to it if the new config fails
 	if ! run_child "$LIBEXEC/build.sh"; then

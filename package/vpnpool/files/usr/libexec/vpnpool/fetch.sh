@@ -17,7 +17,27 @@
 # subscription keeps its last values). "Updated": $CONF_DIR/sources_cache/.ok-<sub id> (mtime,
 # refreshed at most once a day) + fetch_status.json in RAM.
 # Exit: 0 if every subscription has data (fresh or cached), 1 if none produced anything.
+#
+#   fetch.sh                  every enabled subscription (the periodic / "Update subscriptions" run)
+#   fetch.sh --only <id>...   only these subscriptions ("Update" of one subscription, ROADMAP 10.3):
+#                             the other subscriptions keep what the last run fetched (a copy that is
+#                             missing is taken from their own cache), their status and meta stay as
+#                             they are; no cache clean-up and no throttle stamp (those are the full
+#                             run's). Exit 0 when the given subscriptions have data.
 . /usr/libexec/vpnpool/lib.sh
+
+ONLY=""
+if [ "${1:-}" = --only ]; then
+	shift
+	for a in "$@"; do case "$a" in ''|*[!A-Za-z0-9_]*) ;; *) ONLY="$ONLY $a" ;; esac; done
+	[ -n "$ONLY" ] || exit 0
+	ONLY="$ONLY "
+fi
+only_has() {   # $1=sub id -> 0 if this run fetches it
+	[ -z "$ONLY" ] && return 0
+	case "$ONLY" in *" $1 "*) return 0 ;; esac
+	return 1
+}
 
 mkdir -p "$SB_DATA"
 SRCDIR="$SB_DATA/sources"
@@ -149,9 +169,10 @@ FSTAT="$SB_DATA/fetch_status.json"
 FSTAT_TSV="$SB_DATA/.fetch_status.tsv"
 write_fetch_status() {
 	[ -f "$FSTAT" ] || echo '{}' > "$FSTAT"
-	jq -Rn --argjson at "$(date +%s)" --slurpfile prev "$FSTAT" '
+	# --only: the other subscriptions keep their entries of the last run
+	jq -Rn --argjson at "$(date +%s)" --argjson keep "$([ -n "$ONLY" ] && echo true || echo false)" --slurpfile prev "$FSTAT" '
 		($prev[0] // {}) as $p
-		| reduce (inputs | split("\t") | select(length >= 4)) as $r ({};
+		| reduce (inputs | split("\t") | select(length >= 4)) as $r (if $keep then $p else {} end;
 			.[$r[0]] = {id: $r[1], at: $at, result: $r[2], nodes: ($r[3] | tonumber? // 0),
 			            last_ok_at: (if $r[2] == "ok" then $at else ($p[$r[0]].last_ok_at // null) end)})' \
 		"$FSTAT_TSV" 2>/dev/null | write_atomic "$FSTAT"
@@ -175,7 +196,9 @@ write_meta() {
 	rm -f "$SB_DATA/.meta.new"
 }
 
-rm -rf "$SRCDIR"; mkdir -p "$SRCDIR"; : > "$FSTAT_TSV"
+# --only: what the last run fetched stays in place for the other subscriptions
+[ -z "$ONLY" ] && rm -rf "$SRCDIR"
+mkdir -p "$SRCDIR"; : > "$FSTAT_TSV"
 ucode "$MODEL" subs > "$SB_DATA/.subs" 2>/dev/null || : > "$SB_DATA/.subs"
 # Killed mid-run (the daemon stops / restarts): every subscription not answered yet is recorded as
 # "interrupted" (written atomically), so status never shows an old "ok" for this run.
@@ -184,7 +207,7 @@ on_signal() {
 	local sid en mode url
 	trap - INT TERM HUP
 	while IFS="$TAB" read -r sid en mode url; do
-		[ "$en" = 1 ] || continue
+		[ "$en" = 1 ] && only_has "$sid" || continue
 		cut -f1 "$FSTAT_TSV" 2>/dev/null | grep -Fxq -- "$url" && continue
 		printf '%s\t%s\tinterrupted\t0\n' "$url" "$sid" >> "$FSTAT_TSV"
 	done < "$SB_DATA/.subs"
@@ -197,13 +220,20 @@ nsrc=0; ngot=0; nfresh=0
 # a file, not a pipe: the loop must run in THIS shell to count (and to be interruptible)
 while IFS="$TAB" read -r sid en mode url; do
 	[ "$en" = 1 ] && [ -n "$url" ] || continue
+	if ! only_has "$sid"; then
+		# --only, another subscription: its copy of the last run stays; one that is missing (the
+		# run before never got it) comes from its own cache, so the build still sees its nodes
+		k=$(src_key "$url")
+		[ -f "$SRCDIR/s-$k.raw" ] || { [ -s "$CACHEDIR/s-$k.raw" ] && cp "$CACHEDIR/s-$k.raw" "$SRCDIR/s-$k.raw"; }
+		continue
+	fi
 	fetch_source "$url" "$sid"
 	nsrc=$((nsrc + 1)); ngot=$((ngot + GOT)); nfresh=$((nfresh + FRESH))
 done < "$SB_DATA/.subs"
 
 # Forget cached copies (and "updated" markers) of subscriptions that are no longer configured;
-# a switched-off subscription keeps its copy (switching it on again starts from it).
-if [ -d "$CACHEDIR" ]; then
+# a switched-off subscription keeps its copy (switching it on again starts from it). The full run only.
+if [ -z "$ONLY" ] && [ -d "$CACHEDIR" ]; then
 	while IFS="$TAB" read -r sid en mode url; do src_key "$url"; echo; done < "$SB_DATA/.subs" | grep . > "$SB_DATA/.keys"
 	for f in "$CACHEDIR"/s-*.raw; do
 		[ -f "$f" ] || continue
@@ -229,7 +259,8 @@ if [ -d "$CACHEDIR" ]; then
 fi
 # Record the attempt (any outcome): the daemon's start-up retry loop and restarts use it to
 # avoid re-downloading the subscriptions more often than INTERVAL_MIN (panels rate-limit).
-echo "$(date +%s) $(sources_sig)" | write_atomic "$FETCH_STAMP"
+# Not for --only: one subscription fetched is not the whole set.
+[ -z "$ONLY" ] && echo "$(date +%s) $(sources_sig)" | write_atomic "$FETCH_STAMP"
 trap - INT TERM HUP
 write_fetch_status
 write_meta
