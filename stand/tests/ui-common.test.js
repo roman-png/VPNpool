@@ -432,7 +432,7 @@ test('packaging: translation in installer, feeds and CI; stand-only pages left o
 	if ((inst.match(/^\tinstall_i18n\b/mg) || []).length < 2) bad.push('install.sh: translation not installed in both flows');
 	if (!/luci-i18n-vpnpool-ru_\*\.ipk/.test(pages) || !/luci-i18n-vpnpool-ru-\[0-9\]\*\.apk/.test(pages) || !/expected 3 \.ipk/.test(pages)) bad.push('pages.yml: translation not published');
 	if (!/luci-i18n-vpnpool-ru_\*\.ipk/.test(build) || !/expected 3/.test(build)) bad.push('build.yml: translation not collected');
-	if (!/ui-common\.test\.js --negative/.test(build) || !/ui-nodes\.test\.js --negative/.test(build) ||!/ui-i18n\.sh check/.test(build) || !/ui-components\.sh/.test(build)) bad.push('build.yml: UI checks not run in CI');
+	if (!/ui-common\.test\.js --negative/.test(build) || !/ui-nodes\.test\.js --negative/.test(build) || !/ui-overview\.test\.js --negative/.test(build) ||!/ui-i18n\.sh check/.test(build) || !/ui-components\.sh/.test(build)) bad.push('build.yml: UI checks not run in CI');
 	if (!/vpnpool\.ru\.lmo/.test(dep) || !/--exclude='\.\/www\/luci-static\/resources\/view\/vpnpool\/_\*'/.test(dep)) bad.push('deploy.sh: translation / stand-only pages');
 	eq(bad, [], 'packaging');
 });

@@ -403,6 +403,32 @@ test('subscription group: pick nodes, turn off, delete', async (t) => {
 	eq(t.calls('sub_set')[1], { id: 'sub_main', mode: 'pick', pick: [ ID.A, ID.C ] }, 'picked ids');
 });
 
+test('the Overview "+ Add" (#add) opens the dialog once and clears the address', async (t) => {
+	let replaced = null;
+	t.env.win.location = { hash: '#add', pathname: '/cgi-bin/luci/admin/services/vpnpool/nodes', search: '' };
+	t.env.win.history = { replaceState: (a, b, u) => { replaced = u; } };
+	ok(!t.env.ui.modalOpen, 'positive control: no dialog before the page');
+	await open(t, fixture()); await settle(t);
+	ok(t.env.ui.modalOpen && modal(t).querySelector('.vp-add-text'), 'the "+ Add" dialog is open');
+	eq(t.env.ui.calls.filter(c => c[0] === 'showModal').length, 1, 'once');
+	eq(replaced, '/cgi-bin/luci/admin/services/vpnpool/nodes', '#add removed from the address');
+});
+
+test('a node that fails the check: which site, how many checks in a row, how long ago', async (t) => {
+	const now = Math.floor(NOW / 1000);
+	const root = await open(t, fixture(s => {
+		node(s, 'Bravo').check = { fails: 3, at: now - 600, failed: [ 'www.youtube.com' ] };
+		node(s, 'Charlie').dead = true; node(s, 'Charlie').check = { fails: 1, at: now - 7200, failed: [ 'www.youtube.com', 'openai.com' ] };
+		s.auto_exclude_ids = [];
+		node(s, 'Delta').dead = true; node(s, 'Delta').check = { fails: 0, at: now - 60, failed: [] };
+	}));
+	ok(card(root, 'Bravo').classes.has('vp-dimmed'), 'positive control: Bravo is a failing node');
+	eq(stateOf(card(root, 'Bravo')), 'Does not open www.youtube.com: 3 checks in a row, 10 min ago. It is left out of the automatic choice.', 'the site it did not open, the checks, the time');
+	eq(stateOf(card(root, 'Charlie')), 'Does not open www.youtube.com, openai.com: 1 check in a row, 2 h ago. It is left out of the automatic choice.', 'two sites, one check');
+	eq(stateOf(card(root, 'Delta')), 'Does not open one of the checked sites (www.youtube.com, openai.com), so it is left out of the automatic choice', 'no failed check counted: the words without numbers');
+	eq(card(root, 'Bravo').querySelector('.vp-card-state').getAttribute('data-kind'), 'error', 'said as an error');
+});
+
 test('speed test: the card says it is testing, the result is a badge; a failure is said', async (t) => {
 	const root = await open(t, fixture());
 	t.env.handlers.speedtest = () => ({ ok: true, code: 'started', daemon: 'n/a', running: true });
@@ -571,7 +597,11 @@ const MUTATIONS = [
 	{ name: 'already_running taken as our start', from: "if (r && r.code === 'already_running') throw new common.Error('probe_busy', 'probe_source', r);", to: "", expect: [ 'picking nodes shows only the result of OUR probe; a long list says it is cut' ] },
 	{ name: 'the probe job not compared', from: "if (job != null && (!res || res.job !== job))", to: "if (false)", expect: [ 'picking nodes shows only the result of OUR probe; a long list says it is cut' ] },
 	{ name: 'a cut list not said', from: "var capped = !!(res && res.capped && res.total > nodes.length);", to: "var capped = false;", expect: [ 'picking nodes shows only the result of OUR probe; a long list says it is cut' ] },
-	{ name: 'the first checked site named for a strict check over several', from: "if (s.length > 1) return", to: "if (false) return", expect: [ 'groups by source, state words of every kind of card, no innerHTML' ] },
+	{ name: 'the first checked site named for a strict check over several', from: "else if (s.length > 1) head =", to: "else if (false) head =", expect: [ 'groups by source, state words of every kind of card, no innerHTML' ] },
+	{ name: '#add of the Overview ignored', from: "if (loc && loc.hash === '#add') {", to: "if (false) {", expect: [ 'the Overview "+ Add" (#add) opens the dialog once and clears the address' ] },
+	{ name: 'the hosts the check did not reach ignored', from: "if (failed.length) head =", to: "if (false) head =", expect: [ 'a node that fails the check: which site, how many checks in a row, how long ago' ] },
+	{ name: 'checks in a row not said', from: "if (c && c.fails > 0) {", to: "if (false) {", expect: [ 'a node that fails the check: which site, how many checks in a row, how long ago' ] },
+	{ name: 'the card does not pass the node to the words', from: "state = deadText(st, n);", to: "state = deadText(st);", expect: [ 'a node that fails the check: which site, how many checks in a row, how long ago' ] },
 	{ name: 'deferred node can be connected', from: "primary: n.deferred ? { label: _('Connect'), disabled: true }", to: "primary: false ? { label: _('Connect'), disabled: true }", expect: [ 'groups by source, state words of every kind of card, no innerHTML' ] },
 	{ name: 'add ignores the checkboxes', from: "if (!row.cb || !row.cb.checked) return;", to: "if (!row.cb) return;", expect: [ '"+ Add": a chip and a reason per line, add sends the checked lines, the result names the error lines' ] },
 	{ name: 'result leaves out the lines the check refused', from: "else if (it.status !== 'add') errLines.push(it.line);", to: "", expect: [ '"+ Add": a chip and a reason per line, add sends the checked lines, the result names the error lines' ] },
