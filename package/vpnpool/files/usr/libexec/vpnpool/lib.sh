@@ -18,12 +18,15 @@ log() { logger -t "$NAME" "$1"; }
 # own log (sing-box.log in RAM, colour codes dropped). Telegram bot tokens are masked, a line is
 # cut to 400 characters, and the newest lines that fit in ~160 KB are kept (rpcd takes at most
 # 256 KiB from an exec method, JSON escapes included).
+# The log for the Diagnostics page with the secrets out: bot tokens, the user part of node links
+# (vless://<uuid>@...) and the path / query of any address (subscription tokens, node keys live there).
 log_lines() {   # $1=service|engine $2=lines
 	case "$1" in
 		engine) tail -n "$2" "$SB_DATA/sing-box.log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' ;;
 		*) logread 2>/dev/null | grep -E "$NAME(\[[0-9]+\])?: " | tail -n "$2" \
 			| sed -E "s/ [a-z]+\.[a-z]+ $NAME(\[[0-9]+\])?: / /" ;;
-	esac | sed -E 's#(bot[0-9]{1,20}):[A-Za-z0-9_-]+#\1:***#g' | cut -c1-400 \
+	esac | sed -E 's#(bot[0-9]{1,20}):[A-Za-z0-9_-]+#\1:***#g; s#([A-Za-z][A-Za-z0-9+.-]*://)[^@/ ]+@#\1***@#g; s#([A-Za-z][A-Za-z0-9+.-]*://[^/?\# ]+)[/?\#][^ ]*#\1/***#g' \
+		| cut -c1-400 \
 		| awk '{ a[NR] = $0 } END { t = 0; s = NR + 1
 			for (i = NR; i >= 1; i--) { t += length(a[i]) + 1; if (t > 160000) break; s = i }
 			for (i = s; i <= NR; i++) print a[i] }'
