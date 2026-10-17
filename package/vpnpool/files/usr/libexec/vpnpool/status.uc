@@ -302,9 +302,14 @@ let tf = running ? split(trim(readfile(SB + '/.tunnel') ?? ''), ' ') : [];
 if (tf[0] in [ 'starting', 'up', 'down', 'wan_down' ] && match(tf[1] ?? '', /^[0-9]+$/))
 	tunnel = { state: tf[0], since: +tf[1] };
 let exj = running ? read_json(SB + '/exit.json', null) : null;
-let exit_info = (type(exj) == 'object' && exj.ok === true && length(now_tag) && exj.node == now_tag)
-	? { ip: '' + exj.ip, country: (type(exj.country) == 'string' && length(exj.country)) ? exj.country : null,
-	    node: exj.node, at: exj.at ?? null } : null;
+// ok:false = the lookup for this node found nothing (no echo service answered): said, so the
+// screen does not wait for it forever
+let exit_info = null;
+if (type(exj) == 'object' && length(now_tag) && exj.node == now_tag)
+	exit_info = (exj.ok === true)
+		? { ok: true, ip: '' + exj.ip, country: (type(exj.country) == 'string' && length(exj.country)) ? exj.country : null,
+		    node: exj.node, at: exj.at ?? null }
+		: { ok: false, ip: null, country: null, node: exj.node, at: exj.at ?? null };
 
 // ---- busy workers / progress ----
 let busy = {

@@ -679,19 +679,28 @@ node_quality_check() {
 # exitip.sh asks ONE IP-echo service through the tunnel. Only while the tunnel works (this
 # tick's watchdog verdict), in the background, and only when needed: the active node changed,
 # or the last answer is older than EXIT_EVERY (EXIT_RETRY after a lookup that found nothing).
+# Never more often than EXIT_MIN, even when the automatic choice keeps switching nodes: the
+# echo services block an address that asks too often. The answer of a lookup is read once
+# (EXIT_SEEN), not on every tick.
 EXIT_NODE=""
 EXIT_LAST=0
+EXIT_SEEN=""      # "" = the answer of the last lookup not read yet | ok | failed
 EXIT_EVERY=1800
 EXIT_RETRY=300
+EXIT_MIN=60
 exit_info_check() {   # $1 = the active node (tag) $2 = now (seconds)
 	local now=$2 age
 	[ -n "$1" ] && [ "$WD_HEALTHY" = 1 ] || return 0
 	age=$(( now - EXIT_LAST ))
+	[ "$age" -lt "$EXIT_MIN" ] && return 0
 	if [ "$1" = "$EXIT_NODE" ]; then
 		[ "$age" -lt "$EXIT_RETRY" ] && return 0
-		[ "$age" -lt "$EXIT_EVERY" ] && grep -q '"ok":true' "$SB_DATA/exit.json" 2>/dev/null && return 0
+		if [ -z "$EXIT_SEEN" ]; then
+			if grep -q '"ok":true' "$SB_DATA/exit.json" 2>/dev/null; then EXIT_SEEN=ok; else EXIT_SEEN=failed; fi
+		fi
+		[ "$EXIT_SEEN" = ok ] && [ "$age" -lt "$EXIT_EVERY" ] && return 0
 	fi
-	EXIT_NODE=$1; EXIT_LAST=$now
+	EXIT_NODE=$1; EXIT_LAST=$now; EXIT_SEEN=""
 	setsid "$LIBEXEC/exitip.sh" "$1" >/dev/null 2>&1 &
 }
 
