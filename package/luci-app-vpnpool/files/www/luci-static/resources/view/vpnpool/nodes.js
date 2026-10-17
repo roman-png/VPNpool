@@ -70,7 +70,10 @@ var CSS = [
 	'.vp-add-mode{max-width:100%;box-sizing:border-box}',
 	'.vp-add-pick,.vp-pick-box{flex:1 1 100%;min-width:0}',
 	'.vp-pick-list{max-height:16em;overflow:auto;margin:.3em 0;padding:.2em .4em;border:1px solid var(--border-color-low,rgba(128,128,128,.3));border-radius:4px}',
-	'.vp-pick-item{display:flex;align-items:center;gap:.5em;padding:.2em 0;min-width:0;cursor:pointer}',
+	'.vp-pick-item{display:flex;align-items:flex-start;gap:.5em;padding:.2em 0;min-width:0;cursor:pointer}',
+	// the box sits in a cell one text line high: centred on the FIRST line of a name that wraps
+	'.vp-cb{flex:0 0 auto;display:flex;align-items:center;height:1.4em;height:1lh}',
+	'.vp-cb>input{margin:0}',
 	'.vp-pick-item span{overflow-wrap:anywhere;min-width:0}',
 	'.vp-pick-tools{display:flex;flex-wrap:wrap;gap:.4em;align-items:center}',
 	'.vp-add-result{margin:.5em 0;overflow-wrap:anywhere}',
@@ -293,7 +296,7 @@ function pickList(res, checked) {
 		cb.checked = !!checked(n);
 		boxes.push({ cb: cb, n: n });
 		return E('label', { 'class': 'vp-pick-item' }, [
-			cb,
+			E('span', { 'class': 'vp-cb' }, [ cb ]),
 			E('span', {}, [ n.tag || n.id ]),
 			E('span', { 'class': 'vp-muted' }, [ [ n.server, (n.delay != null && n.delay > 0) ? _('%d ms').format(n.delay) : _('no answer') ].filter(Boolean).join(' · ') ])
 		]);
@@ -1104,7 +1107,7 @@ return view.extend({
 			list.disable(allBox.checked);
 			allBox.addEventListener('change', function() { list.disable(allBox.checked); });
 			dom.content(box, [
-				E('label', { 'class': 'vp-pick-item' }, [ allBox, E('span', {}, _('Take every node of the subscription, new ones too')) ]),
+				E('label', { 'class': 'vp-pick-item' }, [ E('span', { 'class': 'vp-cb' }, [ allBox ]), E('span', {}, _('Take every node of the subscription, new ones too')) ]),
 				list.el
 			]);
 			saveBtn.disabled = false;
