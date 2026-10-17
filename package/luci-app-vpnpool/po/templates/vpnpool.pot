@@ -127,6 +127,7 @@ msgid "The last update of the VPN settings failed; the previous ones keep workin
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/dashboard.js:154
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:276
 #: files/usr/share/luci/menu.d/luci-app-vpnpool.json
 msgid "Diagnostics"
 msgstr ""
@@ -273,7 +274,7 @@ msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/dashboard.js:354
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:406
-#: files/www/luci-static/resources/vpnpool/common.js:901
+#: files/www/luci-static/resources/vpnpool/common.js:911
 msgid "Subscription"
 msgstr ""
 
@@ -325,145 +326,333 @@ msgstr ""
 msgid "Back to automatic choice."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:30
-msgid "Testing exit via VPN…"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:94
+msgid "The service is turned on"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:33
-msgid "VPN exit: %s (IP %s)"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:94
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:95
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:96
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:97
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:98
+msgid "yes"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:35
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:37
-msgid "VPN exit test failed — is the service running?"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:94
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:95
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:96
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:97
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:98
+msgid "no"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:48
-msgid "Service"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:95
+msgid "The service is running"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:49
-msgid "Enabled"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:96
+msgid "Traffic goes through the VPN"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:49
-msgid "Daemon running"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:97
+msgid "Starts with the router"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:50
-msgid "Routing active"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:98
+msgid "The VPN engine answers"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:50
-msgid "Autostart on boot"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:98
+msgid "the service is not running"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:51
-msgid "sing-box PID"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:99
+msgid "Internet without the VPN"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:51
-msgid "Clash API reachable"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:99
+msgid "works"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:54
-msgid "Coexistence"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:99
+msgid "does not work"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:55
-msgid "podkop running"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:100
+msgid "Exit without the VPN"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:55
-msgid "podkop nft table"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:100
+msgid "unknown"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:56
-msgid "zapret nft table"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:101
+msgid "podkop on this router"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:59
-msgid "Network (direct / ISP path)"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:101
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:102
+msgid "found"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:60
-msgid "Internet (direct)"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:101
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:102
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:133
+msgid "not found"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:61
-msgid "WAN interface"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:102
+msgid "zapret on this router"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:61
-msgid "Gateway"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:113
+msgid "Checked again."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:62
-msgid "Direct egress IP"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:120
+msgid "Checking the exit through the VPN…"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:62
-msgid "Direct egress country"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:122
+msgid "Exit through the VPN: %s, address %s."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:63
-msgid "This is your ISP exit (traffic NOT via VPN). Proxied nodes exit elsewhere — see Dashboard pings."
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:133
+msgid "Version"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:65
-msgid "Test exit via VPN"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:134
+msgid "AmneziaWG"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:68
-msgid "Community rule-sets"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:134
+msgid "supported, including 3.1"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:69
-msgid "Lists configured"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:134
+msgid "supported (without 3.1)"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:70
-msgid "SRS cache present"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:135
+msgid "not supported"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:71
-msgid "SRS cache size (KB)"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:136
+msgid "Engine with AmneziaWG"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:74
-msgid "Resources"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:137
+msgid "installed, version %s"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:75
-msgid "sing-box version"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:137
+msgid "kept in memory (installed again at every start)"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:75
-msgid "tproxy port"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:138
+msgid "not installed"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:76
-msgid "fwmark / table"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:140
+msgid "A newer version of the engine with AmneziaWG is available: %s. To update it, connect to the router over SSH and run:"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:76
-msgid "Clash API"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:143
+msgid "The engine with AmneziaWG is up to date. A later version is installed by this command on the router (over SSH):"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:79
-msgid "Recent logs"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:146
+msgid "For AmneziaWG nodes, install the engine with AmneziaWG: connect to the router over SSH and run:"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:81
-msgid "(no logs)"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:149
+msgid "The standard engine is updated with the other packages of the router: System → Software. If podkop is installed, update them together."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:89
-msgid "VPN Pool — Diagnostics"
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:157
+msgid "For reference when something goes wrong. They must not coincide with those of other VPN services on the router (podkop has its own). They are changed only on the router itself."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:91
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:159
+msgid "Port that receives the routed traffic"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:160
+msgid "Port for checks through the VPN"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:161
+msgid "Port for testing one node"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:162
+msgid "Mark of the routed traffic"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:163
+msgid "Routing table and its priority"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:164
+msgid "Engine control address"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:165
+msgid "Network of the devices"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:165
+msgid "found automatically"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:166
+msgid "Living next to other VPN services"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:167
+msgid "Order of name lookups"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:168
+msgid "Address of the connection check"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:169
+msgid "Largest subscription download, KB"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:170
+msgid "Free memory a speed test needs, KB"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:171
+msgid "Sites checked per search run"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:172
+msgid "Engine program"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:172
+msgid "chosen automatically"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:173
+msgid "Program names used to download subscriptions"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:173
+msgid "the standard list"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:174
+msgid "Engine process number"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:175
+msgid "Ready-made lists in use"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:176
+msgid "Copy of the ready-made lists"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:176
+msgid "%d KB"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:176
+msgid "none yet"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:177
+msgid "Internet connection of the router"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:185
+msgid "Which log"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:186
+msgid "The service"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:187
+msgid "The VPN engine"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:190
+msgid "How many lines"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:191
+msgid "last %d lines"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:193
+msgid "Filter: show the lines with this text"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:194
+msgid "Filter"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:200
 msgid "Refresh"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:201
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1059
+msgid "Download"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:219
+msgid "No line has this text."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:219
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:245
+msgid "The log is empty."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:226
+msgid "Lines: %d"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:226
+msgid "Lines: %d of %d"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:254
+msgid "The router did not give the diagnostics. Press \"Check again\"."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:268
+msgid "The log could not be read."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:272
+msgid "Check again"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:273
+msgid "Check the exit through the VPN"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:277
+msgid "Checks"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:278
+msgid "Log"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:279
+msgid "VPN engine"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/diagnostics.js:280
+msgid "Technical parameters"
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:110
@@ -550,7 +739,7 @@ msgid "Another address is being checked right now. Try again when that check end
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:408
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1067
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1076
 msgid "My nodes"
 msgstr ""
 
@@ -588,7 +777,7 @@ msgstr ""
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:439
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:649
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:761
-#: files/www/luci-static/resources/vpnpool/common.js:1226
+#: files/www/luci-static/resources/vpnpool/common.js:1236
 msgid "More actions"
 msgstr ""
 
@@ -615,7 +804,7 @@ msgstr ""
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:743
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:944
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:961
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1121
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1130
 msgid "Delete"
 msgstr ""
 
@@ -664,7 +853,7 @@ msgid "Update"
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:606
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1055
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1064
 msgid "%d node"
 msgid_plural "%d nodes"
 msgstr[0] ""
@@ -683,7 +872,7 @@ msgid "No nodes from this subscription yet."
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:617
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1264
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1273
 msgid "Pick nodes…"
 msgstr ""
 
@@ -871,7 +1060,7 @@ msgid "%s is checked automatically again."
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:868
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1020
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1029
 msgid "At least one node must stay in the automatic choice."
 msgstr ""
 
@@ -916,7 +1105,7 @@ msgid "Copy the link"
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:911
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1071
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1080
 msgid "Close"
 msgstr ""
 
@@ -1001,257 +1190,261 @@ msgstr ""
 msgid "Updating every subscription: the list refreshes when it is done."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1011
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1007
+msgid "Updating the subscription %s: its nodes refresh when it is done."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1008
+msgid "The subscription is turned off. Turn it on to update it."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1020
 msgid "Which nodes take part in the automatic choice"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1012
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1021
 msgid "The automatic choice switches only between the checked nodes; new nodes of the subscriptions take part too. The others stay in the list: you can still connect to them yourself."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1013
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1022
 msgid "\"Favourites only\" is on: of the checked nodes, only the favourites take part."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1014
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1023
 msgid "A list of nodes for the automatic choice from the previous version is in effect: new nodes do not join it. Save this window and new nodes will take part by themselves."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1017
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1082
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1172
-#: files/www/luci-static/resources/vpnpool/common.js:1335
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1026
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1091
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1181
+#: files/www/luci-static/resources/vpnpool/common.js:1345
 msgid "Cancel"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1018
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1079
-#: files/www/luci-static/resources/vpnpool/common.js:832
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1027
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1088
+#: files/www/luci-static/resources/vpnpool/common.js:842
 msgid "Save"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1029
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1038
 msgid "Saved: %d of %d nodes take part in the automatic choice."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1030
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1039
 msgid "Every node takes part in the automatic choice, new ones too."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1039
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1048
 msgid "Collecting the links…"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1049
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1058
 msgid "Copy"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1050
-msgid "Download"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1056
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1065
 msgid "Node links"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1057
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1066
 msgid "The same as a subscription"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1060
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1069
 msgid "There is nothing to export in this set."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1063
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1072
 msgid "Export nodes"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1064
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1073
 msgid "Choose which nodes to export: you get their links and the same list as a subscription for another app."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1066
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1075
 msgid "Favourites"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1068
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1077
 msgid "Every node"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1078
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1286
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1087
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1295
 msgid "Downloading the subscription and checking its nodes. On a slow router this takes up to a minute."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1080
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1089
 msgid "Pick nodes: %s"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1095
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1104
 msgid "Take every node of the subscription, new ones too"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1104
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1113
 msgid "Pick at least one node, or take every node."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1106
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1115
 msgid "Saved: the subscription gives every node, new ones too."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1106
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1115
 msgid "Saved: the subscription gives %d picked nodes."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1114
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1123
 msgid "The subscription is on: its nodes come back after the update."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1114
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1123
 msgid "The subscription is off: its nodes are not used."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1119
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1128
 msgid "Delete the subscription %s?"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1120
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1129
 msgid "Its nodes leave the list."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1120
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1129
 msgid "Your favourites from it stay and connect with one button."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1123
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1132
 msgid "The subscription is deleted."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1132
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1141
 msgid "Links, subscription addresses or settings"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1133
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1142
 msgid "Paste node links (one per line), a subscription address or AmneziaWG settings"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1141
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1150
 msgid "Check"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1142
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1151
 msgid "Add"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1149
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1158
 msgid "The text has changed: check it again."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1163
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1172
 msgid "Add nodes"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1164
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1173
 msgid "One field for everything: node links, a subscription address, an AmneziaVPN link or AmneziaWG settings. Check first: every line shows whether it will be added."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1167
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1176
 msgid "From a file…"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1168
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1177
 msgid "QR code from a picture…"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1186
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1195
 msgid "The field now holds only these settings: AmneziaWG settings are added one file at a time."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1195
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1204
 msgid "The file could not be read."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1202
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1211
 msgid "No QR code was found in the picture. Try a sharper or a closer picture."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1204
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1213
 msgid "The picture could not be read."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1214
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1223
 msgid "Paste links or load a file first."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1215
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1224
 msgid "The text is too large to check at once: add it in parts."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1225
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1234
 msgid "Will wait for the engine"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1225
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1234
 msgid "Will be added"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1226
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1235
 msgid "Repeated"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1226
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1235
 msgid "Already there"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1227
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1236
 msgid "Will not be added"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1239
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1248
 msgid "Nothing that could be added was found in the text."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1254
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1263
 msgid "Add line %d"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1259
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1268
 msgid "line %d"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1262
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1271
 msgid "What to take from the subscription"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1263
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1272
 msgid "Take every node and keep it updated"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1276
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1285
 msgid "Will be added: %d, already there: %d, will not be added: %d"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1308
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1317
 msgid "Line %d: pick at least one node of the subscription, or take every node."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1349
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1358
 msgid "Not added"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1354
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1363
 msgid "Added or already there"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1354
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1363
 msgid "Added"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1362
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1371
 msgid "Added: %d, already there: %d, errors: %d"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1363
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1372
 msgid "lines %s"
 msgstr ""
 
@@ -1503,966 +1696,985 @@ msgstr ""
 msgid "Addresses like 192.168.1.50, one per line: for devices with a fixed address that are not in the list above."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:296
+#: files/www/luci-static/resources/view/vpnpool/routing.js:297
 #: files/usr/share/luci/menu.d/luci-app-vpnpool.json
 msgid "Routes"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/routing.js:297
+#: files/www/luci-static/resources/view/vpnpool/routing.js:298
 msgid "Choose what goes through the VPN. Changes apply after \"Save\"."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:62
+#: files/www/luci-static/resources/view/vpnpool/settings.js:78
 msgid "10 minutes"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:62
+#: files/www/luci-static/resources/view/vpnpool/settings.js:78
 msgid "30 minutes"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:62
+#: files/www/luci-static/resources/view/vpnpool/settings.js:78
 msgid "1 hour"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:62
+#: files/www/luci-static/resources/view/vpnpool/settings.js:78
 msgid "3 hours"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:63
+#: files/www/luci-static/resources/view/vpnpool/settings.js:79
 msgid "6 hours"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:63
+#: files/www/luci-static/resources/view/vpnpool/settings.js:79
 msgid "12 hours"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:63
+#: files/www/luci-static/resources/view/vpnpool/settings.js:79
 msgid "24 hours"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:66
+#: files/www/luci-static/resources/view/vpnpool/settings.js:82
 msgid "Everything (very large)"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:66
+#: files/www/luci-static/resources/view/vpnpool/settings.js:82
 msgid "Detailed"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:66
-#: files/www/luci-static/resources/view/vpnpool/settings.js:285
+#: files/www/luci-static/resources/view/vpnpool/settings.js:82
+#: files/www/luci-static/resources/view/vpnpool/settings.js:330
 msgid "Normal"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:67
+#: files/www/luci-static/resources/view/vpnpool/settings.js:83
 msgid "Warnings and errors"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:67
+#: files/www/luci-static/resources/view/vpnpool/settings.js:83
 msgid "Errors only"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:67
+#: files/www/luci-static/resources/view/vpnpool/settings.js:83
 msgid "Severe errors only"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:68
+#: files/www/luci-static/resources/view/vpnpool/settings.js:84
 msgid "Crashes only"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:95
+#: files/www/luci-static/resources/view/vpnpool/settings.js:111
 msgid "The test message is sent: check Telegram."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:110
+#: files/www/luci-static/resources/view/vpnpool/settings.js:126
 msgid "The backup is downloaded. Nodes: %d, subscriptions: %d, favourites: %d."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:124
+#: files/www/luci-static/resources/view/vpnpool/settings.js:140
 msgid "This file is too large to upload through the page: at most %d KB."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:136
+#: files/www/luci-static/resources/view/vpnpool/settings.js:154
 msgid "Nodes: %d"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:137
+#: files/www/luci-static/resources/view/vpnpool/settings.js:155
 msgid "Subscriptions: %d"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:138
+#: files/www/luci-static/resources/view/vpnpool/settings.js:156
 msgid "Favourites: %d"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:139
+#: files/www/luci-static/resources/view/vpnpool/settings.js:157
 msgid "AmneziaWG and WireGuard nodes: %d"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:141
+#: files/www/luci-static/resources/view/vpnpool/settings.js:159
+#: files/www/luci-static/resources/view/vpnpool/settings.js:191
 msgid "The unsaved changes on this page are lost."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:143
+#: files/www/luci-static/resources/view/vpnpool/settings.js:161
 msgid "Restore from this backup?"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:144
+#: files/www/luci-static/resources/view/vpnpool/settings.js:162
 msgid "All current settings, subscriptions and nodes are replaced by the ones from the file. The file holds:"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:146
+#: files/www/luci-static/resources/view/vpnpool/settings.js:164
+#: files/www/luci-static/resources/view/vpnpool/settings.js:196
 msgid "Replace everything"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:153
+#: files/www/luci-static/resources/view/vpnpool/settings.js:171
+#: files/www/luci-static/resources/view/vpnpool/settings.js:202
 msgid "Restored. The service starts again with the restored settings."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:175
-msgid "Automatic switching"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:176
-msgid "Switch to a working node automatically"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:177
-msgid "When the current node stops working, the router moves to the fastest working one."
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:178
-msgid "Choose only among favourite nodes"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:179
-msgid "The automatic choice uses only your favourite nodes while at least one of them works."
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:180
-msgid "Add working nodes to favourites automatically"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:181
-msgid "From time to time the fastest working nodes are kept in favourites, so they stay when a subscription ends. Your own favourites are never touched."
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:182
-msgid "How many to keep"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:188
-msgid "Checked sites"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:189
-msgid "Sites to check"
-msgstr ""
-
 #: files/www/luci-static/resources/view/vpnpool/settings.js:190
-msgid "The sites the VPN must really open, one per line — usually the blocked ones, for example youtube.com. The automatic choice uses a node only if it opens every one of them. Empty: a general internet check."
+msgid "The subscriptions, nodes and settings in the file are moved over to this version."
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/settings.js:193
-msgid "Set aside nodes that do not open these sites"
+msgid "Restore the settings of an older version?"
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/settings.js:194
-msgid "Such nodes stay in the list and can be chosen by hand, but the automatic choice skips them."
+msgid "This is a text copy of the settings saved by an older version of VPN Pool, not a backup file. All current settings, subscriptions and nodes are replaced by the ones from it."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:197
-msgid "Protection"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:219
+msgid "Automatic switching"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:198
-msgid "Block the internet while the VPN is down"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:220
+msgid "Switch to a working node automatically"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:199
-msgid "While no node works, what should go through the VPN does not go directly: with \"everything except the chosen sites\" that is the whole internet, with \"only the chosen sites\" only those sites. Off: it goes directly until a node works again."
+#: files/www/luci-static/resources/view/vpnpool/settings.js:221
+msgid "When the current node stops working, the router moves to the fastest working one."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:200
-msgid "Send site name lookups through the VPN"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:222
+msgid "Choose only among favourite nodes"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:201
-msgid "The internet provider does not see which sites the devices look up."
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:204
-msgid "Telegram"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:205
-msgid "Send notifications"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:206
-msgid "About node switching, subscription ends, start and stop."
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:207
-msgid "Control from Telegram"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:208
-msgid "Commands to the bot: status, nodes, switching, on and off. The bot obeys only your chat."
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:210
-msgid "Bot token"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:210
-msgid "Create a bot with @BotFather and paste its token here."
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:214
-msgid "Chat"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:214
-msgid "Your chat number (for example from @userinfobot) or a channel name like @mychannel."
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:217
-msgid "Reach Telegram through the VPN"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:217
-msgid "Needed where Telegram is blocked."
+#: files/www/luci-static/resources/view/vpnpool/settings.js:223
+msgid "The automatic choice uses only your favourite nodes while at least one of them works."
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/settings.js:224
-msgid "Send a test message"
+msgid "Add working nodes to favourites automatically"
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/settings.js:225
-msgid "Uses the token and the chat typed above, even before you save them."
+msgid "From time to time the fastest working nodes are kept in favourites, so they stay when a subscription ends. Your own favourites are never touched."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:231
-msgid "Schedule"
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:232
-msgid "Turn on and off by the clock"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:226
+msgid "How many to keep"
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/settings.js:232
-msgid "The router's time. Leave a time empty to skip that action."
+msgid "Checked sites"
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/settings.js:233
-msgid "Turn on at"
+msgid "Sites to check"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:233
-msgid "Turn off at"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:234
+msgid "The sites the VPN must really open, one per line — usually the blocked ones, for example youtube.com. The automatic choice uses a node only if it opens every one of them. Empty: a general internet check."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:233
-msgid "Update subscriptions at"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:237
+msgid "Set aside nodes that do not open these sites"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:238
+msgid "Such nodes stay in the list and can be chosen by hand, but the automatic choice skips them."
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/settings.js:241
-msgid "Backup"
+msgid "Protection"
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/settings.js:242
-msgid "A file with all settings, subscriptions and nodes, including the Telegram token. Keep it safe."
+msgid "Block the internet while the VPN is down"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:253
-msgid "Download a backup"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:243
+msgid "While no node works, what should go through the VPN does not go directly: with \"everything except the chosen sites\" that is the whole internet, with \"only the chosen sites\" only those sites. Off: it goes directly until a node works again."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:256
-msgid "Restore from a file…"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:244
+msgid "Send site name lookups through the VPN"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:263
-msgid "Node check interval, s"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:245
+msgid "The internet provider does not see which sites the devices look up."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:266
-msgid "Switching threshold, ms"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:248
+msgid "Telegram"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:267
-msgid "Keeps the router from jumping between nodes of almost the same speed."
+#: files/www/luci-static/resources/view/vpnpool/settings.js:249
+msgid "Send notifications"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:270
-msgid "Failed checks in a row before a node is set aside"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:250
+msgid "About node switching, subscription ends, start and stop."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:273
-msgid "Attempts per check"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:251
+msgid "Control from Telegram"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:274
-msgid "A node passes a check if any attempt succeeds: some nodes miss the first one."
+#: files/www/luci-static/resources/view/vpnpool/settings.js:252
+msgid "Commands to the bot: status, nodes, switching, on and off. The bot obeys only your chat."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:254
+msgid "Bot token"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:254
+msgid "Create a bot with @BotFather and paste its token here."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:258
+msgid "Chat"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:258
+msgid "Your chat number (for example from @userinfobot) or a channel name like @mychannel."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:261
+msgid "Reach Telegram through the VPN"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:261
+msgid "Needed where Telegram is blocked."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:268
+msgid "Send a test message"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:269
+msgid "Uses the token and the chat typed above, even before you save them."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:275
+msgid "Schedule"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:276
+msgid "Turn on and off by the clock"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:276
+msgid "The router's time. Leave a time empty to skip that action."
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/settings.js:277
-msgid "Update subscriptions every"
+msgid "Turn on at"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:278
-msgid "More often than every 10 minutes is not allowed: providers block too frequent updates."
+#: files/www/luci-static/resources/view/vpnpool/settings.js:277
+msgid "Turn off at"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:282
-msgid "Get past the provider's filtering"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:277
+msgid "Update subscriptions at"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:283
-msgid "Splits the start of secure connections so that simple provider filters cannot read the site name. Does not help against strong blocking."
-msgstr ""
-
-#: files/www/luci-static/resources/view/vpnpool/settings.js:284
-msgid "Off"
+#: files/www/luci-static/resources/view/vpnpool/settings.js:285
+msgid "Backup"
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/settings.js:286
+msgid "A file with all settings, subscriptions and nodes, including the Telegram token. Keep it safe."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:297
+msgid "Download a backup"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:300
+msgid "Restore from a file…"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:302
+msgid "A text copy of the settings saved by an older version can be restored here too."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:308
+msgid "Node check interval, s"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:311
+msgid "Switching threshold, ms"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:312
+msgid "Keeps the router from jumping between nodes of almost the same speed."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:315
+msgid "Failed checks in a row before a node is set aside"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:318
+msgid "Attempts per check"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:319
+msgid "A node passes a check if any attempt succeeds: some nodes miss the first one."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:322
+msgid "Update subscriptions every"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:323
+msgid "More often than every 10 minutes is not allowed: providers block too frequent updates."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:327
+msgid "Get past the provider's filtering"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:328
+msgid "Splits the start of secure connections so that simple provider filters cannot read the site name. Does not help against strong blocking."
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:329
+msgid "Off"
+msgstr ""
+
+#: files/www/luci-static/resources/view/vpnpool/settings.js:331
 msgid "Strong"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:287
+#: files/www/luci-static/resources/view/vpnpool/settings.js:332
 msgid "Block IPv6 past the VPN"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:288
+#: files/www/luci-static/resources/view/vpnpool/settings.js:333
 msgid "Devices cannot reach the internet over IPv6, so nothing leaks past the VPN."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:291
+#: files/www/luci-static/resources/view/vpnpool/settings.js:336
 msgid "Log detail"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:291
+#: files/www/luci-static/resources/view/vpnpool/settings.js:336
 msgid "What the log on the Diagnostics page keeps."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:293
+#: files/www/luci-static/resources/view/vpnpool/settings.js:338
 msgid "Nodes checked at once"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:294
+#: files/www/luci-static/resources/view/vpnpool/settings.js:339
 msgid "Lower it on a router with little memory."
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:303
+#: files/www/luci-static/resources/view/vpnpool/settings.js:348
 msgid "Advanced"
 msgstr ""
 
-#: files/www/luci-static/resources/view/vpnpool/settings.js:307
+#: files/www/luci-static/resources/view/vpnpool/settings.js:352
 #: files/usr/share/luci/menu.d/luci-app-vpnpool.json
 msgid "Settings"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:115
+#: files/www/luci-static/resources/vpnpool/common.js:118
 msgid "No permission for this action. Log out and log in again: permissions are refreshed at login."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:116
-#: files/www/luci-static/resources/vpnpool/common.js:173
+#: files/www/luci-static/resources/vpnpool/common.js:119
+#: files/www/luci-static/resources/vpnpool/common.js:176
 msgid "This action is not supported by the installed version of the service. Update VPN Pool."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:117
+#: files/www/luci-static/resources/vpnpool/common.js:120
 msgid "The router did not answer in time. Try again in a moment."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:118
+#: files/www/luci-static/resources/vpnpool/common.js:121
 msgid "No connection to the router. Check the connection and try again."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:119
+#: files/www/luci-static/resources/vpnpool/common.js:122
 msgid "The router sent an unexpected answer. Try again; if it repeats, open Diagnostics."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:120
+#: files/www/luci-static/resources/vpnpool/common.js:123
 msgid "The router did not accept the request: some values are invalid."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:121
+#: files/www/luci-static/resources/vpnpool/common.js:124
 msgid "The action failed. Try again; if it repeats, open Diagnostics."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:122
+#: files/www/luci-static/resources/vpnpool/common.js:125
 msgid "Restoring failed, and the previous settings could not be put back completely. Restore the backup again or check the settings."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:124
-#: files/www/luci-static/resources/vpnpool/common.js:125
+#: files/www/luci-static/resources/vpnpool/common.js:127
+#: files/www/luci-static/resources/vpnpool/common.js:128
 msgid "Done."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:126
+#: files/www/luci-static/resources/vpnpool/common.js:129
 msgid "Saved."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:127
+#: files/www/luci-static/resources/vpnpool/common.js:130
 msgid "Nothing has changed."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:128
+#: files/www/luci-static/resources/vpnpool/common.js:131
 msgid "Applied."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:129
+#: files/www/luci-static/resources/vpnpool/common.js:132
 msgid "Added."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:130
+#: files/www/luci-static/resources/vpnpool/common.js:133
 msgid "Deleted."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:131
+#: files/www/luci-static/resources/vpnpool/common.js:134
 msgid "Imported."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:132
+#: files/www/luci-static/resources/vpnpool/common.js:135
 msgid "Restored."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:133
+#: files/www/luci-static/resources/vpnpool/common.js:136
 msgid "Started."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:134
+#: files/www/luci-static/resources/vpnpool/common.js:137
 msgid "Still in progress."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:135
+#: files/www/luci-static/resources/vpnpool/common.js:138
 msgid "Nothing has been run yet."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:136
+#: files/www/luci-static/resources/vpnpool/common.js:139
 msgid "Already in progress."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:137
+#: files/www/luci-static/resources/vpnpool/common.js:140
 msgid "This is already added."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:138
+#: files/www/luci-static/resources/vpnpool/common.js:141
 msgid "Cleared."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:139
+#: files/www/luci-static/resources/vpnpool/common.js:142
 msgid "Set."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:140
+#: files/www/luci-static/resources/vpnpool/common.js:143
 msgid "Sent."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:141
+#: files/www/luci-static/resources/vpnpool/common.js:144
 msgid "VPN is on."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:142
+#: files/www/luci-static/resources/vpnpool/common.js:145
 msgid "VPN is off."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:143
+#: files/www/luci-static/resources/vpnpool/common.js:146
 msgid "Saved. It takes effect when the service starts."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:144
+#: files/www/luci-static/resources/vpnpool/common.js:147
 msgid "There is nothing to export."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:145
+#: files/www/luci-static/resources/vpnpool/common.js:148
 msgid "Hidden. The node will not be used; you can return it from the hidden nodes."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:146
+#: files/www/luci-static/resources/vpnpool/common.js:149
 msgid "Connecting: the node is being added back, this takes a moment."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:148
+#: files/www/luci-static/resources/vpnpool/common.js:151
 msgid "Some values are not valid. Check the highlighted fields."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:149
+#: files/www/luci-static/resources/vpnpool/common.js:152
 msgid "Not found: it may have been removed already."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:150
+#: files/www/luci-static/resources/vpnpool/common.js:153
 msgid "This feature is turned off in the settings."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:151
+#: files/www/luci-static/resources/vpnpool/common.js:154
 msgid "Telegram is not set up: enter the bot token and the chat first."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:152
+#: files/www/luci-static/resources/vpnpool/common.js:155
 msgid "The service is off. Turn it on and try again."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:153
+#: files/www/luci-static/resources/vpnpool/common.js:156
 msgid "The VPN engine did not accept the command. Try again in a moment."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:154
+#: files/www/luci-static/resources/vpnpool/common.js:157
 msgid "The router could not complete the action. Try again; if it repeats, open Diagnostics."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:155
+#: files/www/luci-static/resources/vpnpool/common.js:158
 msgid "The subscription could not be downloaded or has no nodes. Check the address and the internet connection."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:156
+#: files/www/luci-static/resources/vpnpool/common.js:159
 msgid "The exit could not be checked: nothing answered through the VPN. Check that the service is on and a node works."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:157
+#: files/www/luci-static/resources/vpnpool/common.js:160
 msgid "Telegram did not accept the message. Check the bot token and the chat."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:158
+#: files/www/luci-static/resources/vpnpool/common.js:161
 msgid "There are no nodes yet."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:159
+#: files/www/luci-static/resources/vpnpool/common.js:162
 msgid "Not enough free memory on the router for this test."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:160
+#: files/www/luci-static/resources/vpnpool/common.js:163
 msgid "Another test of a node is running. Try again when it ends."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:161
+#: files/www/luci-static/resources/vpnpool/common.js:164
 msgid "Nothing was added: everything is already there or could not be recognized."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:162
+#: files/www/luci-static/resources/vpnpool/common.js:165
 msgid "The AmneziaVPN link could not be read."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:163
+#: files/www/luci-static/resources/vpnpool/common.js:166
 msgid "This is not a complete VPN Pool configuration."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:164
+#: files/www/luci-static/resources/vpnpool/common.js:167
 msgid "Too large: the value or the file exceeds the limit."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:165
+#: files/www/luci-static/resources/vpnpool/common.js:168
 msgid "Restoring failed. The previous settings are back in place."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:166
+#: files/www/luci-static/resources/vpnpool/common.js:169
 msgid "These settings come from an older version and could not be converted. Nothing was changed: the previous settings are back in place."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:167
+#: files/www/luci-static/resources/vpnpool/common.js:170
 msgid "Several subscriptions fit. Choose the subscription from the list."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:168
+#: files/www/luci-static/resources/vpnpool/common.js:171
 msgid "This text has hidden values (passwords, addresses). Restore from a backup file instead."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:169
+#: files/www/luci-static/resources/vpnpool/common.js:172
 msgid "This file is not a VPN Pool backup or it is damaged."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:170
+#: files/www/luci-static/resources/vpnpool/common.js:173
 msgid "Restoring replaces all current settings. Confirm to continue."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:171
+#: files/www/luci-static/resources/vpnpool/common.js:174
 msgid "The settings could not be written on the router."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:172
-#: files/www/luci-static/resources/vpnpool/common.js:214
+#: files/www/luci-static/resources/vpnpool/common.js:175
+#: files/www/luci-static/resources/vpnpool/common.js:217
 msgid "This setting is not supported by the installed version of the service."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:175
+#: files/www/luci-static/resources/vpnpool/common.js:178
 msgid "The settings are saved, but the schedule could not be set up."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:176
+#: files/www/luci-static/resources/vpnpool/common.js:179
 msgid "Saved. The node waits for the AmneziaWG engine: it starts working once the engine is installed on the router."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:177
+#: files/www/luci-static/resources/vpnpool/common.js:180
 msgid "Saved. The installed VPN engine cannot run AmneziaWG: the node waits until an engine with AmneziaWG is installed."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:178
+#: files/www/luci-static/resources/vpnpool/common.js:181
 msgid "Saved. This node needs AmneziaWG 3.1, and the installed VPN engine only has an older AmneziaWG: the node waits until the AmneziaWG engine is installed."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:180
+#: files/www/luci-static/resources/vpnpool/common.js:183
 msgid "This node stopped the VPN engine from starting, so it was set aside. Check the node settings or add it again."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:181
+#: files/www/luci-static/resources/vpnpool/common.js:184
 msgid "No node can work right now: all nodes are waiting (the reason is shown next to each node)."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:182
+#: files/www/luci-static/resources/vpnpool/common.js:185
 msgid "This node uses random packet trailers: the server must run AmneziaWG 3.1 too, otherwise it will not answer."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:184
+#: files/www/luci-static/resources/vpnpool/common.js:187
 msgid "This AmneziaVPN link is an account key, not server settings. In the AmneziaVPN app, share the connection as a settings file or link and paste that."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:185
+#: files/www/luci-static/resources/vpnpool/common.js:188
 msgid "This AmneziaVPN link gives full access to the server (the administrator password), so it was not saved. Share a user connection instead."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:186
+#: files/www/luci-static/resources/vpnpool/common.js:189
 msgid "This AmneziaVPN link has no protocol the router supports (AmneziaWG, WireGuard, XRay, Shadowsocks)."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:187
+#: files/www/luci-static/resources/vpnpool/common.js:190
 msgid "This AmneziaVPN link has no connection settings inside."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:188
+#: files/www/luci-static/resources/vpnpool/common.js:191
 msgid "The settings have no server: the [Peer] part with the server address and key is missing."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:189
+#: files/www/luci-static/resources/vpnpool/common.js:192
 msgid "The settings list several servers ([Peer] parts). One node holds one server: split them into separate files."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:190
+#: files/www/luci-static/resources/vpnpool/common.js:193
 msgid "A value in the AmneziaWG settings is not valid."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:191
+#: files/www/luci-static/resources/vpnpool/common.js:194
 msgid "The AmneziaWG settings have an option the router does not know. Update VPN Pool or remove that option."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:197
+#: files/www/luci-static/resources/vpnpool/common.js:200
 msgid "Wrong kind of value."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:198
+#: files/www/luci-static/resources/vpnpool/common.js:201
 msgid "The value is not valid."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:199
+#: files/www/luci-static/resources/vpnpool/common.js:202
 msgid "The value is too small."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:200
+#: files/www/luci-static/resources/vpnpool/common.js:203
 msgid "The value is too large."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:201
+#: files/www/luci-static/resources/vpnpool/common.js:204
 msgid "The time is not valid. Use hours and minutes, for example 07:30."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:202
+#: files/www/luci-static/resources/vpnpool/common.js:205
 msgid "Enter a full address starting with http:// or https://."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:203
+#: files/www/luci-static/resources/vpnpool/common.js:206
 msgid "Enter a site name, for example example.com."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:204
+#: files/www/luci-static/resources/vpnpool/common.js:207
 msgid "Unknown list."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:205
+#: files/www/luci-static/resources/vpnpool/common.js:208
 msgid "Enter an address like 192.168.1.10."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:206
+#: files/www/luci-static/resources/vpnpool/common.js:209
 msgid "Enter a device hardware address like AA:BB:CC:DD:EE:FF."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:207
+#: files/www/luci-static/resources/vpnpool/common.js:210
 msgid "Unknown network interface."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:208
+#: files/www/luci-static/resources/vpnpool/common.js:211
 msgid "Enter a whole number."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:209
+#: files/www/luci-static/resources/vpnpool/common.js:212
 msgid "This does not look like a Telegram bot token."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:210
+#: files/www/luci-static/resources/vpnpool/common.js:213
 msgid "This does not look like a Telegram chat number."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:211
+#: files/www/luci-static/resources/vpnpool/common.js:214
 msgid "No such node."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:212
+#: files/www/luci-static/resources/vpnpool/common.js:215
 msgid "There is no such program on the router."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:213
+#: files/www/luci-static/resources/vpnpool/common.js:216
 msgid "Choose whether to take every node or only the nodes you pick."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:221
+#: files/www/luci-static/resources/vpnpool/common.js:224
 msgid "Already added."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:222
+#: files/www/luci-static/resources/vpnpool/common.js:225
 msgid "The same node is already in an earlier line."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:223
+#: files/www/luci-static/resources/vpnpool/common.js:226
 msgid "The same node is already in this list."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:224
+#: files/www/luci-static/resources/vpnpool/common.js:227
 msgid "Hidden by you."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:225
+#: files/www/luci-static/resources/vpnpool/common.js:228
 msgid "Not among the picked nodes."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:226
+#: files/www/luci-static/resources/vpnpool/common.js:229
 msgid "The address is not valid."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:227
+#: files/www/luci-static/resources/vpnpool/common.js:230
 msgid "This is a whole configuration of the VPN engine, not a node link. Add the address of the subscription it comes from instead."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:228
+#: files/www/luci-static/resources/vpnpool/common.js:231
 msgid "Too many lines at once: the rest was not read. Add them in parts."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:229
+#: files/www/luci-static/resources/vpnpool/common.js:232
 msgid "The link could not be read: it is damaged or incomplete."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:230
+#: files/www/luci-static/resources/vpnpool/common.js:233
 msgid "This is not a node link."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:231
+#: files/www/luci-static/resources/vpnpool/common.js:234
 msgid "This kind of link is not supported."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:232
+#: files/www/luci-static/resources/vpnpool/common.js:235
 msgid "This entry is not a node."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:233
+#: files/www/luci-static/resources/vpnpool/common.js:236
 msgid "No nodes were found in it."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:234
+#: files/www/luci-static/resources/vpnpool/common.js:237
 msgid "This kind of entry cannot be added."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:235
+#: files/www/luci-static/resources/vpnpool/common.js:238
 msgid "The port in the link is not valid."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:236
+#: files/www/luci-static/resources/vpnpool/common.js:239
 msgid "The user key in the link is not valid."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:237
+#: files/www/luci-static/resources/vpnpool/common.js:240
 msgid "The server address in the link is not valid."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:238
+#: files/www/luci-static/resources/vpnpool/common.js:241
 msgid "A key in the link is not valid."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:239
+#: files/www/luci-static/resources/vpnpool/common.js:242
 msgid "The server key in the link is not valid."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:240
+#: files/www/luci-static/resources/vpnpool/common.js:243
 msgid "Part of the server key in the link is not valid."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:241
+#: files/www/luci-static/resources/vpnpool/common.js:244
 msgid "This kind of link needs encryption, but the link has none."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:242
+#: files/www/luci-static/resources/vpnpool/common.js:245
 msgid "The link uses a way of connecting the router does not support."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:243
+#: files/www/luci-static/resources/vpnpool/common.js:246
 msgid "The link uses a kind of protection the router does not support."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:244
+#: files/www/luci-static/resources/vpnpool/common.js:247
 msgid "The link needs an add-on the router does not have."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:245
+#: files/www/luci-static/resources/vpnpool/common.js:248
 msgid "The link uses a kind of disguise the router does not support."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:246
+#: files/www/luci-static/resources/vpnpool/common.js:249
 msgid "The link uses a cipher the router does not support."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:247
+#: files/www/luci-static/resources/vpnpool/common.js:250
 msgid "The link uses a data flow mode the router does not support."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:248
+#: files/www/luci-static/resources/vpnpool/common.js:251
 msgid "The link uses an encryption the router does not support."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:249
+#: files/www/luci-static/resources/vpnpool/common.js:252
 msgid "A value in the settings is not valid."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:700
-#: files/www/luci-static/resources/vpnpool/common.js:731
+#: files/www/luci-static/resources/vpnpool/common.js:704
+#: files/www/luci-static/resources/vpnpool/common.js:735
 msgid "another setting"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:728
+#: files/www/luci-static/resources/vpnpool/common.js:732
 msgid "\"%s\": %s"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:763
+#: files/www/luci-static/resources/vpnpool/common.js:772
 msgid "Also: %s."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:814
+#: files/www/luci-static/resources/vpnpool/common.js:824
 msgid "Saving…"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:814
+#: files/www/luci-static/resources/vpnpool/common.js:824
 msgid "There are unsaved changes."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:814
+#: files/www/luci-static/resources/vpnpool/common.js:824
 msgid "All changes are saved."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:827
+#: files/www/luci-static/resources/vpnpool/common.js:837
 msgid "Save changes"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:830
+#: files/www/luci-static/resources/vpnpool/common.js:840
 msgid "Revert"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:855
+#: files/www/luci-static/resources/vpnpool/common.js:865
 msgid "%d B"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:856
+#: files/www/luci-static/resources/vpnpool/common.js:866
 msgid "%s KB"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:857
+#: files/www/luci-static/resources/vpnpool/common.js:867
 msgid "%s MB"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:858
+#: files/www/luci-static/resources/vpnpool/common.js:868
 msgid "%s GB"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:863
+#: files/www/luci-static/resources/vpnpool/common.js:873
 msgid "just now"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:864
+#: files/www/luci-static/resources/vpnpool/common.js:874
 msgid "%d min ago"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:865
+#: files/www/luci-static/resources/vpnpool/common.js:875
 msgid "%d h ago"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:902
+#: files/www/luci-static/resources/vpnpool/common.js:912
 msgid "turned off"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:903
+#: files/www/luci-static/resources/vpnpool/common.js:913
 msgid "picked nodes: %d"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:903
+#: files/www/luci-static/resources/vpnpool/common.js:913
 msgid "every node"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:906
+#: files/www/luci-static/resources/vpnpool/common.js:916
 msgid "expired on %s"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:907
+#: files/www/luci-static/resources/vpnpool/common.js:917
 msgid "The subscription %s has expired: its nodes may stop working."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:908
+#: files/www/luci-static/resources/vpnpool/common.js:918
 msgid "valid until %s (the last day)"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:909
+#: files/www/luci-static/resources/vpnpool/common.js:919
 msgid "The subscription %s expires today (%s)."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:910
+#: files/www/luci-static/resources/vpnpool/common.js:920
 msgid "valid until %s (%d days left)"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:911
+#: files/www/luci-static/resources/vpnpool/common.js:921
 msgid "The subscription %s expires in %d days (%s)."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:916
+#: files/www/luci-static/resources/vpnpool/common.js:926
 msgid "%s of %s left"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:917
+#: files/www/luci-static/resources/vpnpool/common.js:927
 msgid "The subscription %s has little traffic left: %s of %s."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:919
+#: files/www/luci-static/resources/vpnpool/common.js:929
 msgid "updated %s"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:920
+#: files/www/luci-static/resources/vpnpool/common.js:930
 msgid "the last update failed"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:921
+#: files/www/luci-static/resources/vpnpool/common.js:931
 msgid "The subscription %s could not be updated the last time."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:922
+#: files/www/luci-static/resources/vpnpool/common.js:932
 msgid "picked nodes gone from it: %d"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:1035
+#: files/www/luci-static/resources/vpnpool/common.js:1045
 msgid "The service is off: the change takes effect after it is turned on."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:1337
+#: files/www/luci-static/resources/vpnpool/common.js:1347
 msgid "Continue"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:1339
+#: files/www/luci-static/resources/vpnpool/common.js:1349
 msgid "Are you sure?"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:1359
+#: files/www/luci-static/resources/vpnpool/common.js:1369
 msgid "Select"
 msgstr ""
 
