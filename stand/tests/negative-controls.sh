@@ -791,8 +791,8 @@ ctl s6-rpcd-restore-not-migrated rpcd fail 'rpcd/restore/1x-backup-migrated ;rpc
 ctl s6-migrate-backup-config-only migrate fail 'migrate/backup-before-changes ' \
 	"$LIBX/migrate.sh" 'tar -czf "$BK.tmp" -C / $(backup_members)' 'tar -czf "$BK.tmp" -C / etc/config/vpnpool'
 ctl s6-migrate-not-idempotent migrate fail 'migrate/idempotent ;migrate/2x-config-untouched ' \
-	"$LIBX/migrate.sh" '[ "$(uci -q get vpnpool.main.schema)" = 2 ] && exit 0' 'false && exit 0' \
-	"$LIBX/migrate.sh" '[ "$(uci -q get vpnpool.main.schema)" = 2 ] && exit 0' 'false && exit 0'
+	"$LIBX/migrate.sh" 'schema)" = 2 ]; then rm -f "$FAILF"; exit 0; fi' 'schema)" = 2 ] && false; then rm -f "$FAILF"; exit 0; fi' \
+	"$LIBX/migrate.sh" 'schema)" = 2 ]; then rm -f "$FAILF"; exit 0; fi' 'schema)" = 2 ] && false; then rm -f "$FAILF"; exit 0; fi'
 ctl s6-migrate-hard-pin-lost migrate fail 'migrate/hard-pin-becomes-the-preferred-node ;migrate/the-migrated-config-builds ' \
 	"$LIBX/migrate.uc" "if (length(M.selected_node ?? '')) pref = id_of_tag('selected_node', M.selected_node);" ';'
 ctl s6-migrate-no-running-node-list migrate fail 'migrate/tag-stores-become-ids ;migrate/unmatched-kept-and-reported ' \
