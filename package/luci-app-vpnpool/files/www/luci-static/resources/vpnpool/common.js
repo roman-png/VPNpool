@@ -871,19 +871,22 @@ function checkSites(st) {
 		.map(function(s) { return s.replace(/^[a-z]+:\/\//i, '').replace(/[\/?#].*$/, ''); }).filter(Boolean);
 }
 // Which sites the failing nodes did not open — ONE answer for the Nodes cards and the Overview's
-// alert: the node checker's last sweep (node.check.failed of nodes with failed checks; exact) when
-// it names them, otherwise the checked sites of the settings (the check is strict: a failing node
-// did not open at least one of them; exact = false). { sites: [host…], exact: bool }; sites may
-// be empty (no sites set: the default connection check).
+// alert, built node by node: a node's own answer is the node checker's last sweep
+// (node.check.failed when it has failed checks; exact), otherwise the checked sites of the settings
+// (the check is strict: a failing node did not open at least one of them). The answers of the
+// nodes are joined without repeats, so every site the alert names is on the card of its node.
+// { sites: [host…], exact: every node's answer came from the check }; sites may be empty (no sites
+// set and no check data: the default connection check).
 function failedSites(st, nodes) {
-	var seen = {}, out = [];
+	var seen = {}, out = [], exact = true, any = false, conf = null;
+	function add(h) { if (h && !seen[h]) { seen[h] = true; out.push(String(h)); } }
 	(Array.isArray(nodes) ? nodes : []).forEach(function(n) {
 		var c = n && n.check;
-		if (c && c.fails > 0 && Array.isArray(c.failed))
-			c.failed.forEach(function(h) { if (h && !seen[h]) { seen[h] = true; out.push(String(h)); } });
+		any = true;
+		if (c && c.fails > 0 && Array.isArray(c.failed) && c.failed.filter(Boolean).length) c.failed.forEach(add);
+		else { exact = false; (conf = conf || checkSites(st)).forEach(add); }
 	});
-	if (out.length) return { sites: out, exact: true };
-	return { sites: checkSites(st), exact: false };
+	return { sites: out, exact: any && exact };
 }
 // whole days until a moment (seconds); negative = it has passed
 function daysLeft(ts) { return Math.floor((ts * 1000 - Date.now()) / 86400000); }

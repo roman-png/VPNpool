@@ -126,7 +126,8 @@ test('state in words for every state the daemon reports', async (t) => {
 	const root = await open(t, fixture());
 	const cases = [
 		[ s => { s.enabled = false; s.running = false; s.routing = false; s.tunnel = null; s.exit = null; }, 'VPN is off', '', 'The internet goes directly, without the VPN.' ],
-		[ s => { s.running = false; s.routing = false; s.tunnel = null; }, 'VPN is on, but the service is not running', 'error', null ],
+		[ s => { s.running = false; s.routing = false; s.tunnel = null; }, 'VPN is on, but the service is not running', 'error', 'Turn the VPN off and on again; if it repeats, open Diagnostics.' ],
+		[ s => { s.running = false; s.paused = true; s.routing = false; s.tunnel = null; }, 'VPN is on, but the service is not running', 'error', 'Press "Turn the VPN on"; if it repeats, open Diagnostics.' ],
 		[ s => { s.paused = true; s.routing = false; }, 'Paused', 'warn', 'Paused from Telegram: the internet goes directly, without the VPN. "Turn the VPN on" resumes it.' ],
 		[ s => { s.tunnel = { state: 'down', since: 1 }; }, 'No node works', 'error', 'If no node works again in a moment, what should go through the VPN goes directly.' ],
 		[ s => { s.tunnel = { state: 'wan_down', since: 1 }; s.routing = false; }, 'The router has no internet', 'error', 'Check the cable or the internet provider.' ],
@@ -146,7 +147,12 @@ test('state in words for every state the daemon reports', async (t) => {
 		if (detail != null) eq(text(root, '.vp-ov-detail'), detail, 'detail of case ' + n);
 		n++;
 	}
-	eq(n, 13, 'positive control: every case ran');
+	eq(n, 14, 'positive control: every case ran');
+	// the words name the button that is on the screen: a pause left from before a restart of the service
+	await poll(t, fixture(s => { s.running = false; s.paused = true; s.routing = false; s.tunnel = null; }));
+	eq(text(root, '.vp-ov-toggle'), 'Turn the VPN on', 'the button named in the words is there');
+	await poll(t, fixture(s => { s.running = false; s.routing = false; s.tunnel = null; }));
+	eq(text(root, '.vp-ov-toggle'), 'Turn the VPN off', 'positive control: without the pause the words say off and on, the button is off');
 	await poll(t, fixture(s => { s.enabled = false; s.running = false; s.tunnel = null; s.exit = null; }));
 	ok(!shown(root, '.vp-ov-facts'), 'off: no node / exit / speed rows');
 	eq(text(root, '.vp-ov-toggle'), 'Turn the VPN on', 'toggle while off');
@@ -239,6 +245,11 @@ test('alerts in words: failing nodes, engine, set aside, unreadable files, subsc
 	// which site: the node checker's own answer (as on the Nodes cards), not the settings
 	await poll(t, fixture(s => { node(s, 'Bravo').dead = true; node(s, 'Bravo').check = { fails: 2, at: SEC - 60, failed: [ 'chat.example' ] }; }));
 	eq(alerts(root), [ '1 node does not open chat.example: it is left out of the automatic choice.' ], 'the site of the real check');
+	// mixed: one failing node named its sites, the other has no check data (its card says the sites of the settings)
+	await poll(t, fixture(s => { node(s, 'Bravo').dead = true; node(s, 'Bravo').check = { fails: 2, at: SEC - 60, failed: [ 'chat.example' ] }; node(s, 'Alpha').dead = true; }));
+	ok(!node(t.env.handlers.status(), 'Alpha').check, 'positive control: Alpha has no check data');
+	eq(alerts(root), [ '2 nodes fail the check of the sites (www.youtube.com, chat.example): they are left out of the automatic choice.' ], 'node by node: every site the alert names is on the card of its node');
+	eq(t.common.failedSites(t.env.handlers.status(), [ node(t.env.handlers.status(), 'Alpha') ]).sites, [ 'www.youtube.com' ], 'Alpha alone (its card): the settings');
 	await poll(t, fixture(s => { node(s, 'Bravo').dead = true; s.settings.check_services = ''; }));
 	eq(alerts(root), [ '1 node fails the connection check: it is left out of the automatic choice.' ], 'no sites set and no check data: the general words');
 	await poll(t, fixture(s => { s.subscriptions[0].expire = SEC + 3600; }));
@@ -378,7 +389,9 @@ const MUTATIONS = [
 	{ name: 'the alert names the settings, not the check', from: "var sites = common.failedSites(st, dead).sites;", to: "var sites = common.checkSites(st);", expect: [ T_ALERT ] },
 	{ name: '"(connection)" in brackets again', from: ": N_(dead.length, '%d node fails the connection check", to: ": N_(dead.length, '%d node fails the check of the sites (connection)", expect: [ T_ALERT ] },
 	{ name: 'common: the last day as "in 0 days"', file: 'common', from: "else if (days === 0) out.push(", to: "else if (false) out.push(", expect: [ T_ALERT ] },
-	{ name: 'common: the sites of the check ignored', file: 'common', from: "if (out.length) return { sites: out, exact: true };", to: "", expect: [ T_ALERT ] },
+	{ name: 'common: the sites of the check ignored', file: 'common', from: "c.failed.filter(Boolean).length) c.failed.forEach(add);", to: "false) c.failed.forEach(add);", expect: [ T_ALERT ] },
+	{ name: 'common: a node without check data left out (only the nodes that named sites)', file: 'common', from: "else { exact = false; (conf = conf || checkSites(st)).forEach(add); }", to: "else exact = false;", expect: [ T_ALERT ] },
+	{ name: 'a stopped service with a pause: the words name the missing "off" button', from: "d: st.paused ? _('Press", to: "d: false ? _('Press", expect: [ T_STATE ] },
 	{ name: '"goes directly" while the routes still lead into the tunnel', from: ": (st.routing ? _('If no node works again", to: ": (false ? _('If no node works again", expect: [ T_STATE ] },
 	{ name: 'the choice of the user not said', from: "if (pref && pref.id) {", to: "if (false) {", expect: [ T_PREF ] },
 	{ name: 'back to automatic choice through a legacy method', from: "common.call('auto_select'", to: "common.call('set_preferred'", expect: [ T_PREF, T_API ] },

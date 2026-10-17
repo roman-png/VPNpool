@@ -436,12 +436,14 @@ ctl ui2-exit-reread-every-tick daemon fail 'daemon/exit-lookup-only-when-needed 
 ctl ui2-exit-without-tunnel daemon fail 'daemon/exit-lookup-only-when-needed ' \
 	"$LIBX/vpnpoold" '	[ -n "$1" ] && [ "$WD_HEALTHY" = 1 ] || return 0' '	[ -n "$1" ] || return 0'
 ctl ui2-exitip-direct daemon fail 'daemon/exitip-first-address-through-the-tunnel ;daemon/exitip-nothing-answers-says-so ' \
-	"$LIBX/exitip.sh" 'J=$(curl -s -m 7 --proxy "socks5h://127.0.0.1:$TP" "$url" 2>/dev/null)' 'J=$(curl -s -m 7 "$url" 2>/dev/null)'
+	"$LIBX/lib.sh" 'j=$(curl -s -m 7 --proxy "socks5h://127.0.0.1:$1" "$url" 2>/dev/null)' 'j=$(curl -s -m 7 "$url" 2>/dev/null)'
 ctl ui2-exitip-junk-address daemon fail 'daemon/exitip-first-address-through-the-tunnel ' \
-	"$LIBX/exitip.sh" '	case "$IP" in (*[!0-9a-fA-F:.]*|'"''"') IP=""; continue ;; esac' '	:' \
-	"$LIBX/exitip.sh" '	case "$IP" in (*[.:]*) ;; (*) IP=""; continue ;; esac' '	:'
+	"$LIBX/lib.sh" '		case "$ip" in (*[!0-9a-fA-F:.]*|'"''"') continue ;; esac' '		:' \
+	"$LIBX/lib.sh" '		case "$ip" in (*[.:]*) ;; (*) continue ;; esac' '		:'
 ctl ui2-exitip-word-address daemon fail 'daemon/exitip-first-address-through-the-tunnel ' \
-	"$LIBX/exitip.sh" '	case "$IP" in (*[.:]*) ;; (*) IP=""; continue ;; esac' '	:'
+	"$LIBX/lib.sh" '		case "$ip" in (*[.:]*) ;; (*) continue ;; esac' '		:'
+ctl ui2-exit-answer-of-another-node daemon fail 'daemon/exit-lookup-only-when-needed ' \
+	"$LIBX/vpnpoold" ' && grep -qF "\"node\":\"$1\"" "$SB_DATA/exit.json" 2>/dev/null' ''
 ctl ui2-status-exit-other-node status fail 'status/exit-of-another-node-not-shown ' \
 	"$LIBX/status.uc" "if (type(exj) == 'object' && length(now_tag) && exj.node == now_tag)" "if (type(exj) == 'object' && length(now_tag))"
 ctl ui2-status-exit-failure-hidden status fail 'status/failed-exit-lookup-and-unknown-tunnel-state ' \
@@ -459,6 +461,10 @@ ctl ui2-overview-exit-dead-tunnel ui-overview fail 'FAIL - exit: only while the 
 	"$VIEW/dashboard.js" 'exit: !(live && tunnelUp && tag) ? null' 'exit: !(live && tag) ? null'
 ctl ui2-overview-pause-on ui-overview fail 'FAIL - a pause from Telegram' \
 	"$VIEW/dashboard.js" 'function vpnOn(st) { return !!(st && st.enabled && !st.paused); }' 'function vpnOn(st) { return !!(st && st.enabled); }'
+ctl ui2-failed-sites-mixed ui-overview fail 'FAIL - alerts in words' \
+	package/luci-app-vpnpool/files/www/luci-static/resources/vpnpool/common.js 'else { exact = false; (conf = conf || checkSites(st)).forEach(add); }' 'else exact = false;'
+ctl ui2-overview-pause-stopped ui-overview fail 'FAIL - state in words for every state the daemon reports' \
+	"$VIEW/dashboard.js" "d: st.paused ? _('Press" "d: false ? _('Press"
 ctl ui2-nodes-check-words-dropped ui-nodes fail 'FAIL - a node that fails the check: which site' \
 	"$VIEW/nodes.js" 'state = deadText(st, n);' 'state = deadText(st);'
 ctl ui2-ci-overview-dropped ui-unit fail 'FAIL - packaging: translation in installer, feeds and CI' \
