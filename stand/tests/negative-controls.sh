@@ -936,6 +936,11 @@ ctl s6-status-migration-failure-hidden migrate fail 'migrate/failure-visible-in-
 	"$LIBX/status.uc" "let migration = (o('schema', '') != '2' && type(migfail) == 'object')" 'let migration = (false)'
 ctl s6-upgrade-never-migrates upgrade fail 'FAIL - migrated (schema 2);FAIL - the service is started again after the migration;FAIL - the call right before the first one on the migrated config' \
 	package/vpnpool/files/etc/uci-defaults/90-vpnpool-2.0 '[ -x /usr/libexec/vpnpool/migrate.sh ] || exit 0' 'exit 0'
+# the tunnel proved by the probe before the routes is "up" at once (not "starting" for the warm-up)
+ctl daemon-proven-tunnel-starting daemon fail 'daemon/tunnel-proven-at-start-is-up ' \
+	"$LIBX/vpnpoold" '[ "$h" = 1 ] && { TUNNEL_PROVEN=$SB_STARTED; tunnel_state up "$(date +%s)"; }' '[ "$h" = 1 ] && { TUNNEL_PROVEN=$SB_STARTED; }'
+ctl daemon-warmup-hides-proven daemon fail 'daemon/tunnel-proven-at-start-is-up ' \
+	"$LIBX/vpnpoold" '[ "$TUNNEL_PROVEN" = "$SB_STARTED" ] || tunnel_state starting "$now"' 'tunnel_state starting "$now"'
 # ---- ui4: "Update" of one subscription (fetch.sh --only, the daemon's queue, rpcd sub_refresh)
 ctl ui4-fetch-only-ignored fetch fail 'fetch/only-one-subscription ;fetch/only-the-others-from-their-own-cache ' \
 	"$LIBX/fetch.sh" 'if [ "${1:-}" = --only ]; then' 'if false; then'

@@ -540,6 +540,20 @@ expect_true "still healthy a second later: since unchanged" cmp -s "$DS/t1" "$DS
 expect_eq "dead while WAN works" "$(cut -d' ' -f1 "$DS/t3")" down
 expect_eq "the router has no internet" "$(cut -d' ' -f1 "$DS/t4")" wan_down
 end
+# (1b) a probe that proved the tunnel of this start (routing up) is "up" at once, also during the
+# watchdog's warm-up; a new start without such a probe is "starting" again
+sc_tproven() {
+	SB_STARTED=$(date +%s); routing_eval; cp "$TUNNEL_FILE" "$DS/p0"
+	watchdog_check; cp "$TUNNEL_FILE" "$DS/p1"                            # warm-up, proven: stays up
+	SB_STARTED=$(( $(date +%s) + 1 )); watchdog_check; cp "$TUNNEL_FILE" "$DS/p2"   # another start
+}
+ds_reset 0 up; rm -f "$DS"/p[0-2]; in_daemon sc_tproven
+begin "daemon/tunnel-proven-at-start-is-up"
+expect_true "positive control: the three states written" test -s "$DS/p2"
+expect_eq "the probe before the routes: up" "$(cut -d' ' -f1 "$DS/p0")" up
+expect_true "the warm-up does not turn it back to starting" cmp -s "$DS/p0" "$DS/p1"
+expect_eq "a new start, nothing proved yet: starting" "$(cut -d' ' -f1 "$DS/p2")" starting
+end
 # (2) the exit lookup: only with a working tunnel, on a node change, again after 30 min (5 min
 # after a lookup that found nothing) — never per tick
 printf '#!/bin/sh\necho "exitip $1" >> %s\n' "$RLOG" > "$FL/exitip.sh"; chmod +x "$FL/exitip.sh"
