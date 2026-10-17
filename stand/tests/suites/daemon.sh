@@ -533,14 +533,16 @@ sc_exit() {
 	exit_info_check A 1000; exit_info_check A 1100           # the same node 100 s later: no second lookup
 	exit_info_check B 1150                                    # the node changed: a lookup
 	exit_info_check C 1170                                    # changed again 20 s later: not more often than once a minute
-	echo '{"ok":false,"ip":""}' > "$SB_DATA/exit.json"
+	echo '{"ok":false,"ip":"","node":"B"}' > "$SB_DATA/exit.json"
 	exit_info_check B 1460                                    # found nothing, 5 min later: again
-	echo '{"ok":true,"ip":"198.51.100.7"}' > "$SB_DATA/exit.json"
-	exit_info_check B 1770                                    # found, 5 min later: not again
-	echo '{"ok":false,"ip":""}' > "$SB_DATA/exit.json"
-	exit_info_check B 1800                                    # the answer was read once (not re-read every tick)
-	exit_info_check B 3300                                    # found, 30 min later: again
-	exit_info_check C 3320                                    # a change 20 s after a lookup: waits
+	echo '{"ok":true,"ip":"198.51.100.7","node":"A"}' > "$SB_DATA/exit.json"
+	exit_info_check B 1770                                    # the answer is another node's: not this one's, again
+	echo '{"ok":true,"ip":"198.51.100.7","node":"B"}' > "$SB_DATA/exit.json"
+	exit_info_check B 2080                                    # found for B, 5 min later: not again
+	echo '{"ok":false,"ip":"","node":"B"}' > "$SB_DATA/exit.json"
+	exit_info_check B 2100                                    # the answer was read once (not re-read every tick)
+	exit_info_check B 3600                                    # found, 30 min later: again
+	exit_info_check C 3620                                    # a change 20 s after a lookup: waits
 	WD_HEALTHY=0; exit_info_check C 4000                      # the tunnel does not work: never
 	WD_HEALTHY=""; exit_info_check C 4001                     # not judged (warm-up): never
 	exit_info_check "" 4002
@@ -549,9 +551,9 @@ sc_exit() {
 ds_reset 0 up; in_daemon sc_exit
 begin "daemon/exit-lookup-only-when-needed"
 expect_eq "node A looked up once" "$(gcount '^exitip A$' "$RLOG")" 1
-expect_eq "node B: change, retry after nothing, 30 min" "$(gcount '^exitip B$' "$RLOG")" 3
+expect_eq "node B: change, retry after nothing, after another node's answer, 30 min" "$(gcount '^exitip B$' "$RLOG")" 4
 expect_eq "never without a working tunnel" "$(gcount '^exitip C' "$RLOG")" 0
-expect_eq "nothing else" "$(gcount '^exitip' "$RLOG")" 4
+expect_eq "nothing else" "$(gcount '^exitip' "$RLOG")" 5
 end
 # (3) exitip.sh: through the tunnel only, the first service with an address, country upper case
 reset_state; mock_on
