@@ -35,7 +35,10 @@ var SERVICE_NAMES = { youtube: 'YouTube', openai: 'ChatGPT', netflix: 'Netflix',
 
 var CSS = [
 	'.vp-nodes-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.5em;margin:0 0 .8em}',
-	'.vp-nodes-search{flex:1 1 12em;min-width:0;max-width:22em;box-sizing:border-box}',
+	// the buttons and "⋯" on one line ("⋯" at its end), the search on its own line below
+	// (its basis + right margin fill the line, so it always starts a line of its own)
+	'.vp-nodes-search{order:10;flex:0 0 min(100%,32em);margin-right:calc(100% - min(100%,32em));min-width:0;box-sizing:border-box}',
+	'.vp-nodes-toolbar>.vp-menu{margin-left:auto}',
 	'.vp-now{display:flex;flex-wrap:wrap;align-items:center;gap:.4em .8em;margin:0 0 .8em;overflow-wrap:anywhere}',
 	// the theme's .btn / flex rules would show a [hidden] element again
 	'.vp-nodes [hidden],.vp-add-dialog [hidden],.vp-pick-dialog [hidden],.vp-pool-dialog [hidden]{display:none!important}',
@@ -79,9 +82,9 @@ var CSS = [
 	'.vp-export-out textarea{width:100%;box-sizing:border-box;font-family:var(--font-mono,monospace);font-size:.85em}',
 	'@media (max-width:600px){',
 	'.vp-nodes-toolbar>.btn,.vp-nodes-toolbar>.cbi-button{flex:1 1 auto}',
-	'.vp-nodes-search{max-width:none;flex-basis:100%}',
-	'.vp-group-actions{width:100%}',
-	'.vp-group-actions>.btn{flex:1 1 auto}',
+	'.vp-nodes-toolbar>.vp-menu{margin-left:0}',
+	'.vp-nodes-search{flex:1 1 100%;max-width:100%;margin-right:0}',
+	'.vp-group-toggle{flex:1 1 8em}',
 	'.vp-bulk>.btn{flex:1 1 auto}',
 	'.vp-bulk-count{flex:1 1 100%}',
 	'.vp-add-tools>.btn{flex:1 1 auto}',

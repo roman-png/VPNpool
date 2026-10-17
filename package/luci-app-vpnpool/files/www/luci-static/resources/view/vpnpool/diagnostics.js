@@ -27,7 +27,8 @@ var CMD_UPDATE = '/usr/libexec/vpnpool/engine.sh update';
 
 var CSS = [
 	'.vp-diag .cbi-section{box-sizing:border-box;max-width:100%;min-width:0}',
-	'.vp-diag-rows{display:grid;grid-template-columns:minmax(12em,auto) 1fr;gap:.35em 1em;align-items:baseline;max-width:100%}',
+	// one label column for every block of the page (the values start at the same place)
+	'.vp-diag-rows{display:grid;grid-template-columns:minmax(0,19em) minmax(0,1fr);gap:.35em 1em;align-items:baseline;max-width:100%}',
 	'.vp-diag-label{color:var(--text-color-medium,GrayText);overflow-wrap:anywhere;min-width:0}',
 	'.vp-diag-value{overflow-wrap:anywhere;min-width:0}',
 	'.vp-diag-name{display:block;font-family:monospace;font-size:.85em;color:var(--text-color-medium,GrayText)}',

@@ -60,5 +60,16 @@ pgrep -f 'uhttpd.*9091' >/dev/null 2>&1 || uhttpd -p 127.0.0.1:9091 -h "$D" >/de
 printf '%s 1a:2b:3c:4d:5e:6f 192.168.1.10 laptop *\n' "$((NOW + 3600))" > /tmp/dhcp.leases
 # our routes: an empty table of ours (needs NET_ADMIN; without it the Overview says the routes are not up)
 nft add table inet vpnpool 2>/dev/null || true
+# no NET_ADMIN (the usual kept stand): a stand-in nft that answers only "list table inet vpnpool",
+# so the Overview can show the "VPN works" state in screenshots (this container only)
+if [ "$STATE" = up ] && ! nft list table inet vpnpool >/dev/null 2>&1; then
+	N=$(command -v nft)
+	[ -e "$N.real" ] || mv "$N" "$N.real"
+	printf '#!/bin/sh
+[ "$*" = "list table inet vpnpool" ] && { echo "table inet vpnpool {"; echo "}"; exit 0; }
+exec %s.real "$@"
+' "$N" > "$N"
+	chmod +x "$N"
+fi
 sleep 6
 ubus call vpnpool status 2>/dev/null | jq -c '{running, routing, tunnel, exit, auto_now, clients: (.client_traffic | length), nodes: (.nodes | length)}'
