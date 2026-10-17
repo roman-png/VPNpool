@@ -418,13 +418,13 @@ test('a node that fails the check: which site, how many checks in a row, how lon
 	const now = Math.floor(NOW / 1000);
 	const root = await open(t, fixture(s => {
 		node(s, 'Bravo').check = { fails: 3, at: now - 600, failed: [ 'www.youtube.com' ] };
-		node(s, 'Charlie').dead = true; node(s, 'Charlie').check = { fails: 1, at: now - 7200, failed: [ 'www.youtube.com', 'openai.com' ] };
+		node(s, 'Charlie').dead = true; node(s, 'Charlie').check = { fails: 1, at: now - 7200, failed: [ 'www.youtube.com', 'chat.example' ] };
 		s.auto_exclude_ids = [];
 		node(s, 'Delta').dead = true; node(s, 'Delta').check = { fails: 0, at: now - 60, failed: [] };
 	}));
 	ok(card(root, 'Bravo').classes.has('vp-dimmed'), 'positive control: Bravo is a failing node');
 	eq(stateOf(card(root, 'Bravo')), 'Does not open www.youtube.com: 3 checks in a row, 10 min ago. It is left out of the automatic choice.', 'the site it did not open, the checks, the time');
-	eq(stateOf(card(root, 'Charlie')), 'Does not open www.youtube.com, openai.com: 1 check in a row, 2 h ago. It is left out of the automatic choice.', 'two sites, one check');
+	eq(stateOf(card(root, 'Charlie')), 'Does not open www.youtube.com, chat.example: 1 check in a row, 2 h ago. It is left out of the automatic choice.', 'two sites of the real check (one not in the settings: the same answer as the Overview alert)');
 	eq(stateOf(card(root, 'Delta')), 'Does not open one of the checked sites (www.youtube.com, openai.com), so it is left out of the automatic choice', 'no failed check counted: the words without numbers');
 	eq(card(root, 'Bravo').querySelector('.vp-card-state').getAttribute('data-kind'), 'error', 'said as an error');
 });
@@ -599,7 +599,7 @@ const MUTATIONS = [
 	{ name: 'a cut list not said', from: "var capped = !!(res && res.capped && res.total > nodes.length);", to: "var capped = false;", expect: [ 'picking nodes shows only the result of OUR probe; a long list says it is cut' ] },
 	{ name: 'the first checked site named for a strict check over several', from: "else if (s.length > 1) head =", to: "else if (false) head =", expect: [ 'groups by source, state words of every kind of card, no innerHTML' ] },
 	{ name: '#add of the Overview ignored', from: "if (loc && loc.hash === '#add') {", to: "if (false) {", expect: [ 'the Overview "+ Add" (#add) opens the dialog once and clears the address' ] },
-	{ name: 'the hosts the check did not reach ignored', from: "if (failed.length) head =", to: "if (false) head =", expect: [ 'a node that fails the check: which site, how many checks in a row, how long ago' ] },
+	{ name: 'the hosts the check did not reach ignored', from: "var f = common.failedSites(st, [ n ])", to: "var f = common.failedSites(st, [])", expect: [ 'a node that fails the check: which site, how many checks in a row, how long ago' ] },
 	{ name: 'checks in a row not said', from: "if (c && c.fails > 0) {", to: "if (false) {", expect: [ 'a node that fails the check: which site, how many checks in a row, how long ago' ] },
 	{ name: 'the card does not pass the node to the words', from: "state = deadText(st, n);", to: "state = deadText(st);", expect: [ 'a node that fails the check: which site, how many checks in a row, how long ago' ] },
 	{ name: 'deferred node can be connected', from: "primary: n.deferred ? { label: _('Connect'), disabled: true }", to: "primary: false ? { label: _('Connect'), disabled: true }", expect: [ 'groups by source, state words of every kind of card, no innerHTML' ] },

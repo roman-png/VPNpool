@@ -870,6 +870,21 @@ function checkSites(st) {
 	return String(((st && st.settings) || {}).check_services || '').split(/[\s,]+/).filter(Boolean)
 		.map(function(s) { return s.replace(/^[a-z]+:\/\//i, '').replace(/[\/?#].*$/, ''); }).filter(Boolean);
 }
+// Which sites the failing nodes did not open — ONE answer for the Nodes cards and the Overview's
+// alert: the node checker's last sweep (node.check.failed of nodes with failed checks; exact) when
+// it names them, otherwise the checked sites of the settings (the check is strict: a failing node
+// did not open at least one of them; exact = false). { sites: [host…], exact: bool }; sites may
+// be empty (no sites set: the default connection check).
+function failedSites(st, nodes) {
+	var seen = {}, out = [];
+	(Array.isArray(nodes) ? nodes : []).forEach(function(n) {
+		var c = n && n.check;
+		if (c && c.fails > 0 && Array.isArray(c.failed))
+			c.failed.forEach(function(h) { if (h && !seen[h]) { seen[h] = true; out.push(String(h)); } });
+	});
+	if (out.length) return { sites: out, exact: true };
+	return { sites: checkSites(st), exact: false };
+}
 // whole days until a moment (seconds); negative = it has passed
 function daysLeft(ts) { return Math.floor((ts * 1000 - Date.now()) / 86400000); }
 // What is known about one subscription (a status.uc subscriptions[] entry), as short parts
@@ -887,6 +902,8 @@ function subFacts(s) {
 		var days = daysLeft(s.expire);
 		if (days < 0) out.push({ t: _('expired on %s').format(fmtDate(s.expire)), k: 'error',
 			alert: s.enabled ? _('The subscription %s has expired: its nodes may stop working.').format(name) : undefined });
+		else if (days === 0) out.push({ t: _('valid until %s (the last day)').format(fmtDate(s.expire)), k: 'warn',
+			alert: s.enabled ? _('The subscription %s expires today (%s).').format(name, fmtDate(s.expire)) : undefined });
 		else out.push({ t: _('valid until %s (%d days left)').format(fmtDate(s.expire), days), k: days < 7 ? 'warn' : '',
 			alert: (days < 7 && s.enabled) ? _('The subscription %s expires in %d days (%s).').format(name, days, fmtDate(s.expire)) : undefined });
 	}
@@ -1469,6 +1486,8 @@ return baseclass.extend({
 	ago: ago,
 	/** The checked sites of the settings (status.settings.check_services) as host names. */
 	checkSites: checkSites,
+	/** Which sites the failing nodes did not open: { sites, exact } (see failedSites above). */
+	failedSites: failedSites,
 	/** What is known about one subscription: [{ t, k, alert }] (see subFacts above). */
 	subFacts: subFacts
 });
