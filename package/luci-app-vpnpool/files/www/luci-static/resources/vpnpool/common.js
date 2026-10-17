@@ -103,7 +103,10 @@ var METHODS = {
 	sub_del:          { params: [ 'id' ], write: true, future: true },
 	// "Exclude from the automatic choice" / "Return to the automatic choice" (a list of excluded ids)
 	auto_exclude:     { params: [ 'id' ], write: true, future: true },
-	auto_include:     { params: [ 'id' ], write: true, future: true }
+	auto_include:     { params: [ 'id' ], write: true, future: true },
+	// stage 7 (ui4): "Update" of one subscription; the log of the Diagnostics page
+	sub_refresh:      { params: [ 'id' ], write: true, future: true },
+	logs:             { params: [ 'lines', 'source' ], future: true }
 };
 
 // Reply code -> human text (msgid). The ONE place where codes become words. The codes are the
@@ -614,6 +617,7 @@ function FormSaver(C, o) {
 	this.method = o.method || 'set_config';
 	this.onSaved = o.onSaved || null;
 	this.onChange = o.onChange || null;
+	this.prepare = o.prepare || null;
 	this.busy = null;
 	this.sent = null;
 	this.byName = {};
@@ -752,6 +756,11 @@ FormSaver.prototype = {
 			var ch = self.changes();
 			if (!Object.keys(ch).length) { C.toast(CODE_TEXT.unchanged); return null; }
 			self.clearErrors();
+			// o.prepare(changes) -> (a promise of) the changes to send: a page may bring a field
+			// up to date with the router right before the save (routing.js: sites the automatic
+			// search found while the page was open); if it fails, the changes go as they are
+			return Promise.resolve(self.prepare ? self.prepare(ch) : ch).then(null, function() { return ch; }).then(function(pc) {
+			if (pc && typeof pc === 'object') ch = pc;
 			self.sent = ch;
 			return C.call(self.method, { settings: ch }, { handle: [ 'invalid' ], success: CODE_TEXT.saved }).then(function(r) {
 				for (var f in ch) if (has(ch, f)) { self.base[f] = ch[f]; self.snapPut(self.byName[f], ch[f]); }
@@ -763,6 +772,7 @@ FormSaver.prototype = {
 					C.toast(CODE_TEXT.invalid + (miss.length ? ' ' + _('Also: %s.').format(miss.join(', ')) : ''), 'error', self.method);
 				}
 				return null;
+			});
 			});
 		}, function() {
 			C.toast(CODE_TEXT.invalid, 'error', self.method);

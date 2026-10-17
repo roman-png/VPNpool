@@ -580,7 +580,7 @@ return view.extend({
 		G.info = E('div', { 'class': 'vp-group-info' });
 		G.empty = E('p', { 'class': 'vp-group-empty' });
 		if (g.kind === 'sub') {
-			G.updateBtn = button(_('Update'), 'vp-sub-update', ui.createHandlerFn(this, function() { return this.handleRefresh(); }));
+			G.updateBtn = button(_('Update'), 'vp-sub-update', ui.createHandlerFn(this, function() { return this.handleSubRefresh(G.g.sub); }));
 			G.actions.appendChild(G.updateBtn);
 		}
 		G.el = E('section', { 'class': 'vp-group', 'data-group': g.id }, [ E('div', { 'class': 'vp-group-head' }, [ G.toggle, G.actions, G.info ]), G.body ]);
@@ -999,6 +999,15 @@ return view.extend({
 	},
 	handleRefresh: function() {
 		return this.after(common.call('refresh', {}, { success: _('Updating every subscription: the list refreshes when it is done.') }));
+	},
+	// "Update" in the head of a subscription: only this subscription is downloaded again
+	handleSubRefresh: function(sub) {
+		var name = (sub && (sub.name || sub.url)) || '';
+		return this.after(common.call('sub_refresh', { id: sub && sub.id }, { handle: [ 'disabled' ],
+			success: _('Updating the subscription %s: its nodes refresh when it is done.').format(name) }).catch(function(e) {
+			if (e && e.code === 'disabled') common.toast(_('The subscription is turned off. Turn it on to update it.'), 'warning', 'sub_refresh');
+			throw e;
+		}));
 	},
 
 	handleAutoPool: function() {
