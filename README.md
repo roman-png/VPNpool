@@ -1,4 +1,4 @@
-# VPNpool — VLESS / Reality subscription manager with auto-failover for OpenWrt
+# VPNpool — VLESS / Reality / Hysteria2 / AmneziaWG subscription manager with auto-failover for OpenWrt
 
 <p align="right"><b>English</b> · <a href="README.ru.md">Русский 🇷🇺</a></p>
 
@@ -63,7 +63,8 @@ still of 1.x.
 ## 🚀 Install
 
 **Requirements:** OpenWrt **25.12+** (apk) or **23.05 / 24.10** (opkg), **≥ 128 MB RAM**,
-~40 MB free flash for sing-box — or [16 MB flash with sing-box in RAM](#-routers-with-small-flash-16-mb).
+~40 MB free flash for sing-box (+ ~45 MB for the [AmneziaWG engine](#-amneziawg-engine) if you use AmneziaWG) — or
+[16 MB flash with sing-box in RAM](#-routers-with-small-flash-16-mb).
 Our packages are architecture-independent; sing-box and kmods come from your router's feeds.
 
 | Variant | Command |
@@ -171,7 +172,7 @@ uci set vpnpool.main.enabled='1'; uci commit vpnpool
   last update; **Update** refreshes one subscription
 - ⭐ Favourites survive subscription expiry; nodes you hide go to **Hidden** and come back with one click
 - Share link + **offline QR**, export as a subscription
-- Search, filter and sort for subscriptions with hundreds of nodes
+- Search by name or server and folding groups for subscriptions with hundreds of nodes
 
 **Health check & failover**
 - 🎯 One criterion for "working": opens **every** service you listed — drives urltest, failover and watchdog
@@ -273,8 +274,9 @@ LuCI (5 tabs) ── ubus/rpcd ── vpnpoold (ucode + shell, procd)
                                   │ fetch (multi-UA) → parse → build → sing-box check
                                   │ service check (Clash delay API) → dead/alive sets
                                   ▼
-                          sing-box (the engine)
-   inbound : tproxy 127.0.0.1:1603  +  local mixed SOCKS/HTTP :1605 (tests, bot)
+            sing-box (stock; /usr/bin/sing-box-awg when the pool has AmneziaWG nodes)
+   inbound : tproxy 127.0.0.1:1603  +  local mixed SOCKS/HTTP :1605 (exit test, bot)
+             + :1606 (checks of one node at a time)
    outbound: urltest "auto" (ping + failover) + selector + nodes + direct
    endpoints[]: AmneziaWG / WireGuard peers (sing-box >= 1.13)
    route   : sniff SNI → community SRS / domains → proxy (or direct in exclude mode)
@@ -317,8 +319,9 @@ Everything lives in `/etc/config/vpnpool`, section `config vpnpool 'main'`.
 | `speedtest_url` / `speedtest_min_mem_kb` | Cloudflare / `8192` | Speed-test target / free-memory guard |
 | `dns_strategy` | `prefer_ipv4` | Resolution strategy for sing-box probes |
 | `fwmark` / `route_table` / `route_priority` | `0x400000` / `142` / `106` | Non-colliding routing resources |
-| `tproxy_port` / `test_port` / `clash_api` | `1603` / `1605` / `127.0.0.1:9091` | Inbounds and control API |
+| `tproxy_port` / `test_port` / `node_test_port` / `clash_api` | `1603` / `1605` / `1606` / `127.0.0.1:9091` | Inbounds (tproxy, exit test + bot, per-node checks) and control API |
 | `lan_if` / `coexist` / `log_level` | auto / `auto` / `warn` | LAN device, podkop yield, sing-box log level |
+| `schema` | `2` | Layout version of this file (set by the 1.x → 2.0 migration; don't edit) |
 
 Lists kept by the app: `manual_node` (your own links), `hidden`, `auto_exclude` (left out of the
 automatic choice; every other node takes part, new ones too), `auto_member` (1.x: only these take
