@@ -808,7 +808,8 @@ function node_op(op, inp) {
 		let ch = list_del(u, 'auto_exclude', [ id ]);
 		let mem = as_list(u.get('vpnpool', 'main', 'auto_member'), true);
 		let live = {};
-		for (let n in live_nodes()) if (n.id) live[n.id] = true;
+		// as generator.uc: a deferred node is not in the config, so it does not make the list count
+		for (let n in live_nodes()) if (n.id && !n._deferred) live[n.id] = true;
 		if (r && r.node && length(filter(mem, (x) => live[x])) && !(id in mem)) ch = list_add(u, 'auto_member', id) || ch;
 		if (!ch) return (r && r.node) ? { ok: true, code: 'unchanged', id: id, actions: [] } : { ok: false, code: 'not_found' };
 		if (!u.commit('vpnpool')) return { ok: false, code: 'write_failed' };

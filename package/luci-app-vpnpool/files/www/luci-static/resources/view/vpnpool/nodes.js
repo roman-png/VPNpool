@@ -337,6 +337,10 @@ function probe(url) {
 		return pollResult('probe_result', 120000).then(function(res) {
 			if (job != null && (!res || res.job !== job)) throw new common.Error('probe_busy', 'probe_result', res);
 			return res || {};
+		}, function(e) {
+			// a failed result (ok:false) of another job is not ours either
+			if (job != null && e instanceof common.Error && e.reply && e.reply.job !== job) throw new common.Error('probe_busy', 'probe_result', e.reply);
+			throw e;
 		});
 	}).then(null, function(e) {
 		if (e instanceof common.Error && e.code === 'no_nodes') throw new common.Error('fetch_failed', 'probe_result', e.reply);
@@ -362,6 +366,7 @@ function autoPool(st) {
 	var excl = arr(st && st.auto_exclude_ids);
 	var after = base.filter(function(i) { return !has(excl, i); });
 	if (!after.length) after = base;
+	var beforeFav = after.slice();   // the set the exclusions decide on ("favourites only" comes after)
 	var favOnly = false;
 	if (((st && st.settings) || {}).favorites_only) {
 		var favs = pool.filter(function(n) { return n.favorite; }).map(function(n) { return n.id; });
@@ -372,6 +377,8 @@ function autoPool(st) {
 		ids: ids,
 		members: members,
 		participants: after,
+		beforeFav: beforeFav,
+		memberListActive: members.length > 0,
 		favOnly: favOnly,
 		inAuto: function(id) { return has(after, id); },
 		// null (takes part) | 'excluded' | 'not_member' | 'favorites_only'
@@ -745,6 +752,7 @@ return view.extend({
 			menu.push({ label: _('Speed test'), disabled: !!busy, handler: function() { self.doSpeedtest(self.current(n)); } });
 			menu.push({ label: _('Check services'), disabled: !!busy, handler: function() { self.doUnlock(self.current(n)); } });
 			if (why === 'excluded' || why === 'not_member') menu.push({ label: _('Return to the automatic choice'), handler: function() { self.doInclude(self.current(n)); } });
+			else if (why === 'favorites_only') { /* keeping a failing node would not make it take part */ }
 			else if (n.dead && !n.kept) menu.push({ label: _('Return to the automatic choice'), handler: function() { self.doKeep(key, name); } });
 			else if (why !== 'favorites_only') menu.push({ label: _('Exclude from the automatic choice'), handler: function() { self.doExclude(self.current(n)); } });
 			if (n.kept) menu.push({ label: _('Check it automatically again'), handler: function() { self.doUnkeep(key, name); } });
@@ -869,10 +877,12 @@ return view.extend({
 		return cur || n;
 	},
 	// exclusions are a list of EXCLUDED nodes in the backend: every other node takes part, new
-	// ones too; the engine never empties the automatic choice, so excluding the last one is refused here
+	// ones too; the engine ignores exclusions that would empty the automatic choice, so excluding
+	// the last one is refused here — the last one BEFORE "favourites only" (that option steps back
+	// by itself when no favourite is left, as in generator.uc)
 	doExclude: function(n) {
 		var p = autoPool(this.st || {});
-		if (p.participants.length === 1 && p.participants[0] === n.id) {
+		if (p.beforeFav.length === 1 && p.beforeFav[0] === n.id) {
 			common.toast(_('At least one node must stay in the automatic choice.'), 'warning', 'auto-pool');
 			return Promise.resolve();
 		}
@@ -1019,17 +1029,22 @@ return view.extend({
 		ui.showModal(common.txt(_('Which nodes take part in the automatic choice')), [
 			E('p', {}, _('The automatic choice switches only between the checked nodes; new nodes of the subscriptions take part too. The others stay in the list: you can still connect to them yourself.')),
 			p.favOnly ? E('p', { 'class': 'vp-muted' }, _('"Favourites only" is on: of the checked nodes, only the favourites take part.')) : '',
+			p.memberListActive ? E('p', { 'class': 'vp-pool-oldlist' }, _('A list of nodes for the automatic choice from the previous version is in effect: new nodes do not join it. Save this window and new nodes will take part by themselves.')) : '',
 			list.el,
 			E('div', { 'class': 'button-row right' }, [
 				button(_('Cancel'), '', function() { ui.hideModal(); }),
 				button(_('Save'), 'cbi-button-positive important', function() {
 					var ids = list.ids();
 					if (!ids.length) { common.toast(_('At least one node must stay in the automatic choice.'), 'warning', 'auto-pool'); return; }
-					var excl = nodes.map(function(n) { return n.id; }).filter(function(i) { return ids.indexOf(i) < 0; });
+					var shown = nodes.map(function(n) { return n.id; });
+					var excl = shown.filter(function(i) { return ids.indexOf(i) < 0; });
+					// set_config replaces the list: keep the exclusions of nodes this window does not
+					// show (a deferred node, a subscription that is off or not fetched right now)
+					arr(st.auto_exclude_ids).forEach(function(i) { if (shown.indexOf(i) < 0 && excl.indexOf(i) < 0) excl.push(i); });
 					ui.hideModal();
 					// one save: the unchecked ones become exclusions, a 1.x member list goes
 					self.after(common.call('set_config', { settings: { auto_members: [], auto_excludes: excl } }, {
-						success: excl.length ? _('Saved: %d of %d nodes take part in the automatic choice.').format(ids.length, nodes.length)
+						success: (ids.length < nodes.length) ? _('Saved: %d of %d nodes take part in the automatic choice.').format(ids.length, nodes.length)
 							: _('Every node takes part in the automatic choice, new ones too.') }));
 				})
 			])

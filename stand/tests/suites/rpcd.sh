@@ -1027,6 +1027,18 @@ begin "rpcd/auto_include/stale-member-list-left-alone"
 expect_eq "not excluded any more" "$(ulist vpnpool.main.auto_exclude)" ''
 expect_eq "the stale member list unchanged" "$(ulist vpnpool.main.auto_member | tr '\n' ,)" "bbbbbbbbbbbb,"
 end
+# ui1 review 2: a member list naming only a DEFERRED node is not in effect either (the generator
+# does not see deferred nodes): include must not make it count by adding the node to it
+reset_state; fx_nodes
+echo '[{"tag":"Waiting","id":"cccccccccccc","type":"awg","server":"203.0.113.9","port":51820,"reason":"engine_missing","_src":"awg"}]' > /tmp/vpnpool/deferred.json
+uci add_list vpnpool.main.auto_exclude="$ID2"; uci add_list vpnpool.main.auto_member=cccccccccccc; uci commit vpnpool; daemon_start
+rcall auto_include "$FA"
+begin "rpcd/auto_include/deferred-only-member-list-left-alone"
+expect_jq "positive control: the deferred node is in the last build's lists" "$(cat /tmp/vpnpool/deferred.json)" '.[0].id=="cccccccccccc"'
+expect_eq "not excluded any more" "$(ulist vpnpool.main.auto_exclude)" ''
+expect_eq "the member list (only the deferred node) unchanged" "$(ulist vpnpool.main.auto_member | tr '\n' ,)" "cccccccccccc,"
+end
+rm -f /tmp/vpnpool/deferred.json
 rcall auto_exclude "$FA"; rcall auto_exclude "$FA"
 begin "rpcd/auto_exclude/twice-is-unchanged"
 expect_jq "unchanged" "$R" '.ok==true and .code=="unchanged"'
