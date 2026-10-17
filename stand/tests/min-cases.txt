@@ -8,7 +8,7 @@ adaptive 4
 fetch 15
 status 23
 uitext 6
-daemon 50
+daemon 51
 tgbot 22
 awgdecode 74
 engine 71

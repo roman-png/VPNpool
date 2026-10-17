@@ -432,6 +432,9 @@ routing_eval() {   # [reapply|startup]
 	if ! paused && ! killswitch_on; then
 		singbox_alive && wait_tunnel "${RE_ROUNDS:-1}" && h=1
 	fi
+	# a real end-to-end probe just passed: the tunnel of THIS start is up (the watchdog's warm-up
+	# below must not show "starting" for minutes while traffic already flows)
+	[ "$h" = 1 ] && { TUNNEL_PROVEN=$SB_STARTED; tunnel_state up "$(date +%s)"; }
 	apply_routing "$h" "$1"
 }
 
@@ -466,6 +469,7 @@ WD_HEALTHY=""     # this tick's verdict for the supervise loop: 1 / 0 / "" (not 
 # internet). Removed at the daemon's start and stop: no file = nothing known.
 TUNNEL_FILE="$SB_DATA/.tunnel"
 TUNNEL_STATE=""
+TUNNEL_PROVEN=""   # the SB_STARTED of the run whose tunnel a probe proved up (routing_eval)
 tunnel_state() {   # $1=state $2=now
 	[ "$1" = "$TUNNEL_STATE" ] && return 0
 	TUNNEL_STATE=$1
@@ -477,7 +481,7 @@ watchdog_check() {
 	WD_HEALTHY=""
 	now=$(date +%s)
 	# grace window after a (re)start: never judge a tunnel that is still warming up
-	[ $(( now - SB_STARTED )) -lt "$WD_GRACE" ] && { WD_BAD=0; tunnel_state starting "$now"; return 0; }
+	[ $(( now - SB_STARTED )) -lt "$WD_GRACE" ] && { WD_BAD=0; [ "$TUNNEL_PROVEN" = "$SB_STARTED" ] || tunnel_state starting "$now"; return 0; }
 	if tunnel_healthy; then WD_BAD=0; WD_HEALTHY=1; tunnel_state up "$now"; return 0; fi
 	WD_HEALTHY=0
 	# probe failed all attempts — only OUR problem if WAN itself is up
