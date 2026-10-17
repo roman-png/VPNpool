@@ -123,10 +123,8 @@ function deferredText(reason) {
 // general connection check.
 function deadText(st, n) {
 	var c = (n && n.check && typeof n.check === 'object') ? n.check : null;
-	var failed = c ? arr(c.failed).filter(Boolean) : [];
-	var s = common.checkSites(st), head;
-	if (failed.length) head = _('Does not open %s').format(failed.join(', '));
-	else if (s.length === 1) head = _('Does not open %s').format(s[0]);
+	var f = common.failedSites(st, [ n ]), s = f.sites, head;   // the same answer as the Overview's alert
+	if (s.length && (f.exact || s.length === 1)) head = _('Does not open %s').format(s.join(', '));
 	else if (s.length > 1) head = _('Does not open one of the checked sites (%s)').format(s.join(', '));
 	else head = _('Fails the connection check');
 	if (c && c.fails > 0) {

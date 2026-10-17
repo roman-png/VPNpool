@@ -429,20 +429,36 @@ ctl ui2-tunnel-every-tick daemon fail 'daemon/tunnel-state-for-the-overview ' \
 	"$LIBX/vpnpoold" '	[ "$1" = "$TUNNEL_STATE" ] && return 0' '	:'
 ctl ui2-exit-every-tick daemon fail 'daemon/exit-lookup-only-when-needed ' \
 	"$LIBX/vpnpoold" '		[ "$age" -lt "$EXIT_RETRY" ] && return 0' '		:'
+ctl ui2-exit-no-min-interval daemon fail 'daemon/exit-lookup-only-when-needed ' \
+	"$LIBX/vpnpoold" '	[ "$age" -lt "$EXIT_MIN" ] && return 0' '	:'
+ctl ui2-exit-reread-every-tick daemon fail 'daemon/exit-lookup-only-when-needed ' \
+	"$LIBX/vpnpoold" '		if [ -z "$EXIT_SEEN" ]; then' '		if true; then'
 ctl ui2-exit-without-tunnel daemon fail 'daemon/exit-lookup-only-when-needed ' \
 	"$LIBX/vpnpoold" '	[ -n "$1" ] && [ "$WD_HEALTHY" = 1 ] || return 0' '	[ -n "$1" ] || return 0'
 ctl ui2-exitip-direct daemon fail 'daemon/exitip-first-address-through-the-tunnel ;daemon/exitip-nothing-answers-says-so ' \
 	"$LIBX/exitip.sh" 'J=$(curl -s -m 7 --proxy "socks5h://127.0.0.1:$TP" "$url" 2>/dev/null)' 'J=$(curl -s -m 7 "$url" 2>/dev/null)'
 ctl ui2-exitip-junk-address daemon fail 'daemon/exitip-first-address-through-the-tunnel ' \
-	"$LIBX/exitip.sh" '	case "$IP" in (*[!0-9a-fA-F:.]*|'"''"') IP=""; continue ;; esac' '	:'
+	"$LIBX/exitip.sh" '	case "$IP" in (*[!0-9a-fA-F:.]*|'"''"') IP=""; continue ;; esac' '	:' \
+	"$LIBX/exitip.sh" '	case "$IP" in (*[.:]*) ;; (*) IP=""; continue ;; esac' '	:'
+ctl ui2-exitip-word-address daemon fail 'daemon/exitip-first-address-through-the-tunnel ' \
+	"$LIBX/exitip.sh" '	case "$IP" in (*[.:]*) ;; (*) IP=""; continue ;; esac' '	:'
 ctl ui2-status-exit-other-node status fail 'status/exit-of-another-node-not-shown ' \
-	"$LIBX/status.uc" '&& length(now_tag) && exj.node == now_tag)' '&& length(now_tag))'
+	"$LIBX/status.uc" "if (type(exj) == 'object' && length(now_tag) && exj.node == now_tag)" "if (type(exj) == 'object' && length(now_tag))"
+ctl ui2-status-exit-failure-hidden status fail 'status/failed-exit-lookup-and-unknown-tunnel-state ' \
+	"$LIBX/status.uc" '		: { ok: false, ip: null, country: null, node: exj.node, at: exj.at ?? null };' '		: null;'
+# one list of the IP-echo services (lib.sh): a change there reaches rpcd conntest too
+ctl ui2-exit-services-two-lists rpcd fail 'rpcd/conntest/ok ' \
+	"$LIBX/lib.sh" '"https://ifconfig.co/json" "https://ipinfo.io/json" "https://api.ip.sb/geoip"' '"https://ifconfig.invalid/json" "https://ipinfo.io/json" "https://api.ip.sb/geoip"'
 ctl ui2-status-tunnel-stale status fail 'status/daemon-down-no-tunnel-no-exit ' \
 	"$LIBX/status.uc" "let tf = running ? split(" "let tf = true ? split("
 ctl ui2-overview-legacy-call ui-overview fail 'FAIL - "Connected to X" and "Back to automatic choice";FAIL - only the 2.0 methods' \
 	"$VIEW/dashboard.js" "common.call('auto_select'" "common.call('set_preferred'"
 ctl ui2-overview-tunnel-ignored ui-overview fail 'FAIL - state in words for every state the daemon reports' \
 	"$VIEW/dashboard.js" "if (tn === 'down') return" "if (false) return"
+ctl ui2-overview-exit-dead-tunnel ui-overview fail 'FAIL - exit: only while the tunnel works' \
+	"$VIEW/dashboard.js" 'exit: !(live && tunnelUp && tag) ? null' 'exit: !(live && tag) ? null'
+ctl ui2-overview-pause-on ui-overview fail 'FAIL - a pause from Telegram' \
+	"$VIEW/dashboard.js" 'function vpnOn(st) { return !!(st && st.enabled && !st.paused); }' 'function vpnOn(st) { return !!(st && st.enabled); }'
 ctl ui2-nodes-check-words-dropped ui-nodes fail 'FAIL - a node that fails the check: which site' \
 	"$VIEW/nodes.js" 'state = deadText(st, n);' 'state = deadText(st);'
 ctl ui2-ci-overview-dropped ui-unit fail 'FAIL - packaging: translation in installer, feeds and CI' \

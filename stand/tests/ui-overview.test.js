@@ -127,7 +127,8 @@ test('state in words for every state the daemon reports', async (t) => {
 	const cases = [
 		[ s => { s.enabled = false; s.running = false; s.routing = false; s.tunnel = null; s.exit = null; }, 'VPN is off', '', 'The internet goes directly, without the VPN.' ],
 		[ s => { s.running = false; s.routing = false; s.tunnel = null; }, 'VPN is on, but the service is not running', 'error', null ],
-		[ s => { s.paused = true; s.routing = false; }, 'Paused', 'warn', null ],
+		[ s => { s.paused = true; s.routing = false; }, 'Paused', 'warn', 'Paused from Telegram: the internet goes directly, without the VPN. "Turn the VPN on" resumes it.' ],
+		[ s => { s.tunnel = { state: 'down', since: 1 }; }, 'No node works', 'error', 'If no node works again in a moment, what should go through the VPN goes directly.' ],
 		[ s => { s.tunnel = { state: 'wan_down', since: 1 }; s.routing = false; }, 'The router has no internet', 'error', 'Check the cable or the internet provider.' ],
 		[ s => { s.tunnel = { state: 'wan_down', since: 1 }; s.settings.killswitch = true; }, 'The router has no internet', 'error', 'What should go through the VPN is blocked until the internet is back.' ],
 		[ s => { s.tunnel = { state: 'down', since: 1 }; s.routing = false; }, 'No node works', 'error', 'What should go through the VPN goes directly until a node works.' ],
@@ -145,21 +146,44 @@ test('state in words for every state the daemon reports', async (t) => {
 		if (detail != null) eq(text(root, '.vp-ov-detail'), detail, 'detail of case ' + n);
 		n++;
 	}
-	eq(n, 12, 'positive control: every case ran');
+	eq(n, 13, 'positive control: every case ran');
 	await poll(t, fixture(s => { s.enabled = false; s.running = false; s.tunnel = null; s.exit = null; }));
 	ok(!shown(root, '.vp-ov-facts'), 'off: no node / exit / speed rows');
 	eq(text(root, '.vp-ov-toggle'), 'Turn the VPN on', 'toggle while off');
 	ok(!shown(root, '.vp-ov-who'), 'off: no "automatic choice" line');
 });
 
-test('exit: "being checked" while the lookup has not answered; nothing for another node or a dead tunnel', async (t) => {
+test('exit: only while the tunnel works; "being checked" before the lookup; a failed lookup is said', async (t) => {
 	const root = await open(t, fixture(s => { s.exit = null; }));
 	eq(text(root, '.vp-ov-exit'), 'being checked…', 'tunnel up, no lookup yet');
-	await poll(t, fixture(s => { s.exit = null; s.tunnel = { state: 'down', since: 1 }; }));
-	ok(!shown(root, '.vp-ov-exit'), 'a dead tunnel: no exit row');
-	ok(shown(root, '.vp-ov-node'), 'positive control: the node row is still there');
-	await poll(t, fixture(s => { s.exit = { ip: '2001:db8::1', country: null, node: 'Alpha' }; }));
+	// the exit of the last lookup is still in the reply (exit.json outlives a dead tunnel)
+	for (const state of [ 'down', 'wan_down', 'starting' ]) {
+		await poll(t, fixture(s => { s.tunnel = { state, since: 1 }; }));
+		ok(t.env.handlers.status().exit && t.env.handlers.status().exit.ip, 'positive control: the reply has an exit (' + state + ')');
+		ok(shown(root, '.vp-ov-node'), 'positive control: the node row is there (' + state + ')');
+		ok(!shown(root, '.vp-ov-exit'), 'no exit row while the tunnel is ' + state);
+	}
+	await poll(t, fixture(s => { s.exit = { ok: false, ip: null, country: null, node: 'Alpha', at: SEC - 30 }; }));
+	eq(text(root, '.vp-ov-exit'), 'could not be determined: the address check services did not answer', 'a lookup that found nothing');
+	await poll(t, fixture(s => { s.exit = { ok: true, ip: '2001:db8::1', country: null, node: 'Alpha' }; }));
 	eq(text(root, '.vp-ov-exit'), '2001:db8::1', 'an address without a country');
+});
+
+test('a pause from Telegram: "Turn the VPN on" ends it; no node / exit / choice rows', async (t) => {
+	const root = await open(t, fixture(s => { s.paused = true; s.routing = false; s.preferred = { id: ID.B, tag: 'Bravo', in_pool: true }; }));
+	eq(stateOf(root), [ 'Paused', 'warn' ], 'positive control: paused');
+	eq(text(root, '.vp-ov-detail'), 'Paused from Telegram: the internet goes directly, without the VPN. "Turn the VPN on" resumes it.', 'the words name the real button');
+	eq(text(root, '.vp-ov-toggle'), 'Turn the VPN on', 'the button turns the VPN on');
+	ok(!shown(root, '.vp-ov-facts') && !shown(root, '.vp-ov-who') && !shown(root, '.vp-ov-auto'), 'no node / exit / speed / choice rows while paused');
+	t.env.handlers.set_enabled = () => ({ ok: true, code: 'on', daemon: 'n/a' });
+	let polls = 0;
+	t.env.handlers.status = () => (++polls < 3) ? fixture(s => { s.paused = true; s.routing = false; }) : fixture();
+	click(t, q(root, '.vp-ov-toggle')); await settle(t);
+	eq(t.calls('set_enabled'), [ { enabled: true } ], 'set_enabled on (ends the pause)');
+	eq(toasts(t, 'info'), [ 'Turning the VPN on…' ], 'waits while still paused');
+	await t.env.tick(6000);
+	eq(toasts(t, 'info'), [ 'VPN is on.' ], 'done once the pause is over');
+	eq(text(root, '.vp-ov-toggle'), 'Turn the VPN off', 'the button follows');
 });
 
 test('"Connected to X" and "Back to automatic choice"; a chosen node that is gone', async (t) => {
@@ -212,6 +236,13 @@ test('alerts in words: failing nodes, engine, set aside, unreadable files, subsc
 	await poll(t, fixture(s => { s.nodes = [ { tag: 'Home AWG', id: ID.W, proto: 'awg', deferred: true, reason: 'engine_no_awg', source: 'awg' } ]; }));
 	eq(alerts(root), [ '1 AmneziaWG node waits for the AmneziaWG engine: it starts working once the engine is installed.',
 		'No node can work right now: all nodes are waiting (the reason is shown next to each node).' ], 'only waiting nodes');
+	// which site: the node checker's own answer (as on the Nodes cards), not the settings
+	await poll(t, fixture(s => { node(s, 'Bravo').dead = true; node(s, 'Bravo').check = { fails: 2, at: SEC - 60, failed: [ 'chat.example' ] }; }));
+	eq(alerts(root), [ '1 node does not open chat.example: it is left out of the automatic choice.' ], 'the site of the real check');
+	await poll(t, fixture(s => { node(s, 'Bravo').dead = true; s.settings.check_services = ''; }));
+	eq(alerts(root), [ '1 node fails the connection check: it is left out of the automatic choice.' ], 'no sites set and no check data: the general words');
+	await poll(t, fixture(s => { s.subscriptions[0].expire = SEC + 3600; }));
+	eq(alerts(root), [ 'The subscription Main provider expires today (' + new Date((SEC + 3600) * 1000).toLocaleDateString() + ').' ], 'the last day: "today", not "in 0 days"');
 });
 
 test('subscription cards: expiry, traffic left with a bar, "updated", nodes in use', async (t) => {
@@ -325,7 +356,8 @@ async function run(viewSrc, commonSrc, quiet) {
 
 const T_NOW = 'Now: a working VPN — state, node, exit with the country, delay, speed, automatic choice; no innerHTML';
 const T_STATE = 'state in words for every state the daemon reports';
-const T_EXIT = 'exit: "being checked" while the lookup has not answered; nothing for another node or a dead tunnel';
+const T_EXIT = 'exit: only while the tunnel works; "being checked" before the lookup; a failed lookup is said';
+const T_PAUSE = 'a pause from Telegram: "Turn the VPN on" ends it; no node / exit / choice rows';
 const T_PREF = '"Connected to X" and "Back to automatic choice"; a chosen node that is gone';
 const T_ALERT = 'alerts in words: failing nodes, engine, set aside, unreadable files, subscriptions, the last update';
 const T_SUBS = 'subscription cards: expiry, traffic left with a bar, "updated", nodes in use';
@@ -338,8 +370,16 @@ const MUTATIONS = [
 	{ name: 'the tunnel check ignored (a dead tunnel looks fine)', from: "if (tn === 'down') return", to: "if (false) return", expect: [ T_STATE ] },
 	{ name: 'the protection not considered', from: "d: (set.killswitch && st.routing) ? _('What should go through the VPN is blocked until the internet is back.')", to: "d: false ? _('What should go through the VPN is blocked until the internet is back.')", expect: [ T_STATE ] },
 	{ name: 'a working tunnel without the routes said as working', from: "if (tn === 'up') return st.routing", to: "if (tn === 'up') return true", expect: [ T_STATE ] },
-	{ name: 'the exit of the daemon not shown', from: "exit: (ex && ex.ip)", to: "exit: (false)", expect: [ T_NOW, T_EXIT ] },
-	{ name: '"being checked" for a dead tunnel', from: "(live && tunnelUp && tag ?", to: "(live && tag ?", expect: [ T_EXIT ] },
+	{ name: 'the exit of the daemon not shown', from: ": (ex && ex.ok !== false && ex.ip) ?", to: ": false ?", expect: [ T_NOW, T_EXIT ] },
+	{ name: 'the exit shown without the tunnel check', from: "exit: !(live && tunnelUp && tag) ? null", to: "exit: !(live && tag) ? null", expect: [ T_EXIT ] },
+	{ name: 'a failed lookup shown as "being checked"', from: ": (ex && ex.ok === false) ? _('could", to: ": false ? _('could", expect: [ T_EXIT ] },
+	{ name: 'a pause taken as on', from: "function vpnOn(st) { return !!(st && st.enabled && !st.paused); }", to: "function vpnOn(st) { return !!(st && st.enabled); }", expect: [ T_PAUSE ] },
+	{ name: 'the rows shown while paused', from: "var live = !!(on && st.running);", to: "var live = !!(st.enabled && st.running);", expect: [ T_PAUSE ] },
+	{ name: 'the alert names the settings, not the check', from: "var sites = common.failedSites(st, dead).sites;", to: "var sites = common.checkSites(st);", expect: [ T_ALERT ] },
+	{ name: '"(connection)" in brackets again', from: ": N_(dead.length, '%d node fails the connection check", to: ": N_(dead.length, '%d node fails the check of the sites (connection)", expect: [ T_ALERT ] },
+	{ name: 'common: the last day as "in 0 days"', file: 'common', from: "else if (days === 0) out.push(", to: "else if (false) out.push(", expect: [ T_ALERT ] },
+	{ name: 'common: the sites of the check ignored', file: 'common', from: "if (out.length) return { sites: out, exact: true };", to: "", expect: [ T_ALERT ] },
+	{ name: '"goes directly" while the routes still lead into the tunnel', from: ": (st.routing ? _('If no node works again", to: ": (false ? _('If no node works again", expect: [ T_STATE ] },
 	{ name: 'the choice of the user not said', from: "if (pref && pref.id) {", to: "if (false) {", expect: [ T_PREF ] },
 	{ name: 'back to automatic choice through a legacy method', from: "common.call('auto_select'", to: "common.call('set_preferred'", expect: [ T_PREF, T_API ] },
 	{ name: 'kept nodes counted as failing', from: "n.dead && !n.kept && !n.deferred", to: "n.dead && !n.deferred", expect: [ T_ALERT ] },
@@ -353,9 +393,10 @@ const MUTATIONS = [
 	{ name: 'devices shown while off', from: "var view = live ? arr(st.client_traffic)", to: "var view = true ? arr(st.client_traffic)", expect: [ T_DEV ] },
 	{ name: 'the wizard never shown', from: "this.wizard.hidden = !empty;", to: "this.wizard.hidden = true;", expect: [ T_WIZ ] },
 	{ name: 'alerts on an empty install', from: "this.updateAlerts(empty ? [] : alertsOf(st));", to: "this.updateAlerts(alertsOf(st));", expect: [ T_WIZ ] },
-	{ name: '"done" before the daemon runs (no waiting)', from: "return !!s.enabled === target && !!s.running === target;", to: "return true;", expect: [ T_TOGGLE ] },
+	{ name: '"done" before the daemon runs (no waiting)', from: "return target ? (vpnOn(s) && !!s.running) : (!s.enabled && !s.running);", to: "return true;", expect: [ T_TOGGLE, T_PAUSE ] },
+	{ name: 'the end of a pause not waited for', from: "return target ? (vpnOn(s) && !!s.running)", to: "return target ? (!!s.enabled && !!s.running)", expect: [ T_PAUSE ] },
 	{ name: 'a start that did not happen not said', from: "if (e instanceof common.Error && e.code === 'timeout')", to: "if (false)", expect: [ T_TOGGLE ] },
-	{ name: 'the toggle sends the same state', from: "var target = !st.enabled;", to: "var target = !!st.enabled || true;", expect: [ T_TOGGLE ] },
+	{ name: 'the toggle sends the same state', from: "var target = !vpnOn(st);", to: "var target = !!st.enabled || true;", expect: [ T_TOGGLE ] },
 	{ name: 'lists rebuilt on every poll', from: "if (this.sigs[key] === s) return false;", to: "", expect: [ T_POLL ] }
 ];
 

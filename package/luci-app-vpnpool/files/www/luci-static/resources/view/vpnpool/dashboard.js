@@ -105,6 +105,8 @@ function countryName(code) {
 	} catch (e) {}
 	return String(code).toUpperCase();
 }
+// is the VPN switched on: the user's switch, and no Telegram pause
+function vpnOn(st) { return !!(st && st.enabled && !st.paused); }
 function speed(n) { return _('%s/s').format(common.fmtBytes(n)); }
 
 // ---- the state in words: ONE function, from the daemon's own facts ----
@@ -121,13 +123,16 @@ function stateOf(st) {
 	if (!st.running) return { t: _('VPN is on, but the service is not running'), k: 'error',
 		d: _('Turn the VPN off and on again; if it repeats, open Diagnostics.') };
 	if (st.paused) return { t: _('Paused'), k: 'warn',
-		d: _('Paused from Telegram: the internet goes directly. "Turn on" resumes the VPN.') };
+		d: _('Paused from Telegram: the internet goes directly, without the VPN. "Turn the VPN on" resumes it.') };
 	if (tn === 'wan_down') return { t: _('The router has no internet'), k: 'error',
 		d: (set.killswitch && st.routing) ? _('What should go through the VPN is blocked until the internet is back.') : _('Check the cable or the internet provider.') };
 	if (tn === 'down') return { t: _('No node works'), k: 'error',
 		d: (set.killswitch && st.routing)
 			? _('What should go through the VPN is blocked until a node works (protection is on).')
-			: _('What should go through the VPN goes directly until a node works.') };
+			// the daemon takes the routes down after its second failed check (~15-30 s): until then
+			// the traffic still goes into the tunnel
+			: (st.routing ? _('If no node works again in a moment, what should go through the VPN goes directly.')
+				: _('What should go through the VPN goes directly until a node works.')) };
 	if (tn === 'up') return st.routing
 		? { t: _('VPN works'), k: 'ok', d: (st.mode === 'exclude') ? _('Everything except the chosen sites') : _('Only the chosen sites') }
 		: { t: _('The VPN works, but the traffic does not go through it'), k: 'error', d: _('The routes could not be set up. Open Diagnostics.') };
@@ -146,10 +151,13 @@ function alertsOf(st) {
 		out.push({ k: 'error', t: _('The last update of the VPN settings failed; the previous ones keep working.'), go: [ _('Diagnostics'), DIAG ] });
 	var dead = nodes.filter(function(n) { return n && n.dead && !n.kept && !n.deferred; });
 	if (dead.length) {
-		var sites = common.checkSites(st);
+		// the same answer as the Nodes cards (the node checker's last sweep, else the checked sites)
+		var sites = common.failedSites(st, dead).sites;
 		var t = (sites.length === 1)
 			? N_(dead.length, '%d node does not open %s: it is left out of the automatic choice.', '%d nodes do not open %s: they are left out of the automatic choice.').format(dead.length, sites[0])
-			: N_(dead.length, '%d node fails the check of the sites (%s): it is left out of the automatic choice.', '%d nodes fail the check of the sites (%s): they are left out of the automatic choice.').format(dead.length, sites.length ? sites.join(', ') : _('connection'));
+			: sites.length
+				? N_(dead.length, '%d node fails the check of the sites (%s): it is left out of the automatic choice.', '%d nodes fail the check of the sites (%s): they are left out of the automatic choice.').format(dead.length, sites.join(', '))
+				: N_(dead.length, '%d node fails the connection check: it is left out of the automatic choice.', '%d nodes fail the connection check: they are left out of the automatic choice.').format(dead.length);
 		out.push({ k: 'warn', t: t, go: [ _('Nodes'), NODES ] });
 	}
 	var engine = nodes.filter(function(n) { return n && n.deferred && /^engine_/.test(String(n.reason || '')); });
@@ -272,19 +280,27 @@ return view.extend({
 		this.stateEl.setAttribute('data-kind', s.k || '');
 		setText(this.detailEl, s.d);
 		this.detailEl.hidden = !s.d;
-		setText(this.toggleBtn, st.enabled ? _('Turn the VPN off') : _('Turn the VPN on'));
-		this.toggleBtn.classList.toggle('cbi-button-negative', !!st.enabled);
-		this.toggleBtn.classList.toggle('cbi-button-positive', !st.enabled);
+		// on = the VPN carries the traffic as far as the user's switches go: a Telegram pause is an
+		// "off" too (enabled stays 1, the daemon runs), and "Turn the VPN on" ends it (power.sh on)
+		var on = vpnOn(st);
+		setText(this.toggleBtn, on ? _('Turn the VPN off') : _('Turn the VPN on'));
+		this.toggleBtn.classList.toggle('cbi-button-negative', on);
+		this.toggleBtn.classList.toggle('cbi-button-positive', !on);
 
-		var live = !!(st.enabled && st.running);
+		// the node / exit / speed / choice rows only while the traffic can go through the VPN
+		var live = !!(on && st.running);
 		var tag = live ? activeTag(st) : '';
 		var n = tag ? nodeOf(st, tag) : null;
 		var tunnelUp = !!(st.tunnel && st.tunnel.state === 'up');
 		var ex = st.exit;
 		var f = {
 			node: tag || null,
-			exit: (ex && ex.ip) ? (ex.country ? _('%s · %s').format(ex.ip, countryName(ex.country)) : ex.ip)
-				: (live && tunnelUp && tag ? _('being checked…') : null),
+			// the exit only while the tunnel works (exit.json outlives a dead tunnel); a lookup that
+			// found nothing is said, not "being checked" forever
+			exit: !(live && tunnelUp && tag) ? null
+				: (ex && ex.ok !== false && ex.ip) ? (ex.country ? _('%s · %s').format(ex.ip, countryName(ex.country)) : ex.ip)
+				: (ex && ex.ok === false) ? _('could not be determined: the address check services did not answer')
+				: _('being checked…'),
 			delay: (n && n.delay > 0) ? _('%d ms').format(n.delay) : null,
 			speed: null
 		};
@@ -308,7 +324,7 @@ return view.extend({
 		this.factsEl.hidden = Object.keys(f).every(function(k) { return f[k] == null; });
 
 		// automatic choice / the node chosen by the user (the soft choice of "Connect")
-		var pref = st.preferred, who = '';
+		var pref = live ? st.preferred : null, who = '';
 		if (pref && pref.id) {
 			who = (pref.in_pool === false)
 				? _('Chosen by you: %s. It is not among the nodes now, so the automatic choice works.').format(pref.tag || '')
@@ -380,10 +396,10 @@ return view.extend({
 	// on/off: wait for the daemon's answer (status) instead of a blind timer
 	handleToggle: function() {
 		var self = this, st = this.st || {};
-		var target = !st.enabled;
+		var target = !vpnOn(st);
 		return common.call('set_enabled', { enabled: target }).then(function(r) {
 			common.toast(target ? _('Turning the VPN on…') : _('Turning the VPN off…'));
-			return common.waitFor(function(s) { self.update(s); return !!s.enabled === target && !!s.running === target; },
+			return common.waitFor(function(s) { self.update(s); return target ? (vpnOn(s) && !!s.running) : (!s.enabled && !s.running); },
 				{ timeout: target ? 45000 : 20000, interval: 1500 }).then(function() {
 				common.toast(common.codeText(r && r.code) || (target ? common.CODE_TEXT.on : common.CODE_TEXT.off));
 			}, function(e) {
