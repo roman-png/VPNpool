@@ -55,6 +55,24 @@ sb_bin() {
 	if [ -n "$b" ] && [ -x "$b" ]; then echo "$b"; return 0; fi
 	echo "$SB_BIN_DEFAULT"
 }
+# ---- the xray sidecar: XHTTP nodes (sing-box has no XHTTP transport) ----
+# generator.uc writes XRAY_CONF when the pool has XHTTP nodes (each one a socks outbound of
+# sing-box to its own local xray inbound); no XHTTP node -> no file, and no xray runs. The binary:
+# uci xray_bin, else the first of /usr/bin/xray (opkg/apk xray-core) and /tmp/usr/bin/xray
+# (a copy in RAM, the place for it on a router with little flash). Without one the XHTTP nodes
+# are DEFERRED (build.sh: reason xray_missing), never a broken build.
+XRAY_CONF="$SB_DATA/xray.json"
+XRAY_CONF_FLASH="$CONF_DIR/xray.json"
+XRAY_LOG="$SB_DATA/xray.log"
+xray_bin() {
+	local b
+	for b in "$(uci -q get vpnpool.main.xray_bin)" /usr/bin/xray /tmp/usr/bin/xray; do
+		[ -n "$b" ] && [ -x "$b" ] && { echo "$b"; return 0; }
+	done
+	return 1
+}
+our_xray_pids() { pgrep -f "xray[^ ]* run -c $XRAY_CONF" 2>/dev/null; }
+
 # OUR sing-box processes (by our own -c config path — the RAM one, and the flash one a 1.x
 # instance still runs with right after an upgrade), whichever binary runs them (sing-box,
 # sing-box-awg): podkop's instance (-c /etc/sing-box/config.json) never matches.

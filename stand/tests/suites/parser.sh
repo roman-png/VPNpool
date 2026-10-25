@@ -94,8 +94,23 @@ P hy2-alias - "hy2://hypw@hy.example.com:443?sni=hy.example.com#HY2" '.[0].type=
 P tuic - "tuic://$U:tupw@tu.example.com:443?congestion_control=bbr&alpn=h3&sni=tu.example.com&udp_relay_mode=native#TU" \
 	'.[0].type=="tuic"' ".[0].uuid==\"$U\"" '.[0].password=="tupw"' '.[0].congestion_control=="bbr"' \
 	'.[0].udp_relay_mode=="native"' '.[0].tls.alpn==["h3"]'
-P vless-xhttp-refused - "vless://$U@x.example.com:443?type=xhttp&security=tls&path=%2Fx#XH" 'length==0'
-P vless-splithttp-refused - "vless://$U@x.example.com:443?type=splithttp&security=tls#SH" 'length==0'
+# XHTTP (alias splithttp): sing-box has none — vless / trojan nodes run on the xray sidecar
+# (generator.uc). The node keeps the xray fields in transport; vmess over XHTTP stays refused.
+P vless-xhttp-node - "vless://$U@x.example.com:443?type=xhttp&security=tls&sni=x.example.com&path=%2Fx&host=cdn.example.com&mode=packet-up#XH" \
+	'length==1' '.[0].type=="vless"' '.[0].server=="x.example.com"' '.[0].transport.type=="xhttp"' \
+	'.[0].transport.path=="/x"' '.[0].transport.host=="cdn.example.com"' '.[0].transport.mode=="packet-up"' \
+	'.[0].tls.server_name=="x.example.com"'
+P vless-xhttp-reality-spiderx - "vless://$U@203.0.113.30:8443?type=xhttp&security=reality&pbk=$PBK&sid=b3f7&sni=a.example&fp=firefox&spx=%2Fs&mode=auto#XR" \
+	'length==1' '.[0].tls.reality.spider_x=="/s"' '.[0].tls.utls.fingerprint=="firefox"' \
+	'.[0].transport | has("mode") | not'
+P vless-xhttp-mode-auto-same-node - "$(printf 'vless://%s@203.0.113.31:443?type=xhttp&security=tls&mode=auto#A\nvless://%s@203.0.113.31:443?type=xhttp&security=tls#B\n' "$U" "$U")" \
+	'length==1'
+P vless-splithttp-is-xhttp - "vless://$U@x.example.com:443?type=splithttp&security=tls#SH" \
+	'length==1' '.[0].transport.type=="xhttp"'
+P vless-xhttp-extra-json - "vless://$U@x.example.com:443?type=xhttp&security=tls&extra=%7B%22xmux%22%3A%7B%22maxConcurrency%22%3A%2216-32%22%7D%7D#XE" \
+	'.[0].transport.extra.xmux.maxConcurrency=="16-32"'
+P vless-xhttp-extra-junk-refused - "vless://$U@x.example.com:443?type=xhttp&security=tls&extra=%7Bnope#XJ" 'length==0'
+P vless-xhttp-unknown-mode-refused - "vless://$U@x.example.com:443?type=xhttp&security=tls&mode=warp#XM" 'length==0'
 P vless-httpupgrade - "vless://$U@u.example.com:443?type=httpupgrade&security=tls&path=%2Fup&host=u.example.com#HU" \
 	'.[0].transport.type=="httpupgrade" and .[0].transport.path=="/up"'
 P vless-h2 - "vless://$U@h.example.com:443?type=http&security=tls&path=%2Fh2&host=h.example.com#H2" \
@@ -148,7 +163,8 @@ P vless-scheme-uppercase - "VLESS://$U@203.0.113.48:443?security=tls#UP" 'length
 P trojan-default-tls - "trojan://pw@tr.example.com:443#TD" '.[0].tls.enabled==true'
 P trojan-ws - "trojan://pw@tr.example.com:443?type=ws&path=%2Ft&host=cdn.example.com#TW" \
 	'.[0].transport.type=="ws" and .[0].transport.headers.Host=="cdn.example.com"'
-P trojan-xhttp-refused - "trojan://pw@tr.example.com:443?type=xhttp#TX" 'length==0'
+P trojan-xhttp-node - "trojan://pw@tr.example.com:443?type=xhttp&path=%2Ft#TX" \
+	'length==1' '.[0].type=="trojan"' '.[0].transport.type=="xhttp"' '.[0].transport.path=="/t"' '.[0].tls.enabled==true'
 P trojan-password-urldecoded - "trojan://p%40ss%3Aw@tr.example.com:443#TP" '.[0].password=="p@ss:w"'
 VMH2=$(printf '%s' "{\"v\":\"2\",\"ps\":\"VMH2\",\"add\":\"vm.example.com\",\"port\":443,\"id\":\"$U\",\"aid\":\"x\",\"scy\":\"weird\",\"net\":\"h2\",\"host\":\"vm.example.com\",\"path\":\"/vm\",\"tls\":\"tls\"}" | base64 -w0 | tr '+/' '-_' | tr -d '=')
 P vmess-base64url-h2-normalised - "vmess://$VMH2" \
@@ -350,7 +366,7 @@ end
 RPT_IN="#comment
 vless://$U@203.0.113.90:443?security=tls#R-ok
 vless://$U@203.0.113.90:443?security=tls#R-ok
-vless://$U@x.example.com:443?type=xhttp&security=tls#R-xhttp
+vless://$U@x.example.com:443?type=kcp&security=tls#R-kcp
 vless://$U@203.0.113.91:70000?security=tls#R-port
 tuic://bad:pw@tu.example.com:443#R-uuid
 socks://abc

@@ -16,13 +16,18 @@ mkdir -p "$SB_DATA"
 SRCDIR="$SB_DATA/sources"
 NODES="$SB_DATA/nodes.json"
 NB="$SB_DATA/nodes.build.json"      # working copy; becomes $NODES only on success
+XRAY_NEW="$SB_DATA/xray.new.json"   # the xray sidecar's new config; becomes $XRAY_CONF on success
 LINKS_RAM="$SB_DATA/links.json"
 LINKS_FLASH="$CONF_DIR/links.json"
 mkdir -p "$CONF_DIR"
 
 # After a reboot /tmp is empty: seed the live config from the flash copy so "keep the
 # previous config" still has something to keep when this build fails.
-[ -s "$SB_CONF" ] || { [ -s "$SB_CONF_FLASH" ] && cp "$SB_CONF_FLASH" "$SB_CONF"; }
+# The xray config of that flash copy goes with it (its XHTTP nodes are socks outbounds to xray).
+if [ ! -s "$SB_CONF" ] && [ -s "$SB_CONF_FLASH" ]; then
+	cp "$SB_CONF_FLASH" "$SB_CONF"
+	if [ -s "$XRAY_CONF_FLASH" ]; then cp "$XRAY_CONF_FLASH" "$XRAY_CONF"; else rm -f "$XRAY_CONF"; fi
+fi
 
 rm -f "$SB_DATA/.awgcap"   # 1.x guessed AWG support from `version`; now measured (enginecap.uc)
 
@@ -110,7 +115,7 @@ build_status() {   # $1=true|false $2=error code ("" on success)
 }
 fail() {   # $1=error code [$2=exit code, default 1]
 	trap - INT TERM HUP
-	rm -f "$NB" "$NB.x" "$NB.full" "$SB_CONF.new" "$SB_CONF.tmp"
+	rm -f "$NB" "$NB.x" "$NB.full" "$SB_CONF.new" "$SB_CONF.tmp" "$XRAY_NEW" "$XRAY_NEW.tmp"
 	build_status false "${1:-build_failed}"; exit "${2:-1}"
 }
 # Killed (the daemon stops / restarts: TERM to its child): the result is "interrupted", never
@@ -118,7 +123,7 @@ fail() {   # $1=error code [$2=exit code, default 1]
 # end). build.sh holds no lock of its own.
 on_signal() {
 	trap - INT TERM HUP
-	rm -f "$NB" "$NB.x" "$NB.full" "$SB_CONF.new" "$SB_CONF.tmp"
+	rm -f "$NB" "$NB.x" "$NB.full" "$SB_CONF.new" "$SB_CONF.tmp" "$XRAY_NEW" "$XRAY_NEW.tmp"
 	build_status false interrupted; exit 143
 }
 trap on_signal INT TERM HUP
@@ -186,6 +191,7 @@ persist_if_changed "$LINKS_RAM" "$LINKS_FLASH"
 # kept, shown greyed out, does not go into the config and does not break the build):
 #   engine_missing / engine_no_awg — an AmneziaWG node, no AWG-capable engine;
 #   engine_no_awg31 — a node with AWG 3.1 fields, the engine has only AWG 2.0 (the old fork);
+#   xray_missing — an XHTTP node (it runs on the xray sidecar), no xray binary (lib.sh xray_bin);
 #   start_failed — the start guard (vpnpoold) saw THIS node's CONFIG stop sing-box at start, with
 #                  this very node config and engine, less than BAD_TTL ago (a changed node, another
 #                  engine or an expired mark gets a new try).
@@ -201,8 +207,10 @@ printf '%s' "$ENG_JSON" | jq -e 'type == "object" and (.bin | type == "string")'
 	|| ENG_JSON=$(jq -nc --arg b "$SB_BIN_DEFAULT" '{bin:$b, version:null, awg:false, sig:null, reason:null}')
 SB_BIN=$(printf '%s' "$ENG_JSON" | jq -r '.bin')
 SB_VER=$(printf '%s' "$ENG_JSON" | jq -r '.version // ""')
+XRAY_BIN=$(xray_bin) || XRAY_BIN=""
 [ -s "$BAD_NODES" ] || echo '{}' > "$BAD_NODES"
-jq -c --argjson eng "$ENG_JSON" --slurpfile bad "$BAD_NODES" --argjson now "$(date +%s)" --argjson ttl "$BAD_TTL" '
+jq -c --argjson eng "$ENG_JSON" --slurpfile bad "$BAD_NODES" --argjson now "$(date +%s)" --argjson ttl "$BAD_TTL" \
+	--argjson xr "$([ -n "$XRAY_BIN" ] && echo true || echo false)" '
 	(($bad[0] // {}) | if type == "object" then . else {} end) as $b
 	| ["header_protection_key", "content_padding_addition", "rekey_after_time", "rekey_timeout",
 	   "reject_after_time", "keepalive_timeout", "max_handshake_attempts", "random_trailers", "disable_cookies"] as $f31
@@ -212,6 +220,7 @@ jq -c --argjson eng "$ENG_JSON" --slurpfile bad "$BAD_NODES" --argjson now "$(da
 			or (($n.peers // [])[0].persistent_keepalive_interval | type) == "string")) as $n31
 		| (if ($eng.reason // null) != null and $n.type == "awg" then {reason: $eng.reason}
 		   elif $n31 and ($eng.awg31 // false) != true then {reason: "engine_no_awg31"}
+		   elif ($n.transport.type // "") == "xhttp" and $xr != true then {reason: "xray_missing"}
 		   elif $m != null and $m.engine == $eng.sig and $m.cfg == ($n | del(.tag, .id, ._src) | tojson)
 		        and (($m.at // 0) + $ttl) > $now
 		   then {reason: "start_failed", detail: $m.detail}
@@ -310,7 +319,11 @@ fi
 
 # The urltest group probes the SAME URL every other "is it alive" check uses (lib.sh).
 # ... generated for the engine that runs it (VPNPOOL_SB_VERSION: http_clients on >= 1.14).
-VPNPOOL_PROBE_URL=$(primary_probe_url) VPNPOOL_SB_VERSION="$SB_VER" ucode /usr/libexec/vpnpool/generator.uc "$NB" > "$SB_CONF.new" 2>>"$SB_DATA/build.err"
+# XHTTP nodes: the generator also writes the xray sidecar's config ($XRAY_NEW; none = no XHTTP
+# node in this pool). Its name ends in .json: xray picks the config format by the file name.
+rm -f "$XRAY_NEW"
+VPNPOOL_PROBE_URL=$(primary_probe_url) VPNPOOL_SB_VERSION="$SB_VER" VPNPOOL_XRAY_CONF="$XRAY_NEW" \
+	ucode /usr/libexec/vpnpool/generator.uc "$NB" > "$SB_CONF.new" 2>>"$SB_DATA/build.err"
 
 # Resilient validation. A SINGLE malformed node (unsupported flow, reality without
 # uTLS, bad cipher, port out of range, a repeated name, …) makes `sing-box check` reject the
@@ -326,6 +339,57 @@ if ! config_tag_guard "$SB_CONF.new"; then
 fi
 [ -n "$TAG_GUARD_JSON" ] && printf '%s' "$TAG_GUARD_JSON" | jq -r '.[] | "tag\t\(.)\t\trepeated_name\t"' >> "$DROPS" 2>/dev/null
 dropped=$TAG_GUARD_DROPPED; tries=0
+
+# The xray sidecar's config, checked with the binary that will run it (`xray run -test`). One
+# node xray refuses must not take the others down: on a failure every XHTTP node is tested alone
+# (at most XRAY_TEST_MAX, my limit — each test starts xray) and the refused ones leave BOTH
+# configs (their socks outbound and its tag in the groups; their xray inbound / outbound / rule).
+# Refused as a whole with no node to blame: every XHTTP node is dropped, the rest of the pool
+# builds as usual.
+XRAY_TEST_MAX=${VPNPOOL_XRAY_TEST_MAX:-30}
+XRAY_ONE="$SB_DATA/xray.one.json"   # one node alone (xray tells the format by the .json name)
+xray_port_tag() {   # $1=xray inbound port -> the tag of the sing-box socks outbound to it
+	jq -r --argjson p "$1" 'first(.outbounds[] | select(.type == "socks" and .server == "127.0.0.1"
+		and .server_port == $p) | .tag) // ""' "$SB_CONF.new" 2>/dev/null
+}
+xray_drop() {   # $1=space-separated inbound indexes (ascending) $2=reason detail
+	local i port tag idxs
+	idxs=$(printf '%s\n' $1 | jq -R 'tonumber' | jq -cs .)
+	for i in $1; do
+		port=$(jq -r --argjson i "$i" '.inbounds[$i].port' "$XRAY_NEW")
+		tag=$(xray_port_tag "$port")
+		[ -n "$tag" ] || continue
+		jq --arg t "$tag" 'del(.outbounds[] | select(.tag == $t and .type == "socks"))
+			| .outbounds |= map(if (.type=="urltest" or .type=="selector") and (.outbounds|type=="array")
+			                   then .outbounds -= [$t] else . end)' "$SB_CONF.new" > "$SB_CONF.tmp" \
+			&& mv "$SB_CONF.tmp" "$SB_CONF.new"
+		log "build: dropped node \"$tag\" rejected by xray: $2"
+		printf 'tag\t%s\t\trejected_by_xray\t%s\n' "$tag" "$2" >> "$DROPS"
+		dropped=$((dropped + 1))
+	done
+	jq --argjson d "$idxs" '
+		(.inbounds | [range(length)] | map(select(. as $k | $d | index($k) == null))) as $keep
+		| .outbounds = [.outbounds[0]] + [$keep[] as $k | .outbounds[$k + 1]]
+		| .routing.rules = [$keep[] as $k | .routing.rules[$k]]
+		| .inbounds = [$keep[] as $k | .inbounds[$k]]' "$XRAY_NEW" > "$XRAY_NEW.tmp" \
+		&& mv "$XRAY_NEW.tmp" "$XRAY_NEW"
+	[ "$(jq '.inbounds | length' "$XRAY_NEW" 2>/dev/null)" -gt 0 ] 2>/dev/null || rm -f "$XRAY_NEW"
+}
+if [ -s "$XRAY_NEW" ] && ! "$XRAY_BIN" run -test -c "$XRAY_NEW" > "$SB_DATA/xray-check.err" 2>&1; then
+	why=$(grep -m1 -iE 'failed|error|invalid|unknown' "$SB_DATA/xray-check.err" | tr '\t' ' ' | cut -c1-160)
+	n=$(jq '.inbounds | length' "$XRAY_NEW" 2>/dev/null || echo 0)
+	bad=""; i=0
+	while [ "$i" -lt "$n" ]; do
+		if [ "$i" -ge "$XRAY_TEST_MAX" ]; then bad="$bad $i"; i=$((i + 1)); continue; fi
+		jq --argjson i "$i" '{log, inbounds: [.inbounds[$i]], outbounds: [.outbounds[0], .outbounds[$i + 1]],
+			routing: {rules: [.routing.rules[$i]]}}' "$XRAY_NEW" > "$XRAY_ONE"
+		"$XRAY_BIN" run -test -c "$XRAY_ONE" >/dev/null 2>&1 || bad="$bad $i"
+		i=$((i + 1))
+	done
+	rm -f "$XRAY_ONE"
+	[ -n "$bad" ] || bad=$(seq 0 $((n - 1)) | tr '\n' ' ')
+	xray_drop "$bad" "${why:-xray run -test failed}"
+fi
 while ! "$SB_BIN" check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 	tries=$((tries + 1))
 	if [ "$tries" -gt 50 ]; then
@@ -366,6 +430,13 @@ while ! "$SB_BIN" check -c "$SB_CONF.new" 2>"$SB_DATA/check.err"; do
 done
 
 mv "$SB_CONF.new" "$SB_CONF"
+# the xray sidecar's config goes with it (none: no XHTTP node -> the daemon stops xray)
+if [ -s "$XRAY_NEW" ]; then
+	mv "$XRAY_NEW" "$XRAY_CONF"
+	persist_if_changed "$XRAY_CONF" "$XRAY_CONF_FLASH"
+else
+	rm -f "$XRAY_CONF" "$XRAY_CONF_FLASH"
+fi
 # the daemon runs exactly the binary this config was checked with (lib.sh sb_bin)
 printf '%s
 ' "$SB_BIN" | write_atomic "$SB_BIN_FILE"

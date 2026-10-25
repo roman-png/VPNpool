@@ -22,7 +22,10 @@ echo build >> "$RLOG"
 [ -f "$DS/build_slow" ] && /bin/sleep 3
 [ -f "$DS/build_fail" ] && exit 1
 [ -f "$DS/build_fail_once" ] && { rm -f "$DS/build_fail_once"; exit 1; }
-mkdir -p /tmp/vpnpool; echo "{\"gen\":\$\$}" > /tmp/vpnpool/sing-box.json
+mkdir -p /tmp/vpnpool
+# build_same: the sing-box config does not change; xray_gen: a new xray sidecar config
+if [ -f "$DS/build_same" ]; then echo '{"gen":1}' > /tmp/vpnpool/sing-box.json; else echo "{\"gen\":\$\$}" > /tmp/vpnpool/sing-box.json; fi
+[ -f "$DS/xray_gen" ] && echo "{\"x\":\$\$}" > /tmp/vpnpool/xray.json
 exit 0
 EOF
 cat > "$FL/fetch.sh" <<EOF
@@ -45,7 +48,7 @@ dstub() {
 }
 ds_reset() {   # <killswitch 0|1> <tunnel up|down>
 	reset_state
-	mkdir -p "$DS"; : > "$RLOG"; rm -f "$DS/build_fail" "$DS/routed" "$DS/fetch_slow" "$DS/build_slow" /var/run/vpnpool.restarting
+	mkdir -p "$DS"; : > "$RLOG"; rm -f "$DS/build_fail" "$DS/routed" "$DS/fetch_slow" "$DS/build_slow" "$DS/build_same" "$DS/xray_gen" /var/run/vpnpool.restarting
 	echo "$2" > "$DS/tunnel"; echo up > "$DS/wan"
 	uci set vpnpool.main.killswitch="$1"; uci commit vpnpool
 }
@@ -624,4 +627,56 @@ begin "daemon/nodecheck-strikes-say-when-and-which-host"
 expect_eq "positive control: the passing node, no failed host" "$(sline "$N2")" '0|time|'
 expect_eq "the failing node: one strike, when, the host it did not reach" "$(sline "$N1")" '1|time|chat.example'
 expect_eq "one line per node" "$(grep -c . /tmp/vpnpool/.deadstrikes)" 2
+end
+
+# ---- the xray sidecar (XHTTP nodes): it lives and dies with sing-box ----
+# A stand-in xray that runs until killed (the real start_xray / kill_xray / xray_supervise drive it).
+FXR="$DS/xray"
+cat > "$FXR" <<'XEOF'
+#!/bin/sh
+while :; do /bin/sleep 1; done
+XEOF
+chmod +x "$FXR"
+xr_pids() { pgrep -f "xray run -c /tmp/vpnpool/xray.json" 2>/dev/null; }
+sc_xray_start() {
+	nap() { /bin/sleep "$1"; }
+	start_xray; cat "$XRAY_PIDFILE" > "$DS/xpid1"
+	kill "$(cat "$XRAY_PIDFILE")"; /bin/sleep 1
+	xray_supervise; cat "$XRAY_PIDFILE" > "$DS/xpid2"
+	xray_supervise; cat "$XRAY_PIDFILE" > "$DS/xpid3"
+	kill_xray
+}
+ds_reset 0 up; uci set vpnpool.main.xray_bin="$FXR"; uci commit vpnpool
+echo '{"inbounds":[]}' > /tmp/vpnpool/xray.json
+in_daemon sc_xray_start
+begin "daemon/xray-started-supervised-and-stopped"
+expect_true "started with our config (pid recorded)" sh -c '[ -s "$1/xpid1" ]' _ "$DS"
+expect_true "died -> the supervisor started a new one" sh -c '[ -s "$1/xpid2" ] && ! cmp -s "$1/xpid1" "$1/xpid2"' _ "$DS"
+expect_true "alive -> the supervisor leaves it alone" cmp -s "$DS/xpid2" "$DS/xpid3"
+expect_eq "kill_xray leaves no xray" "$(xr_pids | wc -l)" 0
+expect_eq "log says it restarted" "$(gcount '^log xray not running, restarting' "$RLOG")" 1
+end
+
+sc_xray_none() { nap() { /bin/sleep "$1"; }; "$FXR" run -c "$XRAY_CONF" & /bin/sleep 1; rm -f "$XRAY_CONF"; start_xray; xray_supervise; }
+ds_reset 0 up; uci set vpnpool.main.xray_bin="$FXR"; uci commit vpnpool
+echo '{"inbounds":[]}' > /tmp/vpnpool/xray.json
+in_daemon sc_xray_none
+begin "daemon/xray-no-config-no-xray"
+expect_eq "the old xray is stopped and none is started" "$(xr_pids | wc -l)" 0
+expect_eq "nothing restarted" "$(gcount '^log xray' "$RLOG")" 0
+end
+
+# a reload whose sing-box config is unchanged but whose xray config changed restarts the pair
+sc_reload_same() { singbox_alive() { return 0; }; ROUTED=1; do_reload reload; }
+ds_reset 0 up; : > "$DS/build_same"; : > "$DS/xray_gen"
+echo '{"gen":1}' > /tmp/vpnpool/sing-box.json; echo '{"x":0}' > /tmp/vpnpool/xray.json
+in_daemon sc_reload_same
+begin "daemon/reload-xray-config-changed-restarts"
+expect_eq "call sequence" "$(calls)" "build;start;route up;"
+end
+ds_reset 0 up; : > "$DS/build_same"
+echo '{"gen":1}' > /tmp/vpnpool/sing-box.json
+in_daemon sc_reload_same
+begin "daemon/reload-nothing-changed-no-restart"   # positive control: no xray config before or after
+expect_eq "call sequence" "$(calls)" "build;route up;"
 end

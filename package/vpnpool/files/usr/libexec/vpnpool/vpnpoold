@@ -65,7 +65,49 @@ stop_child() {
 
 cap_log() {
 	[ -f "$SB_LOG" ] && [ "$(wc -c < "$SB_LOG" 2>/dev/null || echo 0)" -gt "$LOG_CAP" ] && : > "$SB_LOG"
+	[ -f "$XRAY_LOG" ] && [ "$(wc -c < "$XRAY_LOG" 2>/dev/null || echo 0)" -gt "$LOG_CAP" ] && : > "$XRAY_LOG"
 	return 0
+}
+
+# ---- the xray sidecar (XHTTP nodes, lib.sh XRAY_CONF) ----
+# It lives and dies with sing-box: started right before it (sing-box's socks outbounds to it must
+# find the ports open), stopped with it, and — when it dies on its own — restarted by the
+# supervisor tick without touching sing-box. No XRAY_CONF (no XHTTP node) = no xray.
+XRAY_PIDFILE=/var/run/vpnpool-xray.pid
+kill_xray() {
+	local p i pids
+	i=0
+	while :; do
+		pids=$(our_xray_pids)
+		[ -z "$pids" ] && break
+		i=$((i + 1))
+		for p in $pids; do
+			if [ "$i" -ge 5 ]; then kill -9 "$p" 2>/dev/null; else kill "$p" 2>/dev/null; fi
+		done
+		[ "$i" -ge 12 ] && break
+		nap 1
+	done
+	rm -f "$XRAY_PIDFILE"
+}
+start_xray() {
+	local b
+	kill_xray
+	[ -s "$XRAY_CONF" ] || return 0
+	b=$(xray_bin) || { log "xray: XHTTP nodes in the config but no xray binary — they stay dead"; return 1; }
+	"$b" run -c "$XRAY_CONF" >> "$XRAY_LOG" 2>&1 9>&- &
+	echo $! > "$XRAY_PIDFILE"
+	log "xray started pid=$(cat "$XRAY_PIDFILE" 2>/dev/null)"
+}
+xray_alive() {
+	local p
+	p=$(cat "$XRAY_PIDFILE" 2>/dev/null)
+	[ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+# the supervisor tick: an xray that died on its own is restarted alone (sing-box keeps its state)
+xray_supervise() {
+	[ -s "$XRAY_CONF" ] && ! xray_alive || return 0
+	log "xray not running, restarting"
+	start_xray
 }
 
 # Stop our sing-box and WAIT until it's really gone before returning. The old code
@@ -92,6 +134,7 @@ kill_singbox() {
 		nap 1
 	done
 	rm -f "$SB_PIDFILE"
+	kill_xray
 	nap 1   # let the kernel release the listening sockets before a re-bind
 }
 
@@ -100,6 +143,7 @@ _do_start_singbox() {
 	cap_log
 	# where this start's output begins in the log (the start guard reads its FATAL from here)
 	wc -c < "$SB_LOG" 2>/dev/null > "$SB_DATA/.sb_log_off" || echo 0 > "$SB_DATA/.sb_log_off"
+	start_xray
 	# 9>&- : close the flock fd in the child, otherwise the backgrounded sing-box
 	# INHERITS the lock fd and holds it for its whole lifetime — the next
 	# start_singbox would then block forever on flock and never reload the config.
@@ -157,7 +201,8 @@ GUARD_PENDING=0
 BAD_NODES="$SB_DATA/.bad_nodes.json"
 GUARD_STATUS="$SB_DATA/guard_status.json"
 # the binary first: a config is never back in place without the binary it was checked with
-PREV_FILES="$SB_BIN_FILE $SB_DATA/nodes.json $SB_CONF"
+# (+ the xray sidecar's config: it belongs to this sing-box config — absent stays absent)
+PREV_FILES="$SB_BIN_FILE $SB_DATA/nodes.json $XRAY_CONF $SB_CONF"
 save_prev() {   # the config that runs now (+ its node list and binary) -> *.prev
 	local f
 	[ -s "$SB_CONF" ] || return 0
@@ -584,7 +629,10 @@ do_reload() {
 		log "reload: build failed, keeping the current config and routing"
 		return 1
 	fi
-	if singbox_alive && [ -s "$SB_CONF.prev" ] && cmp -s "$SB_CONF" "$SB_CONF.prev"; then
+	# (a changed XHTTP node can leave the sing-box config as it is — its socks outbound only
+	# names the port — so the xray config counts too; both absent = unchanged)
+	if singbox_alive && [ -s "$SB_CONF.prev" ] && cmp -s "$SB_CONF" "$SB_CONF.prev" \
+		&& { [ ! -e "$XRAY_CONF" ] && [ ! -e "$XRAY_CONF.prev" ] || cmp -s "$XRAY_CONF" "$XRAY_CONF.prev"; }; then
 		log "reload: config unchanged, sing-box keeps running"
 	else
 		start_singbox   # routes stay as they are while it restarts
@@ -738,7 +786,10 @@ rm -f "$RESTART_MARK"   # the restart is done: a later plain stop must remove th
 kill_singbox   # clear any orphaned sing-box left by a previously crashed daemon
 rm -f "$BAD_NODES" "$GUARD_STATUS"   # a (re)start gives every node a new try (start guard)
 rm -f "$TUNNEL_FILE" "$SB_DATA/exit.json"   # nothing is known about the tunnel of a new run yet
-[ -s "$SB_CONF" ] || { [ -s "$SB_CONF_FLASH" ] && cp "$SB_CONF_FLASH" "$SB_CONF"; }
+if [ ! -s "$SB_CONF" ] && [ -s "$SB_CONF_FLASH" ]; then
+	cp "$SB_CONF_FLASH" "$SB_CONF"
+	if [ -s "$XRAY_CONF_FLASH" ]; then cp "$XRAY_CONF_FLASH" "$XRAY_CONF"; else rm -f "$XRAY_CONF"; fi
+fi
 save_prev      # the last config that ran (after a reboot: the flash copy) — the guard's way back
 initial_build
 
@@ -787,6 +838,7 @@ while : ; do
 		fi
 	else
 		SB_FAILS=0
+		xray_supervise
 	fi
 
 	# preferred-node soft pin + switch-back

@@ -374,6 +374,7 @@ A 1.x configuration is moved to this layout at install (a copy of the old one go
 |---|---|
 | *"keeping LAN on DIRECT"* in the log | No node passed the service check — check the subscription and *Settings → Node check* |
 | Everything pings, sites don't open | The node reaches a CDN but not your services — see **"Out of the auto-pool"** |
+| Node "waits for xray (needed for XHTTP)" | Install `xray-core` (see [XHTTP nodes](#%EF%B8%8F-xhttp-nodes-xray-sidecar)) |
 | AmneziaWG node "waits for the engine" | The AmneziaWG engine isn't installed — run the installer with `VPNPOOL_AWG=1` (Diagnostics shows the engine) |
 | `sing-box: Bus error` after reboot (16 MB) | Two boot hooks raced — keep exactly one |
 | Community lists don't download | They come from GitHub Releases — route GitHub through the proxy first |
@@ -409,6 +410,27 @@ sha256 sums.
 - **Architectures:** aarch64, arm_cortex-a7, mipsel_24kc, mips_24kc, x86_64.
 - **Memory:** the binary is ~45 MB. Routers with 16 MB flash keep it in RAM (needs ≥ 256 MB RAM;
   re-fetched at boot), the installer checks free space and memory first.
+
+## 🛰️ XHTTP nodes (xray sidecar)
+
+sing-box has no XHTTP transport, and many panels (Remnawave & co.) now serve mostly
+VLESS / Trojan over XHTTP. vpnpool runs those nodes through **xray-core** next to sing-box:
+
+- Each XHTTP node becomes a sing-box `socks` outbound to its own local port
+  (`127.0.0.1:20800+`, uci `xray_base_port`), and xray carries that port to the real server.
+  To sing-box it is an ordinary node: auto-failover, the service check, delay probes,
+  Connect, speed / unlock tests and per-device traffic all work unchanged.
+- **Install xray:** `opkg install xray-core` (or `apk add xray-core`), or put a binary at
+  `/tmp/usr/bin/xray` (RAM, for 16 MB flash) or anywhere with `uci set vpnpool.main.xray_bin=<path>`.
+  It needs a recent xray that has XHTTP (the generated configs are checked against 25.10.15); an old
+  build without it (1.8.x) refuses the config, and the XHTTP nodes are dropped as *rejected by xray*.
+- **Without xray** XHTTP nodes are kept and shown as *waiting for xray*; they never break the build.
+- Every build checks the xray config with `xray run -test`; a node xray refuses is dropped alone
+  (*rejected by xray* in the build status), the rest of the pool stays.
+- xray runs only while the pool has XHTTP nodes, starts and stops with sing-box, and is
+  restarted by itself if it dies. Its log: `/tmp/vpnpool/xray.log`.
+- Memory: the xray binary is ~35 MB and takes ~30–50 MB of RAM while it runs. TLS fragmentation
+  (anti-DPI) does not apply to the xray leg.
 
 ## 🗺️ Roadmap
 

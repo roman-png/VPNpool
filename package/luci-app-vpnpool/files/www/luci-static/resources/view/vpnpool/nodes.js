@@ -118,6 +118,7 @@ function delayText(d) {
 }
 // short state of a node that waits (deferred, ROADMAP 4.7)
 function deferredText(reason) {
+	if (reason === 'xray_missing') return _('Waits for xray (needed for XHTTP)');
 	if (/^engine_/.test(String(reason || ''))) return _('Waits for the AmneziaWG engine');
 	if (reason === 'start_failed') return _('Set aside: the VPN engine could not start with it');
 	return _('Waits: it cannot work right now');

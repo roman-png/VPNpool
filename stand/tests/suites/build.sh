@@ -17,6 +17,7 @@ BN=0
 run_build() {
 	reset_state
 	mock_on   # health prefilter curls every server: offline stand => all "unreachable" (unfiltered pool)
+	[ "${XRAY_FAKE_ON:-0}" = 1 ] && uci set vpnpool.main.xray_bin="$FAKE_XRAY" && uci commit vpnpool
 	mkdir -p /tmp/vpnpool/sources
 	cp "$1" /tmp/vpnpool/sources/000.raw
 	[ -n "${2:-}" ] && cp "$2" /tmp/vpnpool/sources/001.raw
@@ -132,14 +133,74 @@ expect_jq "bad node not in config" "$(cat /etc/vpnpool/sing-box.json 2>/dev/null
 expect_true "no panic in check.err" sh -c '! grep -q panic /tmp/vpnpool/check.err'
 end
 
-# ---- xhttp: unsupported transport must not become a (dead) node in the config ----
-printf '%s\n%s\n' "$GOOD" "vless://$U@203.0.113.55:443?type=xhttp&security=tls&sni=x.example&path=%2Fx#XHTTP" > "$SUB"
+# ---- XHTTP: sing-box has no such transport — the node runs on the xray sidecar ----
+XH="vless://$U@203.0.113.55:443?type=xhttp&security=tls&sni=x.example&path=%2Fx#XHTTP"
+# no xray on the router: the node waits (deferred, xray_missing), the rest builds, no xray config
+printf '%s\n%s\n' "$GOOD" "$XH" > "$SUB"
 run_build "$SUB"
 begin "build/xhttp-builds"
 expect_good_config
 end
-begin "build/xhttp-not-in-config"
+begin "build/xhttp-without-xray-deferred"
 expect_jq "xhttp node absent" "$(cat /etc/vpnpool/sing-box.json 2>/dev/null)" '[.outbounds[].tag] | index("XHTTP") == null'
+expect_jq "deferred: xray_missing" "$(cat /tmp/vpnpool/deferred.json 2>/dev/null)" 'length==1 and .[0].tag=="XHTTP" and .[0].reason=="xray_missing"'
+expect_true "no xray config" sh -c '[ ! -e /tmp/vpnpool/xray.json ] && [ ! -e /etc/vpnpool/xray.json ]'
+end
+
+# a stand-in xray: `run -test` refuses a config that holds BADXRAY, accepts the rest
+FAKE_XRAY="$T_STATE/build/xray"
+cat > "$FAKE_XRAY" <<'XEOF'
+#!/bin/sh
+[ "$1" = run ] && [ "$2" = -test ] && [ "$3" = -c ] || exit 2
+# like xray: the config format comes from the file name (xray.json.new = "Failed to get format")
+case "$4" in *.json) ;; *) echo "Failed to start: core: Failed to get format of $4"; exit 23 ;; esac
+if grep -q BADXRAY "$4"; then echo "Failed to start: failed to build outbound handler"; exit 23; fi
+echo "Configuration OK."
+XEOF
+chmod +x "$FAKE_XRAY"
+run_build_xray() { XRAY_FAKE_ON=1 run_build "$@"; }
+
+printf '%s\n%s\n' "$GOOD" "$XH" > "$SUB"
+run_build_xray "$SUB"
+begin "build/xhttp-with-xray-socks-to-sidecar"
+expect_good_config
+_c=$(cat /etc/vpnpool/sing-box.json 2>/dev/null); _x=$(cat /tmp/vpnpool/xray.json 2>/dev/null)
+expect_jq "the node is a socks outbound to 127.0.0.1:20800" "$_c" \
+	'[.outbounds[] | select(.tag=="XHTTP")] | length==1 and .[0].type=="socks" and .[0].server=="127.0.0.1" and .[0].server_port==20800'
+expect_jq "it is in the auto pool and the selector" "$_c" \
+	'(.outbounds[] | select(.tag=="auto") | .outbounds | index("XHTTP") != null) and (.outbounds[] | select(.tag=="proxy") | .outbounds | index("XHTTP") != null)'
+expect_jq "xray: socks inbound 20800 -> vless xhttp to the real server" "$_x" \
+	'.inbounds[0].port==20800 and .inbounds[0].listen=="127.0.0.1" and .outbounds[1].protocol=="vless" and .outbounds[1].settings.vnext[0].address=="203.0.113.55" and .outbounds[1].streamSettings.network=="xhttp" and .outbounds[1].streamSettings.xhttpSettings.path=="/x" and .outbounds[1].streamSettings.security=="tls" and .routing.rules[0].inboundTag==["in-0"] and .routing.rules[0].outboundTag=="out-0"'
+expect_jq "xray: the default outbound is a blackhole" "$_x" '.outbounds[0].protocol=="blackhole"'
+expect_jq "nodes.json keeps the real server and the xhttp transport" "$(cat /tmp/vpnpool/nodes.json 2>/dev/null)" \
+	'[.[] | select(.tag=="XHTTP")][0] | .type=="vless" and .server=="203.0.113.55" and .transport.type=="xhttp"'
+expect_true "flash copy of the xray config" cmp -s /tmp/vpnpool/xray.json /etc/vpnpool/xray.json
+end
+
+XB="vless://$U@203.0.113.56:443?type=xhttp&security=tls&path=%2FBADXRAY#XBAD"
+printf '%s\n%s\n%s\n' "$GOOD" "$XH" "$XB" > "$SUB"
+run_build_xray "$SUB"
+begin "build/xhttp-node-xray-refuses-is-dropped-alone"
+expect_good_config
+_c=$(cat /etc/vpnpool/sing-box.json 2>/dev/null)
+expect_jq "the refused node left the config and the groups" "$_c" \
+	'([.outbounds[].tag] | index("XBAD") == null) and all(.outbounds[] | select(.type=="urltest" or .type=="selector"); .outbounds | index("XBAD") == null)'
+expect_jq "the other XHTTP node stays" "$_c" '[.outbounds[] | select(.tag=="XHTTP" and .type=="socks")] | length==1'
+expect_jq "xray config: only the accepted node" "$(cat /tmp/vpnpool/xray.json 2>/dev/null)" \
+	'(.inbounds | length)==1 and (.outbounds | length)==2 and (.routing.rules | length)==1 and .outbounds[1].settings.vnext[0].address=="203.0.113.55"'
+expect_jq "build status: rejected_by_xray" "$(cat /tmp/vpnpool/build_status.json 2>/dev/null)" \
+	'.ok==true and ([.dropped[] | select(.tag=="XBAD" and .reason=="rejected_by_xray")] | length==1)'
+expect_jq "nodes.json: no phantom of the refused node" "$(cat /tmp/vpnpool/nodes.json 2>/dev/null)" '[.[].tag] | index("XBAD") == null'
+end
+
+# the pool loses its XHTTP nodes: the xray config goes (RAM and flash), the daemon stops xray
+printf '%s\n%s\n' "$GOOD" "$XH" > "$SUB"
+run_build_xray "$SUB"
+printf '%s\n' "$GOOD" > "$SUB"; cp "$SUB" /tmp/vpnpool/sources/000.raw
+run_with_timeout 120 sh /usr/libexec/vpnpool/build.sh > "$T_STATE/build.out" 2>&1; BRC=$?
+begin "build/xhttp-gone-xray-config-removed"
+expect_good_config
+expect_true "no xray config in RAM or flash" sh -c '[ ! -e /tmp/vpnpool/xray.json ] && [ ! -e /etc/vpnpool/xray.json ]'
 end
 
 # ---- a second source whose body looks like JSON but isn't: parser.uc dies => 0 nodes ----
