@@ -8,6 +8,8 @@
 #   GET https://sub.example/primary*          200  /tmp/f/primary.b64  /tmp/f/h.txt
 #   P GET https://ifconfig.co/json            200  /tmp/f/ip.json
 #   PUT http://127.0.0.1:9091/proxies/proxy   204  -
+# A key-glob ending in " @<ua-glob>" also has to match the User-Agent (-A), e.g.
+#   GET https://sub.example/s @v2rayNG*       200  /tmp/f/xray.json
 # First matching rule wins. No match => connection refused (http_code 000, exit 7): the
 # stand runs without network, so an unexpected request is a visible failure, not a leak.
 # Every call is appended to $MOCK_DIR/calls.log ("<key>\t<code>").
@@ -17,7 +19,7 @@ MOCK_DIR=${MOCK_DIR:-/tmp/curlmock}
 REAL=/usr/bin/curl
 [ -f "$MOCK_DIR/enabled" ] || exec "$REAL" "$@"
 
-wfmt=""; hdr=""; fail=0; proxy=""; method=GET; hasdata=0
+ua=""; wfmt=""; hdr=""; fail=0; proxy=""; method=GET; hasdata=0
 nurl=0; nout=0
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -27,7 +29,8 @@ while [ $# -gt 0 ]; do
 		-x|--proxy) proxy="$2"; shift ;;
 		-X|--request) method="$2"; shift ;;
 		-d|--data|--data-raw|--data-binary|--data-urlencode|-F|--form) hasdata=1; shift ;;
-		-A|--user-agent|-H|--header|-m|--max-time|--connect-timeout|-e|--referer|-u|--user|-b|--cookie|-c|--cookie-jar|--retry|-r|--range|--limit-rate|--resolve|--interface|--max-filesize) shift ;;
+		-A|--user-agent) ua="$2"; shift ;;
+		-H|--header|-m|--max-time|--connect-timeout|-e|--referer|-u|--user|-b|--cookie|-c|--cookie-jar|--retry|-r|--range|--limit-rate|--resolve|--interface|--max-filesize) shift ;;
 		-f|--fail) fail=1 ;;
 		-*) case "$1" in -*f*) case "$1" in --*) ;; *) fail=1 ;; esac ;; esac ;;   # e.g. -sfL
 		*) nurl=$((nurl + 1)); eval "url_$nurl=\$1" ;;
@@ -48,7 +51,8 @@ transfer() {   # $1=url $2=output file ("" = stdout) -> sets RC
 			[ -n "$pat" ] || continue
 			case "$pat" in \#*) continue ;; esac
 			# shellcheck disable=SC2254
-			case "$key" in
+			k="$key"; case "$pat" in *' @'*) k="$key @$ua" ;; esac
+			case "$k" in
 				$pat) code="$c"; body="${b:--}"; hfile="${h:--}"; tconn="${t:-0.010}"; slp="${s:-0}"; break ;;
 			esac
 		done < "$MOCK_DIR/rules"

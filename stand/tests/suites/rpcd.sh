@@ -931,6 +931,26 @@ expect_jq "the link added, the URL failed with fetch_failed" "$R" '.ok==true and
 expect_eq "no subscription" "$(subs_tsv)" ''
 expect_eq "the trial download happened" "$(mock_calls 'GET https://dead.example.com/s')" 1
 end
+# a panel that answers the first client name with xray JSON (Remnawave to v2rayNG) and a later
+# one with links: the trial tries the client names like fetch.sh, the URL is stored
+printf '[{"remarks":"x","outbounds":[{"protocol":"vless","settings":{}}]}]\n' > "$FXR/xray.json"
+printf '%s\n' "$L2" | base64 -w0 > "$FXR/links.b64"
+reset_state; daemon_start; mock_on
+mock_rule 'GET https://rw.example/api/sub/T @v2rayNG*' 200 "$FXR/xray.json"
+mock_rule 'GET https://rw.example/api/sub/T' 200 "$FXR/links.b64"
+rcall add "$(jarg --arg t "https://rw.example/api/sub/T" '{text:$t}')"
+begin "rpcd/add/url-first-client-gets-xray-json-next-gets-links"
+expect_jq "the URL is stored" "$R" '.ok==true and .added==1 and .failed==[]'
+expect_eq "a subscription with that URL" "$(subs_tsv | cut -f4)" 'https://rw.example/api/sub/T'
+expect_eq "two tries: v2rayNG (no nodes), then the next client name" "$(mock_calls 'GET https://rw.example/api/sub/T')" 2
+end
+reset_state; daemon_start; mock_on   # the cases below start without that subscription
+begin "rpcd/add/default-client-names-same-as-fetch"
+_uc=$(ucode -e 'import { DEFAULT_UAS } from "/usr/libexec/vpnpool/common.uc"; print(DEFAULT_UAS);' 2>/dev/null)
+_sh=$(sh -c '. /usr/libexec/vpnpool/lib.sh; printf %s "$DEFAULT_UAS"' 2>/dev/null)
+expect_true "lib.sh has a list (positive control)" [ -n "$_sh" ]
+expect_eq "common.uc DEFAULT_UAS == lib.sh DEFAULT_UAS" "$_uc" "$_sh"
+end
 # the URL even serves nodes: only add_node's own refusal keeps it from becoming a subscription
 printf '%s\n' "$L2" > "$FXR/evil.txt"; mock_rule 'GET https://evil.example/sub' 200 "$FXR/evil.txt"
 rcall add_node '{"link":"https://evil.example/sub"}'

@@ -52,7 +52,7 @@
 import { readfile, writefile, stdin, popen, unlink, mkdir, stat, lsdir, rename, chmod, access } from 'fs';
 import { cursor } from 'uci';
 import { rand } from 'math';
-import { VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list, engine_select,
+import { DEFAULT_UAS, VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list, engine_select,
 	SCHEMA as DATA_SCHEMA, is_id, subs_of, sub_name_for, fav_read, fav_write, live_nodes, node_lookup, link_of } from './common.uc';
 
 const SB = '/tmp/vpnpool';
@@ -951,19 +951,34 @@ function sub_op(op, inp) {
 }
 
 // Trial download of a subscription URL: does it give nodes at all? (a typo / a panel port blocked
-// from the router must not be stored silently). Short timeouts keep a call inside rpcd's budget.
+// from the router must not be stored silently). The client names are tried in the order fetch.sh
+// tries them (uci probe_ua, else DEFAULT_UAS) up to the first that gives nodes: a panel may answer
+// the first one with a format the parser has no use for (Remnawave: xray JSON to v2rayNG) and
+// the next one with links — one client name only refused such a subscription that fetch.sh reads.
+// No HTTP answer at all (000: DNS, connect, TLS) or a server error (5xx) ends the trial: another
+// name will not help.
+// Short timeouts and SUB_PROBE_SECS (my limit) keep a call inside rpcd's budget.
+const SUB_PROBE_SECS = 20;
 function sub_probe(url) {
 	mkdir(SB);
 	let f = sprintf('%s/.subcheck.%s', SB, uniq());
-	let http = trim(run(sprintf("curl -sfL --connect-timeout 4 -m 9 -A 'v2rayNG/1.9.5' -o %s -w '%%{http_code}' %s 2>/dev/null", sq(f), sq(url))));
-	let n = 0;
-	if ((stat(f)?.size ?? 0) > 0) {
-		let v = null;
-		try { v = json(run(sprintf('ucode %s %s 2>/dev/null', PARSER, sq(f)))); } catch (e) { v = null; }
-		if (type(v) == 'array') n = length(v);
+	let uas = split(trim(cursor().get('vpnpool', 'main', 'probe_ua') ?? '') || DEFAULT_UAS, /[ \t]+/);
+	let http = '000', n = 0, t0 = time();
+	for (let ua in uas) {
+		if (!length(ua) || time() - t0 >= SUB_PROBE_SECS) break;
+		unlink(f);
+		let h = trim(run(sprintf("curl -sfL --connect-timeout 4 -m 8 -A %s -o %s -w '%%{http_code}' %s 2>/dev/null", sq(ua), sq(f), sq(url))));
+		http = length(h) ? h : '000';
+		if (http == '000' || substr(http, 0, 1) == '5') break;
+		if ((stat(f)?.size ?? 0) > 0) {
+			let v = null;
+			try { v = json(run(sprintf('ucode %s %s 2>/dev/null', PARSER, sq(f)))); } catch (e) { v = null; }
+			if (type(v) == 'array') n = length(v);
+		}
+		if (n > 0) break;
 	}
 	unlink(f);
-	return { n: n, http: length(http) ? http : '000' };
+	return { n: n, http: http };
 }
 
 function add(input) {

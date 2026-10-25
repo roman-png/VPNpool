@@ -258,6 +258,11 @@ function engine_select(cfg_bin, has_awg) {
 	return r;
 }
 
-export { VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list,
+// the client names (User-Agents) a subscription download tries, in order (uci probe_ua replaces
+// the list) — the same list as lib.sh DEFAULT_UAS (fetch.sh); a stand test keeps the two equal.
+// Panels answer per client: one gets xray JSON, another a plain link list.
+const DEFAULT_UAS = 'v2rayNG/1.9.5 v2rayN/6.45 Happ/1.0 sing-box/1.12 clash-meta/1.18 Streisand Hiddify/2.0 Shadowrocket/2.2 Mozilla/5.0';
+
+export { DEFAULT_UAS, VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list,
 	CONF_DIR, RUN_DIR, FAV_MAP, SUBS_META, SCHEMA, is_id, subs_of, sub_name_for, fav_read, fav_write, live_nodes, node_lookup, link_of,
 	SB_STOCK, SB_AWG, ENGINE_CAP, sb_version_mm, engine_cap, engine_select };
