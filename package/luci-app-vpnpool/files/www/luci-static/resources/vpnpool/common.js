@@ -180,6 +180,8 @@ var CODE_TEXT = {
 	engine_no_awg:      _('Saved. The installed VPN engine cannot run AmneziaWG: the node waits until an engine with AmneziaWG is installed.'),
 	engine_no_awg31:    _('Saved. This node needs AmneziaWG 3.1, and the installed VPN engine only has an older AmneziaWG: the node waits until the AmneziaWG engine is installed.'),
 	// node states and build results (status: deferred nodes, build.error)
+	xray_missing:       _('This node connects over XHTTP, which needs xray on the router. Install the xray-core package: the node starts working once xray is there.'),
+	rejected_by_xray:   _('xray did not accept the settings of this node, so it was set aside.'),
 	start_failed:       _('This node stopped the VPN engine from starting, so it was set aside. Check the node settings or add it again.'),
 	only_deferred:      _('No node can work right now: all nodes are waiting (the reason is shown next to each node).'),
 	awg_random_trailers: _('This node uses random packet trailers: the server must run AmneziaWG 3.1 too, otherwise it will not answer.'),

@@ -3,7 +3,8 @@
 // Input : one or more files (ARGV) and/or stdin. Each input may be:
 //           - base64 / base64url blob of a link list,
 //           - a plaintext list of links: vless:// vmess:// trojan:// ss:// hysteria2:// hy2://
-//             tuic://  (one per line; blank and '#' comment lines are ignored),
+//             tuic://  (one per line; blank and '#' comment lines are ignored); vless / trojan
+//             over XHTTP become nodes with transport.type "xhttp" (they run on the xray sidecar),
 //           - a sing-box JSON config ({outbounds:[...]}) or a bare outbounds array,
 //           - an AmneziaWG / WireGuard .conf (INI, one per input).
 //         Text that merely LOOKS like JSON (starts with '[' / '{') but is not, falls back to
@@ -207,10 +208,17 @@ function build_tls(p, mode) {
 	return tls;
 }
 
+// XHTTP modes xray accepts (an unknown one would make `xray run -test` reject the whole config)
+let XHTTP_MODES = { auto: 1, 'packet-up': 1, 'stream-up': 1, 'stream-one': 1 };
+
 // transport from xray-style params (type/host/path/serviceName/headerType/ed/eh)
 // -> null (plain TCP), an object, or a reason string. Anything sing-box has no transport for
-// (xhttp, splithttp, kcp, ...) is refused: such a node would be dead (or poison the config).
-function build_transport(p, tls) {
+// (splithttp, kcp, ...) is refused: such a node would be dead (or poison the config).
+// XHTTP (alias splithttp) is the exception for vless / trojan (xray = true): sing-box has no
+// such transport, so these nodes run through the xray sidecar — generator.uc turns each one into
+// a sing-box socks outbound to its own local xray inbound. The transport object keeps the xray
+// fields (path, host, mode, extra); it never reaches sing-box as it is.
+function build_transport(p, tls, xray) {
 	let t = lc(p.type ?? '');
 	let host = p.host ?? '';
 	let path = p.path ?? '';
@@ -266,6 +274,27 @@ function build_transport(p, tls) {
 		if (length(path)) tr.path = path;
 		return tr;
 	}
+	if (t == 'xhttp' || t == 'splithttp') {
+		if (!xray) return 'unsupported_transport';
+		let tr = { type: 'xhttp' };
+		if (length(path)) tr.path = path;
+		if (length(host)) tr.host = host;
+		let mode = qv(p, 'mode');
+		if (length(mode)) {
+			if (!XHTTP_MODES[mode]) return 'unsupported_transport';
+			if (mode != 'auto') tr.mode = mode;
+		}
+		// extra = URL-encoded JSON of the remaining xhttpSettings (xmux, padding, a separate
+		// download leg ...); passed to xray as it is — junk there is not a node
+		let extra = qv(p, 'extra');
+		if (length(extra)) {
+			let x = null;
+			try { x = json(extra); } catch (e) { x = null; }
+			if (type(x) != 'object') return 'parse_error';
+			tr.extra = x;
+		}
+		return tr;
+	}
 	if (t == 'quic') {
 		if (!tls) return 'tls_required';
 		if (tls.reality) return 'unsupported_transport';         // QUIC cannot carry reality
@@ -275,6 +304,12 @@ function build_transport(p, tls) {
 		return { type: 'quic' };
 	}
 	return 'unsupported_transport';
+}
+
+// an XHTTP node runs on xray: what only xray has from the link goes with it (reality spiderX)
+function xray_extras(ob, p) {
+	if (ob.transport?.type != 'xhttp') return;
+	if (ob.tls?.reality && length(p.spx)) ob.tls.reality.spider_x = p.spx;
 }
 
 // common server/port checks for URL-style links -> reason string or null
@@ -322,9 +357,10 @@ function parse_vless(line) {
 		ob.tls = tls;
 	} else if (length(sec) && sec != 'none')
 		return 'unsupported_security';
-	let tr = build_transport(p, ob.tls);
+	let tr = build_transport(p, ob.tls, true);
 	if (type(tr) == 'string') return tr;
 	if (tr) ob.transport = tr;
+	xray_extras(ob, p);
 	return ob;
 }
 
@@ -348,9 +384,10 @@ function parse_trojan(line) {
 		ob.tls = tls;
 	} else if (sec != 'none')
 		return 'unsupported_security';
-	let tr = build_transport(p, ob.tls);
+	let tr = build_transport(p, ob.tls, true);
 	if (type(tr) == 'string') return tr;
 	if (tr) ob.transport = tr;
+	xray_extras(ob, p);
 	return ob;
 }
 

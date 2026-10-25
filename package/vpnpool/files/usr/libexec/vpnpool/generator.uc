@@ -12,7 +12,7 @@
 //   experimental.clash_api for the watchdog / LuCI.
 'use strict';
 
-import { readfile } from 'fs';
+import { readfile, writefile } from 'fs';
 import { cursor } from 'uci';
 import { VALID_COMMUNITY } from './common.uc';
 
@@ -47,6 +47,73 @@ function opt(section, name, def) {
 
 let tproxy_port = int(opt('main', 'tproxy_port', 1603));
 let clash_api   = opt('main', 'clash_api', '127.0.0.1:9091');
+
+// ---- XHTTP nodes: the xray sidecar ----
+// sing-box has no XHTTP transport. Each such node (parser: transport.type "xhttp", vless or
+// trojan) becomes a sing-box socks outbound with the node's own tag to 127.0.0.1:<port>, and
+// xray (VPNPOOL_XRAY_CONF, written here) carries that port's traffic to the real server. To
+// sing-box it is an ordinary node: urltest, the clash delay probes, the selectors and the
+// per-connection traffic work unchanged — and a delay probe measures the whole path through xray.
+// Ports: xray_base_port + the node's index among the XHTTP nodes of this build (loopback only).
+// No XHTTP node -> no xray config (build.sh removes the old one, the daemon runs no xray).
+let XRAY_FP = { chrome: 1, firefox: 1, safari: 1, ios: 1, android: 1, edge: 1, '360': 1, qq: 1,
+	random: 1, randomized: 1 };
+function xray_outbound(n, tag) {
+	let tr = n.transport, tls = n.tls;
+	let ss = { network: 'xhttp', xhttpSettings: {} };
+	if (tr.path != null) ss.xhttpSettings.path = tr.path;
+	if (tr.host != null) ss.xhttpSettings.host = tr.host;
+	ss.xhttpSettings.mode = tr.mode ?? 'auto';
+	if (tr.extra != null) ss.xhttpSettings.extra = tr.extra;
+	let fp = tls?.utls?.fingerprint;
+	fp = (fp != null && XRAY_FP[fp]) ? fp : 'chrome';
+	if (tls?.reality) {
+		ss.security = 'reality';
+		ss.realitySettings = { publicKey: tls.reality.public_key, fingerprint: fp };
+		if (tls.server_name != null) ss.realitySettings.serverName = tls.server_name;
+		if (tls.reality.short_id != null) ss.realitySettings.shortId = tls.reality.short_id;
+		if (tls.reality.spider_x != null) ss.realitySettings.spiderX = tls.reality.spider_x;
+	} else if (tls?.enabled) {
+		ss.security = 'tls';
+		ss.tlsSettings = {};
+		if (tls.server_name != null) ss.tlsSettings.serverName = tls.server_name;
+		if (tls.alpn != null) ss.tlsSettings.alpn = tls.alpn;
+		if (tls.insecure) ss.tlsSettings.allowInsecure = true;
+		if (tls.utls?.enabled) ss.tlsSettings.fingerprint = fp;
+	} else
+		ss.security = 'none';
+	let ob = { tag: tag, streamSettings: ss };
+	if (n.type == 'trojan') {
+		ob.protocol = 'trojan';
+		ob.settings = { servers: [ { address: n.server, port: n.server_port, password: n.password } ] };
+	} else {
+		let user = { id: n.uuid, encryption: 'none' };
+		if (n.flow != null) user.flow = n.flow;
+		ob.protocol = 'vless';
+		ob.settings = { vnext: [ { address: n.server, port: n.server_port, users: [ user ] } ] };
+	}
+	return ob;
+}
+let xray_port = int(opt('main', 'xray_base_port', 20800));
+let x_in = [], x_out = [ { tag: 'block', protocol: 'blackhole' } ], x_rules = [];
+for (let i = 0; i < length(nodes); i++) {
+	let n = nodes[i];
+	if (type(n) != 'object' || n.transport?.type != 'xhttp') continue;
+	let k = length(x_in), port = xray_port + k;
+	push(x_in, { tag: 'in-' + k, listen: '127.0.0.1', port: port, protocol: 'socks',
+		settings: { auth: 'noauth', udp: true, ip: '127.0.0.1' } });
+	push(x_out, xray_outbound(n, 'out-' + k));
+	push(x_rules, { type: 'field', inboundTag: [ 'in-' + k ], outboundTag: 'out-' + k });
+	nodes[i] = { type: 'socks', tag: n.tag, server: '127.0.0.1', server_port: port, version: '5' };
+}
+let XRAY_CONF = getenv('VPNPOOL_XRAY_CONF');
+if (length(XRAY_CONF ?? '') && length(x_in))
+	writefile(XRAY_CONF, sprintf('%.J\n', {
+		log: { loglevel: 'warning' },
+		inbounds: x_in,
+		outbounds: x_out,     // the first one is the default: nothing unmatched leaves
+		routing: { rules: x_rules }
+	}));
 let health_url  = opt('main', 'health_url', 'http://cp.cloudflare.com/generate_204');
 
 // urltest active-node pick + failover key on the SAME service the dead-filter / watchdog
