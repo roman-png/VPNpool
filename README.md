@@ -309,7 +309,7 @@ Everything lives in `/etc/config/vpnpool`, section `config vpnpool 'main'`.
 | `favorites_only` | `0` | The automatic choice uses only favourite nodes |
 | `dead_filter` / `dead_filter_strikes` / `dead_filter_tries` | `1` / `3` / `3` | Service filter for the auto-pool, failed cycles before demotion, retries per cycle |
 | `ipv6` | `block` | `block` = fail-closed IPv6 guard; `off` = don't touch IPv6 |
-| `killswitch` / `dns_protect` | `0` / `0` | Fail-closed IPv4 in `exclude` mode / LAN DNS through the tunnel |
+| `killswitch` / `dns_protect` | `0` / `0` | Fail-closed IPv4 in `exclude` mode / LAN DNS sent to outside resolvers goes through the tunnel (lookups via the router's dnsmasq still reach the provider) |
 | `client_mode` | `all` | `all` / `exclude` / `include` per-device routing |
 | `antidpi` | `off` | `off` / `on` (`tls_fragment`) / `aggressive` (+ `tls_record_fragment`) |
 | `adaptive_routing` / `adaptive_max_per_run` | `0` / `8` | Auto-detect direct-blocked domains |

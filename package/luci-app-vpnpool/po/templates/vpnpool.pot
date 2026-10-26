@@ -274,7 +274,7 @@ msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/dashboard.js:354
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:413
-#: files/www/luci-static/resources/vpnpool/common.js:933
+#: files/www/luci-static/resources/vpnpool/common.js:934
 msgid "Subscription"
 msgstr ""
 
@@ -789,7 +789,7 @@ msgstr ""
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:446
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:656
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:768
-#: files/www/luci-static/resources/vpnpool/common.js:1258
+#: files/www/luci-static/resources/vpnpool/common.js:1259
 msgid "More actions"
 msgstr ""
 
@@ -1229,13 +1229,13 @@ msgstr ""
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:1033
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:1098
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:1188
-#: files/www/luci-static/resources/vpnpool/common.js:1367
+#: files/www/luci-static/resources/vpnpool/common.js:1368
 msgid "Cancel"
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:1034
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:1095
-#: files/www/luci-static/resources/vpnpool/common.js:864
+#: files/www/luci-static/resources/vpnpool/common.js:865
 msgid "Save"
 msgstr ""
 
@@ -1894,11 +1894,11 @@ msgid "While no node works, what should go through the VPN does not go directly:
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/settings.js:244
-msgid "Send site name lookups through the VPN"
+msgid "Send lookups to outside DNS servers through the VPN"
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/settings.js:245
-msgid "The internet provider does not see which sites the devices look up."
+msgid "Covers devices that ask a DNS server on the internet directly. Lookups the devices send to the router still reach the internet provider."
 msgstr ""
 
 #: files/www/luci-static/resources/view/vpnpool/settings.js:248
@@ -2490,203 +2490,207 @@ msgid "No nodes were found in it."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:239
-msgid "This kind of entry cannot be added."
+msgid "There was no time left to check this subscription. Add it on its own."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:240
-msgid "The port in the link is not valid."
+msgid "This kind of entry cannot be added."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:241
-msgid "The user key in the link is not valid."
+msgid "The port in the link is not valid."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:242
-msgid "The server address in the link is not valid."
+msgid "The user key in the link is not valid."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:243
-msgid "A key in the link is not valid."
+msgid "The server address in the link is not valid."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:244
-msgid "The server key in the link is not valid."
+msgid "A key in the link is not valid."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:245
-msgid "Part of the server key in the link is not valid."
+msgid "The server key in the link is not valid."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:246
-msgid "This kind of link needs encryption, but the link has none."
+msgid "Part of the server key in the link is not valid."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:247
-msgid "The link uses a way of connecting the router does not support."
+msgid "This kind of link needs encryption, but the link has none."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:248
-msgid "The link uses a kind of protection the router does not support."
+msgid "The link uses a way of connecting the router does not support."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:249
-msgid "The link needs an add-on the router does not have."
+msgid "The link uses a kind of protection the router does not support."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:250
-msgid "The link uses a kind of disguise the router does not support."
+msgid "The link needs an add-on the router does not have."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:251
-msgid "The link uses a cipher the router does not support."
+msgid "The link uses a kind of disguise the router does not support."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:252
-msgid "The link uses a data flow mode the router does not support."
+msgid "The link uses a cipher the router does not support."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:253
-msgid "The link uses an encryption the router does not support."
+msgid "The link uses a data flow mode the router does not support."
 msgstr ""
 
 #: files/www/luci-static/resources/vpnpool/common.js:254
+msgid "The link uses an encryption the router does not support."
+msgstr ""
+
+#: files/www/luci-static/resources/vpnpool/common.js:255
 msgid "A value in the settings is not valid."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:726
-#: files/www/luci-static/resources/vpnpool/common.js:757
+#: files/www/luci-static/resources/vpnpool/common.js:727
+#: files/www/luci-static/resources/vpnpool/common.js:758
 msgid "another setting"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:754
+#: files/www/luci-static/resources/vpnpool/common.js:755
 msgid "\"%s\": %s"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:794
+#: files/www/luci-static/resources/vpnpool/common.js:795
 msgid "Also: %s."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:846
+#: files/www/luci-static/resources/vpnpool/common.js:847
 msgid "Saving…"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:846
+#: files/www/luci-static/resources/vpnpool/common.js:847
 msgid "There are unsaved changes."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:846
+#: files/www/luci-static/resources/vpnpool/common.js:847
 msgid "All changes are saved."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:859
+#: files/www/luci-static/resources/vpnpool/common.js:860
 msgid "Save changes"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:862
+#: files/www/luci-static/resources/vpnpool/common.js:863
 msgid "Revert"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:887
+#: files/www/luci-static/resources/vpnpool/common.js:888
 msgid "%d B"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:888
+#: files/www/luci-static/resources/vpnpool/common.js:889
 msgid "%s KB"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:889
+#: files/www/luci-static/resources/vpnpool/common.js:890
 msgid "%s MB"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:890
+#: files/www/luci-static/resources/vpnpool/common.js:891
 msgid "%s GB"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:895
+#: files/www/luci-static/resources/vpnpool/common.js:896
 msgid "just now"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:896
+#: files/www/luci-static/resources/vpnpool/common.js:897
 msgid "%d min ago"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:897
+#: files/www/luci-static/resources/vpnpool/common.js:898
 msgid "%d h ago"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:934
+#: files/www/luci-static/resources/vpnpool/common.js:935
 msgid "turned off"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:935
+#: files/www/luci-static/resources/vpnpool/common.js:936
 msgid "picked nodes: %d"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:935
+#: files/www/luci-static/resources/vpnpool/common.js:936
 msgid "every node"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:938
+#: files/www/luci-static/resources/vpnpool/common.js:939
 msgid "expired on %s"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:939
+#: files/www/luci-static/resources/vpnpool/common.js:940
 msgid "The subscription %s has expired: its nodes may stop working."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:940
+#: files/www/luci-static/resources/vpnpool/common.js:941
 msgid "valid until %s (the last day)"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:941
+#: files/www/luci-static/resources/vpnpool/common.js:942
 msgid "The subscription %s expires today (%s)."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:942
+#: files/www/luci-static/resources/vpnpool/common.js:943
 msgid "valid until %s (%d days left)"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:943
+#: files/www/luci-static/resources/vpnpool/common.js:944
 msgid "The subscription %s expires in %d days (%s)."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:948
+#: files/www/luci-static/resources/vpnpool/common.js:949
 msgid "%s of %s left"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:949
+#: files/www/luci-static/resources/vpnpool/common.js:950
 msgid "The subscription %s has little traffic left: %s of %s."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:951
+#: files/www/luci-static/resources/vpnpool/common.js:952
 msgid "updated %s"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:952
+#: files/www/luci-static/resources/vpnpool/common.js:953
 msgid "the last update failed"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:953
+#: files/www/luci-static/resources/vpnpool/common.js:954
 msgid "The subscription %s could not be updated the last time."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:954
+#: files/www/luci-static/resources/vpnpool/common.js:955
 msgid "picked nodes gone from it: %d"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:1067
+#: files/www/luci-static/resources/vpnpool/common.js:1068
 msgid "The service is off: the change takes effect after it is turned on."
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:1369
+#: files/www/luci-static/resources/vpnpool/common.js:1370
 msgid "Continue"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:1371
+#: files/www/luci-static/resources/vpnpool/common.js:1372
 msgid "Are you sure?"
 msgstr ""
 
-#: files/www/luci-static/resources/vpnpool/common.js:1391
+#: files/www/luci-static/resources/vpnpool/common.js:1392
 msgid "Select"
 msgstr ""
 

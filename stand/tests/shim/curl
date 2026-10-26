@@ -10,6 +10,7 @@
 #   PUT http://127.0.0.1:9091/proxies/proxy   204  -
 # A key-glob ending in " @<ua-glob>" also has to match the User-Agent (-A), e.g.
 #   GET https://sub.example/s @v2rayNG*       200  /tmp/f/xray.json
+# A sleep longer than -m/--max-time ends at -m with no answer (http_code 000, exit 28), as curl.
 # First matching rule wins. No match => connection refused (http_code 000, exit 7): the
 # stand runs without network, so an unexpected request is a visible failure, not a leak.
 # Every call is appended to $MOCK_DIR/calls.log ("<key>\t<code>").
@@ -19,7 +20,7 @@ MOCK_DIR=${MOCK_DIR:-/tmp/curlmock}
 REAL=/usr/bin/curl
 [ -f "$MOCK_DIR/enabled" ] || exec "$REAL" "$@"
 
-ua=""; wfmt=""; hdr=""; fail=0; proxy=""; method=GET; hasdata=0
+ua=""; maxt=""; wfmt=""; hdr=""; fail=0; proxy=""; method=GET; hasdata=0
 nurl=0; nout=0
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -30,7 +31,8 @@ while [ $# -gt 0 ]; do
 		-X|--request) method="$2"; shift ;;
 		-d|--data|--data-raw|--data-binary|--data-urlencode|-F|--form) hasdata=1; shift ;;
 		-A|--user-agent) ua="$2"; shift ;;
-		-H|--header|-m|--max-time|--connect-timeout|-e|--referer|-u|--user|-b|--cookie|-c|--cookie-jar|--retry|-r|--range|--limit-rate|--resolve|--interface|--max-filesize) shift ;;
+		-m|--max-time) maxt="$2"; shift ;;
+		-H|--header|--connect-timeout|-e|--referer|-u|--user|-b|--cookie|-c|--cookie-jar|--retry|-r|--range|--limit-rate|--resolve|--interface|--max-filesize) shift ;;
 		-f|--fail) fail=1 ;;
 		-*) case "$1" in -*f*) case "$1" in --*) ;; *) fail=1 ;; esac ;; esac ;;   # e.g. -sfL
 		*) nurl=$((nurl + 1)); eval "url_$nurl=\$1" ;;
@@ -58,6 +60,10 @@ transfer() {   # $1=url $2=output file ("" = stdout) -> sets RC
 		done < "$MOCK_DIR/rules"
 	fi
 	printf '%s\t%s\n' "$key" "$code" >> "$MOCK_DIR/calls.log"
+	timedout=0
+	if [ "$slp" != 0 ] && [ -n "$maxt" ] && awk -v s="$slp" -v m="$maxt" 'BEGIN { exit !(s > m) }'; then
+		slp=$maxt; code=000; timedout=1
+	fi
 	[ "$slp" != 0 ] && sleep "$slp"
 	[ -n "$hdr" ] && {
 		if [ "$hfile" != - ] && [ -f "$hfile" ]; then cat "$hfile" > "$hdr"; else printf 'HTTP/1.1 %s\r\n\r\n' "$code" > "$hdr"; fi
@@ -84,6 +90,7 @@ transfer() {   # $1=url $2=output file ("" = stdout) -> sets RC
 	fi
 	RC=0
 	[ "$code" = 000 ] && RC=7
+	[ "$timedout" = 1 ] && RC=28
 	[ "$fail" = 1 ] && [ "$code" -ge 400 ] && RC=22
 	return 0
 }

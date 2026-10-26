@@ -957,17 +957,27 @@ function sub_op(op, inp) {
 // the next one with links — one client name only refused such a subscription that fetch.sh reads.
 // No HTTP answer at all (000: DNS, connect, TLS) or a server error (5xx) ends the trial: another
 // name will not help.
-// Short timeouts and SUB_PROBE_SECS (my limit) keep a call inside rpcd's budget.
-const SUB_PROBE_SECS = 20;
-function sub_probe(url) {
+// Time: ONE budget for every URL of one add call (deadline = time() + SUB_PROBE_SECS, set by
+// add()), each curl capped at what is left of it. LuCI gives up on an rpc call after 20 s
+// (L.env.rpctimeout, rpc.declare without a timeout; rpcd's own exec limit is 30 s), and one add
+// call carries every "take all" URL of the dialog: a per-URL limit summed past both. The rest of
+// the 20 s is for the parser runs and the uci writes. SUB_PROBE_SECS = 14 is my assumption, not
+// a limit of the panels or of LuCI. A URL the budget had no room for is reported as
+// probe_no_time ("add it on its own"), never as fetch_failed: it was not tried.
+const SUB_PROBE_SECS = 14;
+const SUB_PROBE_MIN = 3;   // less left than this: no new try (a connect alone may need it)
+function sub_probe(url, deadline) {
 	mkdir(SB);
 	let f = sprintf('%s/.subcheck.%s', SB, uniq());
 	let uas = split(trim(cursor().get('vpnpool', 'main', 'probe_ua') ?? '') || DEFAULT_UAS, /[ \t]+/);
-	let http = '000', n = 0, t0 = time();
+	let http = '000', n = 0, tried = 0;
 	for (let ua in uas) {
-		if (!length(ua) || time() - t0 >= SUB_PROBE_SECS) break;
+		let left = deadline - time();
+		if (!length(ua) || left < SUB_PROBE_MIN) break;
 		unlink(f);
-		let h = trim(run(sprintf("curl -sfL --connect-timeout 4 -m 8 -A %s -o %s -w '%%{http_code}' %s 2>/dev/null", sq(ua), sq(f), sq(url))));
+		tried++;
+		let h = trim(run(sprintf("curl -sfL --connect-timeout %d -m %d -A %s -o %s -w '%%{http_code}' %s 2>/dev/null",
+			min(4, left), min(8, left), sq(ua), sq(f), sq(url))));
 		http = length(h) ? h : '000';
 		if (http == '000' || substr(http, 0, 1) == '5') break;
 		if ((stat(f)?.size ?? 0) > 0) {
@@ -978,7 +988,7 @@ function sub_probe(url) {
 		if (n > 0) break;
 	}
 	unlink(f);
-	return { n: n, http: http };
+	return { n: n, http: http, tried: tried };
 }
 
 function add(input) {
@@ -1013,7 +1023,7 @@ function add(input) {
 	}
 	let a = analyze(text, type(input.items) == 'array');
 	let u = cursor();
-	let added = 0, dup = 0, failed = [], acts = {}, addlinks = [], addurls = [], probes = [], addawg = [], awg_ids = [], sub_ids = [], warning = null;
+	let added = 0, dup = 0, failed = [], acts = {}, addlinks = [], addurls = [], probes = [], addawg = [], awg_ids = [], sub_ids = [], warning = null, probe_by = null;
 	for (let it in a.items) {
 		if (pick && !pick['' + it.line]) continue;
 		if (it.status == 'dup') { dup++; continue; }
@@ -1025,8 +1035,10 @@ function add(input) {
 		}
 		let line = a.lines[it.line];
 		if (it.kind == 'subscription_url') {
-			let pr = sub_probe(line);
+			probe_by ??= time() + SUB_PROBE_SECS;   // one budget for every URL of this call
+			let pr = sub_probe(line, probe_by);
 			push(probes, { line: it.line, fetched: pr.n, http: pr.http });
+			if (!pr.tried) { push(failed, { line: it.line, reason: 'probe_no_time' }); continue; }
 			if (pr.n < 1) { push(failed, { line: it.line, reason: 'fetch_failed', http: pr.http }); continue; }
 			push(addurls, line); acts[sub_on ? 'USR2' : 'none'] = true;
 		} else if (it.kind == 'link') { push(addlinks, line); acts.USR1 = true; }
