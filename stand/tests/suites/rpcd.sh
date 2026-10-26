@@ -944,6 +944,23 @@ expect_jq "the URL is stored" "$R" '.ok==true and .added==1 and .failed==[]'
 expect_eq "a subscription with that URL" "$(subs_tsv | cut -f4)" 'https://rw.example/api/sub/T'
 expect_eq "two tries: v2rayNG (no nodes), then the next client name" "$(mock_calls 'GET https://rw.example/api/sub/T')" 2
 end
+# one budget for every URL of one add call (LuCI gives up on a call after 20 s): a slow panel
+# that answers each client name in 6 s with nothing usable eats it, the next URL is not tried
+# and says so (probe_no_time), and the call ends well inside 20 s
+reset_state; daemon_start; mock_on
+mock_rule 'GET https://slow.example/s' 200 "$FXR/xray.json" - 0.010 6
+mock_rule 'GET https://next.example/s' 200 "$FXR/links.b64"
+_t0=$(date +%s)
+rcall add "$(jarg --arg t "$(printf 'https://slow.example/s\nhttps://next.example/s')" '{text:$t}')"
+_dt=$(( $(date +%s) - _t0 ))
+begin "rpcd/add/urls-share-one-time-budget"
+expect_true "the slow panel was tried more than once (positive control: the budget is not empty)" [ "$(mock_calls 'GET https://slow.example/s')" -ge 2 ]
+expect_jq "the slow URL failed with fetch_failed, the next one with probe_no_time" "$R" \
+	'.ok==false and .added==0 and ([.failed[] | .reason] | sort)==["fetch_failed","probe_no_time"]'
+expect_eq "the next URL was not downloaded at all" "$(mock_calls 'GET https://next.example/s')" 0
+expect_true "the call ended inside LuCI's 20 s (took ${_dt} s)" [ "$_dt" -lt 18 ]
+expect_eq "no subscription" "$(subs_tsv)" ''
+end
 reset_state; daemon_start; mock_on   # the cases below start without that subscription
 begin "rpcd/add/default-client-names-same-as-fetch"
 _uc=$(ucode -e 'import { DEFAULT_UAS } from "/usr/libexec/vpnpool/common.uc"; print(DEFAULT_UAS);' 2>/dev/null)

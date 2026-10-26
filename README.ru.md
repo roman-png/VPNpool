@@ -310,7 +310,7 @@ fake-IP и без перехвата dnsmasq.
 | `favorites_only` | `0` | Автовыбор только среди избранных узлов |
 | `dead_filter` / `dead_filter_strikes` / `dead_filter_tries` | `1` / `3` / `3` | Фильтр авто-пула по сервисам, провалов до исключения, повторов за цикл |
 | `ipv6` | `block` | `block` — IPv6 закрыт; `off` — IPv6 не трогаем |
-| `killswitch` / `dns_protect` | `0` / `0` | Закрытый IPv4 в режиме `exclude` / DNS LAN через туннель |
+| `killswitch` / `dns_protect` | `0` / `0` | Закрытый IPv4 в режиме `exclude` / DNS-запросы LAN к внешним серверам — через туннель (запросы через dnsmasq роутера по-прежнему уходят провайдеру) |
 | `client_mode` | `all` | `all` / `exclude` / `include` по устройствам |
 | `antidpi` | `off` | `off` / `on` (`tls_fragment`) / `aggressive` (+ `tls_record_fragment`) |
 | `adaptive_routing` / `adaptive_max_per_run` | `0` / `8` | Поиск доменов, заблокированных напрямую |

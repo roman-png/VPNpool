@@ -241,8 +241,8 @@ return view.extend({
 		s = m.section(form.NamedSection, 'protect', 'protect', _('Protection'));
 		s.option(form.Flag, 'killswitch', _('Block the internet while the VPN is down'),
 			_('While no node works, what should go through the VPN does not go directly: with "everything except the chosen sites" that is the whole internet, with "only the chosen sites" only those sites. Off: it goes directly until a node works again.'));
-		s.option(form.Flag, 'dns_protect', _('Send site name lookups through the VPN'),
-			_('The internet provider does not see which sites the devices look up.'));
+		s.option(form.Flag, 'dns_protect', _('Send lookups to outside DNS servers through the VPN'),
+			_('Covers devices that ask a DNS server on the internet directly. Lookups the devices send to the router still reach the internet provider.'));
 
 		// ---- Telegram
 		s = m.section(form.NamedSection, 'telegram', 'telegram', _('Telegram'));
