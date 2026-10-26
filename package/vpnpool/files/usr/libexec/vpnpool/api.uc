@@ -16,7 +16,8 @@
 //                                  failed:[{line, reason}], actions, probes:[{line, fetched, http}],
 //                                  awg_ids?, warning? (engine_missing|engine_no_awg: an AWG node
 //                                  is stored deferred until the engine is installed)}. A subscription URL is taken only
-//                                  after a trial download that yields nodes (else fetch_failed) —
+//                                  after a trial download that yields nodes (else fetch_failed;
+//                                  probe_no_time when the call's time budget left no try) —
 //                                  the same rule as add_sub (add_sub goes through here).
 //   api.uc node <op>               stdin {id?|tag?, ids?|tags?}: fav unfav activate deactivate hide
 //                                  unhide keep unkeep connect auto delete prefer_toggle (ROADMAP 9:
