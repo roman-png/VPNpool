@@ -94,21 +94,70 @@ def browser(shot, height=None, url="192.168.1.1/cgi-bin/luci/admin/services/vpnp
 
 
 def phone(shot, scale=1.0):
+    """An iPhone: titanium rim, side buttons, status bar and the Dynamic Island."""
     img = Image.open(os.path.join(SRC, shot)).convert("RGB")
-    if scale != 1.0:
-        img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
-    bez, r_out = 12, 46
-    w, h = img.width + bez * 2, img.height + bez * 2
-    body = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    frame = Image.new("RGBA", (w, h), (18, 18, 20, 255))
-    frame.putalpha(rounded_mask((w, h), r_out))
-    body.alpha_composite(frame)
-    screen = img.convert("RGBA")
-    screen.putalpha(rounded_mask(img.size, r_out - bez))
-    body.alpha_composite(screen, (bez, bez))
-    edge = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    ImageDraw.Draw(edge).rounded_rectangle((0, 0, w - 1, h - 1), r_out, outline=(85, 85, 90, 255), width=2)
-    body.alpha_composite(edge)
+    k = scale
+    if k != 1.0:
+        img = img.resize((round(img.width * k), round(img.height * k)), Image.LANCZOS)
+    u = lambda v: round(v * k)
+    sw, sh = img.size
+    sb = u(50)                     # status bar above the page, like on the phone
+    bez, rim, btn, r_out = u(13), max(2, u(3)), max(2, u(3)), u(58)
+    bw, bh = sw + bez * 2, sh + bez * 2
+    W, H = bw + btn * 2, bh
+
+    # rim, black glass and the side buttons, drawn big for smooth edges
+    big = Image.new("RGBA", (W * SS, H * SS), (0, 0, 0, 0))
+    d = ImageDraw.Draw(big)
+    s = lambda *v: [round(x * SS) for x in v]
+    metal = (74, 74, 80, 255)
+    for x0, y0, y1 in ((0, 118, 150), (0, 178, 232), (0, 246, 300)):          # action, volume
+        d.rounded_rectangle(s(x0, u(y0), btn + rim * 2, u(y1)), u(2) * SS, fill=metal)
+    d.rounded_rectangle(s(W - btn - rim * 2, u(196), W - 1, u(286)), u(2) * SS, fill=metal)  # power
+    d.rounded_rectangle(s(btn, 0, btn + bw - 1, bh - 1), r_out * SS, fill=metal)
+    d.rounded_rectangle(s(btn + rim, rim, btn + bw - 1 - rim, bh - 1 - rim), (r_out - rim) * SS,
+                        fill=(8, 8, 10, 255))
+    body = big.resize((W, H), Image.LANCZOS)
+
+    # the screen: a status bar strip on top, the page below it
+    bg = img.getpixel((2, sh - 2))
+    screen = Image.new("RGB", (sw, sh), bg)
+    screen.paste(img.crop((0, 0, sw, sh - sb)), (0, sb))
+    screen = screen.convert("RGBA")
+    screen.putalpha(rounded_mask((sw, sh), r_out - bez))
+    body.alpha_composite(screen, (btn + bez, bez))
+
+    # status bar and the island
+    ov = Image.new("RGBA", (W * SS, H * SS), (0, 0, 0, 0))
+    d = ImageDraw.Draw(ov)
+    x0, y0 = btn + bez, bez
+    cy = y0 + u(26)
+    iw, ih = u(112), u(33)
+    d.rounded_rectangle(s(x0 + (sw - iw) / 2, cy - ih / 2, x0 + (sw + iw) / 2, cy + ih / 2),
+                        ih / 2 * SS, fill=(0, 0, 0, 255))
+    white = (245, 245, 247, 255)
+    try:
+        tf = ImageFont.truetype("seguisb.ttf", u(16) * SS)
+    except OSError:
+        tf = font(u(16) * SS)
+    d.text(s(x0 + u(52), cy), "9:41", fill=white, font=tf, anchor="mm")
+    rx = x0 + sw - u(26)                                        # battery
+    d.rounded_rectangle(s(rx - u(25), cy - u(6), rx - u(2), cy + u(6)), u(3.5) * SS,
+                        outline=(245, 245, 247, 150), width=max(1, round(1.2 * k * SS)))
+    d.rounded_rectangle(s(rx - u(23), cy - u(4), rx - u(7), cy + u(4)), u(2) * SS, fill=white)
+    d.rounded_rectangle(s(rx, cy - u(2.5), rx + u(1.8), cy + u(2.5)), u(1) * SS, fill=(245, 245, 247, 150))
+    wx = rx - u(40)                                             # wi-fi
+    for r, a in ((u(11), 255), (u(7.5), 255), (u(4), 255)):
+        d.pieslice(s(wx - r, cy + u(5) - r, wx + r, cy + u(5) + r), 225, 315, fill=(245, 245, 247, a))
+        d.pieslice(s(wx - r + u(2.2), cy + u(5) - r + u(2.2), wx + r - u(2.2), cy + u(5) + r - u(2.2)),
+                   225, 315, fill=(0, 0, 0, 0))
+    d.pieslice(s(wx - u(3), cy + u(2), wx + u(3), cy + u(8)), 225, 315, fill=white)
+    sx = wx - u(36)                                             # signal
+    for n in range(4):
+        hgt = u(4 + n * 2.6)
+        d.rounded_rectangle(s(sx + n * u(5), cy + u(5) - hgt, sx + n * u(5) + u(3.2), cy + u(5)), u(1) * SS,
+                            fill=white)
+    body.alpha_composite(ov.resize((W, H), Image.LANCZOS))
     return body
 
 
