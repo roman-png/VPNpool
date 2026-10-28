@@ -10,10 +10,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/roman-png/VPNpool/releases/latest"><img alt="Последний релиз" src="https://img.shields.io/github/v/release/roman-png/VPNpool?label=release&style=flat-square&color=22c1a6"></a>
+  <a href="https://github.com/roman-png/VPNpool/releases/latest"><img alt="Последний релиз" src="https://img.shields.io/github/v/release/roman-png/VPNpool?label=release&style=flat-square&color=ff7b54"></a>
   <a href="https://github.com/roman-png/VPNpool/actions/workflows/build.yml"><img alt="Сборка .ipk + .apk" src="https://img.shields.io/github/actions/workflow/status/roman-png/VPNpool/build.yml?label=build&style=flat-square"></a>
-  <img alt="OpenWrt 23.05 / 24.10 / 25.12 (opkg + apk)" src="https://img.shields.io/badge/OpenWrt-23.05%20%7C%2024.10%20%7C%2025.12-00B5E2?style=flat-square&logo=openwrt&logoColor=white">
-  <img alt="Движок: sing-box" src="https://img.shields.io/badge/engine-sing--box-3b6fe0?style=flat-square">
+  <img alt="OpenWrt 23.05 / 24.10 / 25.12 (opkg + apk)" src="https://img.shields.io/badge/OpenWrt-23.05%20%7C%2024.10%20%7C%2025.12-ffb347?style=flat-square&logo=openwrt&logoColor=white">
+  <img alt="Движок: sing-box" src="https://img.shields.io/badge/engine-sing--box-c2456b?style=flat-square">
   <a href="LICENSE"><img alt="Лицензия: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-lightgrey?style=flat-square"></a>
 </p>
 
