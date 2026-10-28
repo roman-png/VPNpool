@@ -1,20 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#22c1a6"/>
-      <stop offset="1" stop-color="#3b6fe0"/>
+    <linearGradient id="bg" x1="0" y1="0" x2=".6" y2="1">
+      <stop offset="0" stop-color="#ffb347"/>
+      <stop offset=".55" stop-color="#ff7b54"/>
+      <stop offset="1" stop-color="#c2456b"/>
     </linearGradient>
+    <radialGradient id="sun" cx="64" cy="58" r="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff2c9" stop-opacity=".9"/>
+      <stop offset="1" stop-color="#fff2c9" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+    <clipPath id="sq"><rect width="128" height="128" rx="30"/></clipPath>
   </defs>
   <rect width="128" height="128" rx="30" fill="url(#bg)"/>
-  <!-- a pool of nodes: the router in the middle, one node in use, the others on standby -->
-  <g stroke="#fff" stroke-width="5" stroke-linecap="round">
-    <line x1="64" y1="72" x2="64" y2="30" stroke-opacity="1"/>
-    <line x1="64" y1="72" x2="30" y2="92" stroke-opacity=".45"/>
-    <line x1="64" y1="72" x2="98" y2="92" stroke-opacity=".45"/>
+  <circle cx="64" cy="58" r="40" fill="url(#sun)"/>
+  <!-- an arc of nodes over the pool, the middle one in use -->
+  <path d="M26 70a38 38 0 0 1 76 0" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-opacity=".55"/>
+  <circle cx="26" cy="70" r="6" fill="#fff" fill-opacity=".75"/>
+  <circle cx="102" cy="70" r="6" fill="#fff" fill-opacity=".75"/>
+  <circle cx="64" cy="32" r="13" fill="#fff6d8" filter="url(#glow)"/>
+  <circle cx="64" cy="32" r="10" fill="#fff"/>
+  <!-- the water -->
+  <g clip-path="url(#sq)" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="4.5">
+    <path d="M14 86c8.3 0 8.3 6 16.6 6s8.3-6 16.6-6 8.3 6 16.6 6 8.3-6 16.6-6 8.3 6 16.6 6 8.3-6 16.6-6"/>
+    <path d="M22 102c7 0 7 5 14 5s7-5 14-5 7 5 14 5 7-5 14-5 7 5 14 5 7-5 14-5" stroke-opacity=".6"/>
   </g>
-  <circle cx="64" cy="30" r="12" fill="#fff"/>
-  <circle cx="30" cy="92" r="10" fill="#fff" fill-opacity=".55"/>
-  <circle cx="98" cy="92" r="10" fill="#fff" fill-opacity=".55"/>
-  <circle cx="64" cy="72" r="15" fill="#fff"/>
-  <circle cx="64" cy="72" r="6" fill="#2f8fcf"/>
 </svg>
