@@ -1,24 +1,40 @@
-# VPNpool — менеджер подписки VLESS / Reality / Hysteria2 / AmneziaWG с автопереключением для OpenWrt
-
-<p align="right"><a href="README.md">English</a> · <b>Русский 🇷🇺</b></p>
-
 <p align="center">
-  <a href="https://github.com/roman-png/VPNpool/actions/workflows/build.yml"><img alt="Сборка .ipk + .apk" src="https://github.com/roman-png/VPNpool/actions/workflows/build.yml/badge.svg"></a>
-  <a href="https://github.com/roman-png/VPNpool/releases/latest"><img alt="Последний релиз" src="https://img.shields.io/github/v/release/roman-png/VPNpool?label=release"></a>
-  <img alt="OpenWrt 23.05 / 24.10 / 25.12 (opkg + apk)" src="https://img.shields.io/badge/OpenWrt-23.05%20%7C%2024.10%20%7C%2025.12-blue">
-  <img alt="Движок: sing-box" src="https://img.shields.io/badge/engine-sing--box-success">
-  <img alt="Протоколы: VLESS VMess Trojan Shadowsocks Hysteria2 TUIC AmneziaWG" src="https://img.shields.io/badge/protocols-VLESS%20%C2%B7%20VMess%20%C2%B7%20Trojan%20%C2%B7%20SS%20%C2%B7%20Hysteria2%20%C2%B7%20TUIC%20%C2%B7%20AmneziaWG-informational">
-  <img alt="Лицензия: GPL-3.0" src="https://img.shields.io/badge/License-GPL--3.0-blue.svg">
+  <img src="docs/readme/logo.svg" width="96" height="96" alt="логотип vpnpool">
 </p>
 
-**Как v2RayTun или Happ — только на роутере.** vpnpool держит всю вашу подписку VLESS /
-Reality как пул, проверяет каждый узел по тем сервисам, которые нужны *вам*, и сам
-переключается на рабочий. Узлы AmneziaWG живут в том же пуле. Управление — из LuCI,
-Telegram-бота или обычным `uci`.
+<h1 align="center">VPNpool</h1>
 
 <p align="center">
-  <img alt="Вкладка «Обзор» vpnpool: VPN работает, узел, страна выхода, задержка, скорость, тревоги, подписки, устройства" src="docs/screenshots/overview.jpg" width="820">
+  <b>Менеджер подписки VLESS / Reality / Hysteria2 / AmneziaWG с автопереключением для OpenWrt</b><br>
+  Как v2RayTun или Happ — только на роутере.
 </p>
+
+<p align="center">
+  <a href="https://github.com/roman-png/VPNpool/releases/latest"><img alt="Последний релиз" src="https://img.shields.io/github/v/release/roman-png/VPNpool?label=release&style=flat-square&color=22c1a6"></a>
+  <a href="https://github.com/roman-png/VPNpool/actions/workflows/build.yml"><img alt="Сборка .ipk + .apk" src="https://img.shields.io/github/actions/workflow/status/roman-png/VPNpool/build.yml?label=build&style=flat-square"></a>
+  <img alt="OpenWrt 23.05 / 24.10 / 25.12 (opkg + apk)" src="https://img.shields.io/badge/OpenWrt-23.05%20%7C%2024.10%20%7C%2025.12-00B5E2?style=flat-square&logo=openwrt&logoColor=white">
+  <img alt="Движок: sing-box" src="https://img.shields.io/badge/engine-sing--box-3b6fe0?style=flat-square">
+  <a href="LICENSE"><img alt="Лицензия: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-lightgrey?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <a href="#-установка">Установка</a> ·
+  <a href="#%EF%B8%8F-быстрый-старт">Быстрый старт</a> ·
+  <a href="#-скриншоты">Скриншоты</a> ·
+  <a href="#-возможности">Возможности</a> ·
+  <a href="#-справочник">Вопросы и ответы</a> ·
+  <a href="README.md">English 🇬🇧</a>
+</p>
+
+<br>
+
+<p align="center">
+  <img alt="Вкладка «Обзор» vpnpool в браузере и на телефоне: VPN работает, узел, страна выхода, задержка, скорость, тревоги, подписки" src="docs/readme/hero.png" width="860">
+</p>
+
+vpnpool держит всю вашу подписку VLESS / Reality как пул, проверяет каждый узел по тем
+сервисам, которые нужны *вам*, и сам переключается на рабочий. Узлы AmneziaWG живут в том
+же пуле. Управление — из LuCI, Telegram-бота или обычным `uci`.
 
 ```sh
 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
@@ -26,40 +42,71 @@ sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.
 
 <sub>Одна команда для любой OpenWrt: `.apk` на 25.12+, `.ipk` на 23.05 / 24.10 — формат установщик выбирает сам. Другие варианты — в разделе [Установка](#-установка).</sub>
 
----
-
-## 📸 Скриншоты
-
-Демо-данные на тестовом стенде (выдуманные узлы, адреса скрыты). Язык и тема — как в настройках LuCI.
-
-| **Обзор** | **Узлы** |
-|---|---|
-| ![Вкладка «Обзор» vpnpool](docs/screenshots/overview.jpg) | ![Вкладка «Узлы» vpnpool](docs/screenshots/nodes.jpg) |
-| **Маршруты** | **Настройки** |
-| ![Вкладка «Маршруты» vpnpool](docs/screenshots/routes.jpg) | ![Вкладка «Настройки» vpnpool](docs/screenshots/settings.jpg) |
-| **Диагностика** | **На телефоне** |
-| ![Вкладка «Диагностика» vpnpool](docs/screenshots/diagnostics.jpg) | ![«Обзор» на телефоне](docs/screenshots/overview-mobile.jpg) ![«Узлы» на телефоне](docs/screenshots/nodes-mobile.jpg) ![«Настройки» на телефоне](docs/screenshots/settings-mobile.jpg) |
+**Протоколы:** VLESS (Reality + Vision) · VMess · Trojan · Shadowsocks · Hysteria2 · TUIC · XHTTP · JSON sing-box · AmneziaWG 1.x–3.1
 
 ---
 
 ## ✨ Главное
 
-| | |
-|---|---|
-| 🎯 **Проверка по делу** | Узел «рабочий», только если открывает *ваши* сервисы (например, YouTube), а не просто пингуется |
-| 🔀 **Автопереключение** | urltest + сквозной сторож: упавший активный узел заменяется сам |
-| 🚦 **Без «чёрной дыры»** | LAN никогда не уходит в мёртвый туннель — нет рабочих узлов, интернет идёт напрямую |
-| 📡 **Подписки** | Автообновление, несколько подписок в одном пуле, перебор User-Agent клиентов |
-| 🧩 **Протоколы** | VLESS (Reality + Vision), VMess, Trojan, Shadowsocks, Hysteria2, TUIC, JSON sing-box, **AmneziaWG 1.x–3.1** |
-| 🧭 **Маршрутизация** | Только выбранные сайты или всё, кроме них; 24 готовых списка; правила по устройствам |
-| 🛡️ **Защита от утечек** | IPv6-заслон, kill-switch, защита DNS, анти-DPI фрагментацией TLS |
-| 🤖 **Telegram** | Уведомления и бот с кнопками; работает, даже где Telegram заблокирован |
-| 📟 **Маленькие роутеры** | Работает на 16 МБ флеш — sing-box живёт в ОЗУ |
-| 🤝 **Соседство** | С podkop и zapret: свои метки, таблицы и порты |
+<table>
+<tr>
+<td width="50%" valign="top">🎯 <b>Проверка по делу</b><br>Узел «рабочий», только если открывает <i>ваши</i> сервисы (например, YouTube), а не просто пингуется</td>
+<td width="50%" valign="top">🔀 <b>Автопереключение</b><br>urltest + сквозной сторож: упавший активный узел заменяется сам</td>
+</tr>
+<tr>
+<td valign="top">🚦 <b>Без «чёрной дыры»</b><br>LAN никогда не уходит в мёртвый туннель — нет рабочих узлов, интернет идёт напрямую</td>
+<td valign="top">📡 <b>Подписки</b><br>Автообновление, несколько подписок в одном пуле, перебор User-Agent клиентов</td>
+</tr>
+<tr>
+<td valign="top">🧭 <b>Маршрутизация</b><br>Только выбранные сайты или всё, кроме них; 24 готовых списка; правила по устройствам</td>
+<td valign="top">🛡️ <b>Защита от утечек</b><br>IPv6-заслон, kill-switch, защита DNS, анти-DPI фрагментацией TLS</td>
+</tr>
+<tr>
+<td valign="top">🤖 <b>Telegram</b><br>Уведомления и бот с кнопками; работает, даже где Telegram заблокирован</td>
+<td valign="top">📟 <b>Маленькие роутеры</b><br>Работает на 16 МБ флеш — sing-box живёт в ОЗУ</td>
+</tr>
+<tr>
+<td valign="top">🧬 <b>AmneziaWG</b><br>WireGuard с маскировкой в том же пуле, с той же проверкой и автопереключением</td>
+<td valign="top">🤝 <b>Соседство</b><br>С podkop и zapret: свои метки, таблицы и порты</td>
+</tr>
+</table>
 
 ---
 
+## 📸 Скриншоты
 
+<table>
+<tr>
+<td width="50%" align="center" valign="top">
+  <a href="docs/screenshots/nodes.jpg"><img alt="Вкладка «Узлы» vpnpool" src="docs/readme/nodes.png"></a><br>
+  <b>Узлы</b><br><sub>Подписки, задержка, узел в работе, какие сервисы открывает каждый узел</sub>
+</td>
+<td width="50%" align="center" valign="top">
+  <a href="docs/screenshots/routes.jpg"><img alt="Вкладка «Маршруты» vpnpool" src="docs/readme/routes.png"></a><br>
+  <b>Маршруты</b><br><sub>Только выбранные сайты или всё, кроме них; готовые списки; устройства</sub>
+</td>
+</tr>
+<tr>
+<td width="50%" align="center" valign="top">
+  <a href="docs/screenshots/settings.jpg"><img alt="Вкладка «Настройки» vpnpool" src="docs/readme/settings.png"></a><br>
+  <b>Настройки</b><br><sub>Автопереключение, проверяемые сайты, защита, Telegram, расписание</sub>
+</td>
+<td width="50%" align="center" valign="top">
+  <a href="docs/screenshots/diagnostics.jpg"><img alt="Вкладка «Диагностика» vpnpool" src="docs/readme/diagnostics.png"></a><br>
+  <b>Диагностика</b><br><sub>Проверки, журнал с фильтром, версия движка, технические параметры</sub>
+</td>
+</tr>
+<tr>
+<td colspan="2" align="center">
+  <img alt="«Обзор», «Узлы» и «Настройки» на телефоне" src="docs/readme/phones.png" width="640"><br>
+  <b>На телефоне</b><br><sub>Те же пять вкладок, разложенные под узкий экран</sub>
+</td>
+</tr>
+</table>
+
+<p align="center"><sub>Демо-данные на тестовом стенде (выдуманные узлы, адреса скрыты). Язык и тема — как в настройках LuCI. Нажмите на картинку, чтобы открыть страницу целиком.</sub></p>
+
+---
 
 ## 🚀 Установка
 
@@ -410,6 +457,8 @@ kill -USR2 $(cat /var/run/vpnpool.pid)   # заново скачать подп�
 - **Память:** бинарь ~45 МБ. На роутерах с 16 МБ флеша он живёт в ОЗУ (нужно от 256 МБ ОЗУ; скачивается
   заново при загрузке), установщик заранее проверяет место и память.
 
+---
+
 ## 🛰️ XHTTP-узлы (xray рядом с sing-box)
 
 У sing-box нет транспорта XHTTP, а многие панели (Remnawave и др.) теперь отдают в основном
@@ -431,17 +480,24 @@ VLESS / Trojan через XHTTP. vpnpool запускает такие узлы 
 - Память: бинарник xray ~35 МБ и ~30–50 МБ RAM во время работы. Фрагментация TLS (анти-DPI)
   на участок через xray не действует.
 
+---
+
 ## 🗺️ Планы
 
 Более быстрое переключение по активной проверке · DNS/FakeIP с DoH через прокси · полный
 IPv6 tproxy · подписки Clash YAML · цепочки узлов · AmneziaWG для других архитектур
 
+---
+
 ## 🛠️ Разработка
 
 ucode + shell + немного LuCI JS — компилировать нечего. В `package/` — два пакета, в
 `stand/` — Docker-стенд на настоящем rootfs OpenWrt, `scripts/deploy.sh` выкладывает файлы
-на роутер по SSH, `tools/router-smoke-test.sh` проверяет живой роутер без изменений.
+на роутер по SSH, `tools/router-smoke-test.sh` проверяет живой роутер без изменений,
+`tools/readme-art.py` собирает картинки для README из `docs/screenshots/`.
 Issues и PR приветствуются.
+
+---
 
 ## 📄 Лицензия
 

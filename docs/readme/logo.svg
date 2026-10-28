@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22c1a6"/>
+      <stop offset="1" stop-color="#3b6fe0"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="url(#bg)"/>
+  <!-- a pool of nodes: the router in the middle, one node in use, the others on standby -->
+  <g stroke="#fff" stroke-width="5" stroke-linecap="round">
+    <line x1="64" y1="72" x2="64" y2="30" stroke-opacity="1"/>
+    <line x1="64" y1="72" x2="30" y2="92" stroke-opacity=".45"/>
+    <line x1="64" y1="72" x2="98" y2="92" stroke-opacity=".45"/>
+  </g>
+  <circle cx="64" cy="30" r="12" fill="#fff"/>
+  <circle cx="30" cy="92" r="10" fill="#fff" fill-opacity=".55"/>
+  <circle cx="98" cy="92" r="10" fill="#fff" fill-opacity=".55"/>
+  <circle cx="64" cy="72" r="15" fill="#fff"/>
+  <circle cx="64" cy="72" r="6" fill="#2f8fcf"/>
+</svg>

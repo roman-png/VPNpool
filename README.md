@@ -1,24 +1,40 @@
-# VPNpool — VLESS / Reality / Hysteria2 / AmneziaWG subscription manager with auto-failover for OpenWrt
-
-<p align="right"><b>English</b> · <a href="README.ru.md">Русский 🇷🇺</a></p>
-
 <p align="center">
-  <a href="https://github.com/roman-png/VPNpool/actions/workflows/build.yml"><img alt="Build .ipk + .apk" src="https://github.com/roman-png/VPNpool/actions/workflows/build.yml/badge.svg"></a>
-  <a href="https://github.com/roman-png/VPNpool/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/roman-png/VPNpool?label=release"></a>
-  <img alt="OpenWrt 23.05 / 24.10 / 25.12 (opkg + apk)" src="https://img.shields.io/badge/OpenWrt-23.05%20%7C%2024.10%20%7C%2025.12-blue">
-  <img alt="Engine: sing-box" src="https://img.shields.io/badge/engine-sing--box-success">
-  <img alt="Protocols: VLESS VMess Trojan Shadowsocks Hysteria2 TUIC AmneziaWG" src="https://img.shields.io/badge/protocols-VLESS%20%C2%B7%20VMess%20%C2%B7%20Trojan%20%C2%B7%20SS%20%C2%B7%20Hysteria2%20%C2%B7%20TUIC%20%C2%B7%20AmneziaWG-informational">
-  <img alt="License: GPL-3.0" src="https://img.shields.io/badge/License-GPL--3.0-blue.svg">
+  <img src="docs/readme/logo.svg" width="96" height="96" alt="vpnpool logo">
 </p>
 
-**Like v2RayTun or Happ — but on your router.** vpnpool keeps your whole VLESS / Reality
-subscription as a pool, checks every node against the services *you* need, and switches
-to a working one by itself. AmneziaWG nodes join the same pool. Managed from LuCI, a
-Telegram bot or plain `uci`.
+<h1 align="center">VPNpool</h1>
 
 <p align="center">
-  <img alt="vpnpool Overview tab: the VPN works, node, exit country, delay, speed, alerts, subscriptions, devices" src="docs/screenshots/overview.jpg" width="820">
+  <b>VLESS / Reality / Hysteria2 / AmneziaWG subscription manager with auto-failover for OpenWrt</b><br>
+  Like v2RayTun or Happ — but on your router.
 </p>
+
+<p align="center">
+  <a href="https://github.com/roman-png/VPNpool/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/roman-png/VPNpool?label=release&style=flat-square&color=22c1a6"></a>
+  <a href="https://github.com/roman-png/VPNpool/actions/workflows/build.yml"><img alt="Build .ipk + .apk" src="https://img.shields.io/github/actions/workflow/status/roman-png/VPNpool/build.yml?label=build&style=flat-square"></a>
+  <img alt="OpenWrt 23.05 / 24.10 / 25.12 (opkg + apk)" src="https://img.shields.io/badge/OpenWrt-23.05%20%7C%2024.10%20%7C%2025.12-00B5E2?style=flat-square&logo=openwrt&logoColor=white">
+  <img alt="Engine: sing-box" src="https://img.shields.io/badge/engine-sing--box-3b6fe0?style=flat-square">
+  <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-lightgrey?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <a href="#-install">Install</a> ·
+  <a href="#%EF%B8%8F-quick-start">Quick start</a> ·
+  <a href="#-screenshots">Screenshots</a> ·
+  <a href="#-features">Features</a> ·
+  <a href="#-reference">FAQ</a> ·
+  <a href="README.ru.md">Русский 🇷🇺</a>
+</p>
+
+<br>
+
+<p align="center">
+  <img alt="vpnpool Overview tab in a browser and on a phone: the VPN works, node, exit country, delay, speed, alerts, subscriptions" src="docs/readme/hero.png" width="860">
+</p>
+
+vpnpool keeps your whole VLESS / Reality subscription as a pool, checks every node against
+the services *you* need, and switches to a working one by itself. AmneziaWG nodes join the
+same pool. Managed from LuCI, a Telegram bot or plain `uci`.
 
 ```sh
 sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.sh)
@@ -26,40 +42,71 @@ sh <(wget -O - https://raw.githubusercontent.com/roman-png/VPNpool/main/install.
 
 <sub>One command for every OpenWrt: `.apk` on 25.12+, `.ipk` on 23.05 / 24.10 — the installer picks the format itself. More options in [Install](#-install).</sub>
 
----
-
-## 📸 Screenshots
-
-Demo data on the test stand (made-up nodes; addresses hidden). The interface follows the LuCI language and theme.
-
-| **Overview** | **Nodes** |
-|---|---|
-| ![vpnpool Overview tab](docs/screenshots/overview.jpg) | ![vpnpool Nodes tab](docs/screenshots/nodes.jpg) |
-| **Routes** | **Settings** |
-| ![vpnpool Routes tab](docs/screenshots/routes.jpg) | ![vpnpool Settings tab](docs/screenshots/settings.jpg) |
-| **Diagnostics** | **On a phone** |
-| ![vpnpool Diagnostics tab](docs/screenshots/diagnostics.jpg) | ![Overview on a phone](docs/screenshots/overview-mobile.jpg) ![Nodes on a phone](docs/screenshots/nodes-mobile.jpg) ![Settings on a phone](docs/screenshots/settings-mobile.jpg) |
+**Protocols:** VLESS (Reality + Vision) · VMess · Trojan · Shadowsocks · Hysteria2 · TUIC · XHTTP · sing-box JSON · AmneziaWG 1.x–3.1
 
 ---
 
 ## ✨ Highlights
 
-| | |
-|---|---|
-| 🎯 **Checks what matters** | A node is "working" only if it opens *your* services (e.g. YouTube) — not just answers a ping |
-| 🔀 **Auto-failover** | urltest + end-to-end watchdog; the dead active node is replaced automatically |
-| 🚦 **Fail-safe** | The LAN is never routed into a dead tunnel — no working node, internet stays direct |
-| 📡 **Subscriptions** | Auto-update, several subscriptions in one pool, multi-client User-Agent probing |
-| 🧩 **Protocols** | VLESS (Reality + Vision), VMess, Trojan, Shadowsocks, Hysteria2, TUIC, sing-box JSON, **AmneziaWG 1.x–3.1** |
-| 🧭 **Routing** | Only selected sites or everything-except, 24 community lists, per-device rules |
-| 🛡️ **Leak protection** | IPv6 guard, kill-switch, DNS-leak guard, TLS-fragment anti-DPI |
-| 🤖 **Telegram** | Alerts + two-way bot with a button menu, works where Telegram is blocked |
-| 📟 **Small routers** | Runs on 16 MB flash — sing-box lives in RAM |
-| 🤝 **Coexists** | With podkop and zapret: separate marks, tables, ports |
+<table>
+<tr>
+<td width="50%" valign="top">🎯 <b>Checks what matters</b><br>A node is "working" only if it opens <i>your</i> services (e.g. YouTube) — not just answers a ping</td>
+<td width="50%" valign="top">🔀 <b>Auto-failover</b><br>urltest + end-to-end watchdog; the dead active node is replaced automatically</td>
+</tr>
+<tr>
+<td valign="top">🚦 <b>Fail-safe</b><br>The LAN is never routed into a dead tunnel — no working node, internet stays direct</td>
+<td valign="top">📡 <b>Subscriptions</b><br>Auto-update, several subscriptions in one pool, multi-client User-Agent probing</td>
+</tr>
+<tr>
+<td valign="top">🧭 <b>Routing</b><br>Only selected sites or everything-except, 24 community lists, per-device rules</td>
+<td valign="top">🛡️ <b>Leak protection</b><br>IPv6 guard, kill-switch, DNS-leak guard, TLS-fragment anti-DPI</td>
+</tr>
+<tr>
+<td valign="top">🤖 <b>Telegram</b><br>Alerts + two-way bot with a button menu, works where Telegram is blocked</td>
+<td valign="top">📟 <b>Small routers</b><br>Runs on 16 MB flash — sing-box lives in RAM</td>
+</tr>
+<tr>
+<td valign="top">🧬 <b>AmneziaWG</b><br>Obfuscated WireGuard in the same pool, with the same check and failover</td>
+<td valign="top">🤝 <b>Coexists</b><br>With podkop and zapret: separate marks, tables, ports</td>
+</tr>
+</table>
 
 ---
 
+## 📸 Screenshots
 
+<table>
+<tr>
+<td width="50%" align="center" valign="top">
+  <a href="docs/screenshots/nodes.jpg"><img alt="vpnpool Nodes tab" src="docs/readme/nodes.png"></a><br>
+  <b>Nodes</b><br><sub>Subscriptions, delay, the node in use, which services each node opens</sub>
+</td>
+<td width="50%" align="center" valign="top">
+  <a href="docs/screenshots/routes.jpg"><img alt="vpnpool Routes tab" src="docs/readme/routes.png"></a><br>
+  <b>Routes</b><br><sub>Selected sites or everything except them, ready-made lists, devices</sub>
+</td>
+</tr>
+<tr>
+<td width="50%" align="center" valign="top">
+  <a href="docs/screenshots/settings.jpg"><img alt="vpnpool Settings tab" src="docs/readme/settings.png"></a><br>
+  <b>Settings</b><br><sub>Failover, the services to check, protection, Telegram, timetable</sub>
+</td>
+<td width="50%" align="center" valign="top">
+  <a href="docs/screenshots/diagnostics.jpg"><img alt="vpnpool Diagnostics tab" src="docs/readme/diagnostics.png"></a><br>
+  <b>Diagnostics</b><br><sub>Checks, log with a filter, engine version, technical parameters</sub>
+</td>
+</tr>
+<tr>
+<td colspan="2" align="center">
+  <img alt="Overview, Nodes and Settings on a phone" src="docs/readme/phones.png" width="640"><br>
+  <b>On a phone</b><br><sub>The same five tabs, laid out for a narrow screen</sub>
+</td>
+</tr>
+</table>
+
+<p align="center"><sub>Demo data on the test stand (made-up nodes, addresses hidden). The interface follows the LuCI language and theme. Click a picture for the whole page.</sub></p>
+
+---
 
 ## 🚀 Install
 
@@ -411,6 +458,8 @@ sha256 sums.
 - **Memory:** the binary is ~45 MB. Routers with 16 MB flash keep it in RAM (needs ≥ 256 MB RAM;
   re-fetched at boot), the installer checks free space and memory first.
 
+---
+
 ## 🛰️ XHTTP nodes (xray sidecar)
 
 sing-box has no XHTTP transport, and many panels (Remnawave & co.) now serve mostly
@@ -432,16 +481,23 @@ VLESS / Trojan over XHTTP. vpnpool runs those nodes through **xray-core** next t
 - Memory: the xray binary is ~35 MB and takes ~30–50 MB of RAM while it runs. TLS fragmentation
   (anti-DPI) does not apply to the xray leg.
 
+---
+
 ## 🗺️ Roadmap
 
 Faster active-probe failover · DNS/FakeIP with DoH-over-proxy · full IPv6 tproxy ·
 Clash YAML subscriptions · multi-hop chains · AmneziaWG for more architectures
 
+---
+
 ## 🛠️ Development
 
 ucode + shell + a little LuCI JS — nothing to compile. `package/` holds the two packages,
 `stand/` a Docker debug stand on a real OpenWrt rootfs, `scripts/deploy.sh` deploys to a
-router over SSH, `tools/router-smoke-test.sh` checks a live router read-only. Issues and PRs welcome.
+router over SSH, `tools/router-smoke-test.sh` checks a live router read-only, `tools/readme-art.py` builds the README pictures from
+`docs/screenshots/`. Issues and PRs welcome.
+
+---
 
 ## 📄 License
 
