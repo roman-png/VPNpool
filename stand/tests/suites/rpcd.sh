@@ -677,6 +677,25 @@ begin "rpcd/add/failed-lines-reported"
 expect_jq "unreadable vpn:// + junk, each with its line and reason" "$R" '.ok==false and .failed==[{line:1,reason:"decode_failed"},{line:2,reason:"not_a_link"}]'
 end
 
+# ---- the service off: the Nodes list follows the change without the daemon (listbuild.sh) ----
+# (a node added with the VPN off stayed out of the list until the VPN was turned on)
+has_node1() { jq -e 'map(.tag) | index("Node1") != null' /tmp/vpnpool/nodes.json >/dev/null 2>&1; }
+reset_state; daemon_stop
+rcall add "$(jarg --arg t "$L1" '{text:$t}')"
+i=0; while ! has_node1 && [ $i -lt 300 ]; do msleep 100; i=$((i+1)); done
+begin "rpcd/add/service-off-list-rebuilt"
+expect_jq "stored, the daemon not running" "$R" '.ok==true and .added==1 and .daemon=="not_running"'
+expect_true "the node is in the list without the daemon" has_node1
+end
+i=0; while [ -e /tmp/vpnpool/.listbuild.pid ] && [ $i -lt 100 ]; do msleep 100; i=$((i+1)); done
+reset_state; daemon_start
+rcall add "$(jarg --arg t "$L1" '{text:$t}')"
+msleep 1500
+begin "rpcd/add/service-on-no-own-list-build"
+expect_jq "the daemon was signalled" "$R" '.ok==true and .daemon=="signalled"'
+expect_true "no list build beside the daemon" sh -c '[ ! -e /tmp/vpnpool/nodes.json ] && [ ! -e /tmp/vpnpool/.listbuild.pid ]'
+end
+
 # ---- backup holds the secrets; restore checks before it replaces ----
 reset_state
 uci set vpnpool.main.telegram_token='123456:SECRET-BOT-TOKEN'; uci add_list vpnpool.main.manual_node="$L1"; uci set vpnpool.main.enabled=1; uci commit vpnpool

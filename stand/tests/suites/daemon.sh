@@ -680,3 +680,21 @@ in_daemon sc_reload_same
 begin "daemon/reload-nothing-changed-no-restart"   # positive control: no xray config before or after
 expect_eq "call sequence" "$(calls)" "build;route up;"
 end
+
+# (5) a start stops the node-list build of the service-off time (listbuild.sh): two build.sh at
+# once would share their working files. A stand-in: a shell with a long foreground child.
+sc_stop_listbuild() { stop_listbuild; }
+ds_reset 0 up
+sh -c '/bin/sleep 30; :' & LBP=$!
+msleep 300
+LBC=$(pgrep -P "$LBP" 2>/dev/null | head -1)
+echo "$LBP" > /tmp/vpnpool/.listbuild.pid; : > /tmp/vpnpool/.listbuild.again
+in_daemon sc_stop_listbuild
+msleep 300
+begin "daemon/start-stops-the-service-off-list-build"
+expect_true "positive control: the stand-in had its child" [ -n "$LBC" ]
+expect_true "the build is gone" sh -c "! kill -0 $LBP 2>/dev/null"
+expect_true "its child (build.sh) is gone too" sh -c "! kill -0 ${LBC:-1} 2>/dev/null"
+expect_true "pidfile and repeat flag removed" sh -c '[ ! -e /tmp/vpnpool/.listbuild.pid ] && [ ! -e /tmp/vpnpool/.listbuild.again ]'
+end
+kill "$LBP" "${LBC:-}" 2>/dev/null; wait "$LBP" 2>/dev/null

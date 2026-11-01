@@ -138,6 +138,19 @@ kill_singbox() {
 	nap 1   # let the kernel release the listening sockets before a re-bind
 }
 
+# The node-list build of the service-off time (listbuild.sh, rpcd with no daemon): stopped at
+# start, the daemon builds itself — two build.sh at once would share their working files.
+stop_listbuild() {
+	local p c i=0
+	p=$(cat "$SB_DATA/.listbuild.pid" 2>/dev/null)
+	case "$p" in ''|*[!0-9]*) return 0 ;; esac
+	kill -0 "$p" 2>/dev/null || { rm -f "$SB_DATA/.listbuild.pid"; return 0; }
+	for c in $(pgrep -P "$p" 2>/dev/null); do kill "$c" 2>/dev/null; done
+	kill "$p" 2>/dev/null
+	while kill -0 "$p" 2>/dev/null && [ "$i" -lt 10 ]; do i=$((i + 1)); nap 1; done
+	rm -f "$SB_DATA/.listbuild.pid" "$SB_DATA/.listbuild.again" "$SB_DATA/.listbuild.again.fetch"
+}
+
 _do_start_singbox() {
 	kill_singbox   # ensure no previous/orphaned instance holds :1603 or the cache lock
 	cap_log
@@ -784,6 +797,7 @@ log "vpnpoold starting (whole-LAN selective, coexist with podkop)"
 startup_guard  # kill-switch: block now; otherwise: no stale table during the first build
 rm -f "$RESTART_MARK"   # the restart is done: a later plain stop must remove the block
 kill_singbox   # clear any orphaned sing-box left by a previously crashed daemon
+stop_listbuild # a node-list build of the service-off time: the daemon builds itself
 rm -f "$BAD_NODES" "$GUARD_STATUS"   # a (re)start gives every node a new try (start guard)
 rm -f "$TUNNEL_FILE" "$SB_DATA/exit.json"   # nothing is known about the tunnel of a new run yet
 if [ ! -s "$SB_CONF" ] && [ -s "$SB_CONF_FLASH" ]; then
