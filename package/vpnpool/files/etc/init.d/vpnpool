@@ -63,6 +63,10 @@ start_service() {
 		procd_close_instance
 	else
 		logger -t vpnpool "disabled in /etc/config/vpnpool (option enabled '0'); daemon not starting"
+		# booted with the service off: no daemon builds the node list, so the Nodes page would
+		# be empty — build it once from what is stored (no tunnel, no routing)
+		[ "$schema" = 2 ] && [ -x /usr/libexec/vpnpool/listbuild.sh ] && \
+			/usr/libexec/vpnpool/listbuild.sh USR1 --if-missing </dev/null >/dev/null 2>&1 &
 	fi
 
 	start_tgbot_instance

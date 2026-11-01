@@ -59,9 +59,15 @@ rep() {
 finish() {   # $1=daemon word
 	jq -c --arg d "${1:-n/a}" '. + {daemon:$d} + (if .ok then {} else {error:.code} end) | del(.actions)'
 }
-# Signal the daemon and say how it went, as the "daemon" word of the reply.
+# Signal the daemon and say how it went, as the "daemon" word of the reply. With the service
+# off, a rebuild / refetch request still rebuilds the node lists (listbuild.sh, in the
+# background: no tunnel, no routing), so the Nodes page shows the change at once.
 signal_word() {   # $1=USR1|USR2|HUP
-	if signal_daemon "$1"; then echo signalled; else echo not_running; fi
+	if signal_daemon "$1"; then echo signalled; return; fi
+	case "$1" in
+		USR1|USR2) /usr/libexec/vpnpool/listbuild.sh "$1" </dev/null >/dev/null 2>&1 & ;;
+	esac
+	echo not_running
 }
 daemon_alive() {
 	local p

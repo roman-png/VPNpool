@@ -163,6 +163,12 @@ ctl build-config-not-installed build fail 'build/clean-subscription ;build/poiso
 ctl rpcd-add_node-no-signal rpcd fail 'rpcd/add_node/ok ;rpcd/add_node/no-daemon-reported ;rpcd/add_sub/ok ;rpcd/add_sub/no-daemon-reported ;rpcd/add/ok ;rpcd/add/no-daemon-reported ' \
 	"$RPCD" '		case "$a" in USR1|USR2) d=$(signal_word "$a") ;; esac' '		case "$a" in USR1|USR2)  d=$(signal_word "$a") ;; esac' \
 	"$RPCD" '		case "$a" in USR1|USR2) d=$(signal_word "$a") ;; esac' '		case "$a" in USR1|USR2) d=n/a ;; esac'
+# the service off: no node-list rebuild without the daemon -> the added node stays out of the list
+ctl rpcd-service-off-no-list-build rpcd fail 'rpcd/add/service-off-list-rebuilt ' \
+	"$RPCD" '		USR1|USR2) /usr/libexec/vpnpool/listbuild.sh "$1" </dev/null >/dev/null 2>&1 & ;;' '		USR1|USR2) : ;;'
+# the daemon start leaves the service-off build running (two build.sh at once)
+ctl daemon-start-keeps-list-build daemon fail 'daemon/start-stops-the-service-off-list-build ' \
+	"$LIBX/vpnpoold" '	kill -0 "$p" 2>/dev/null || { rm -f "$SB_DATA/.listbuild.pid"; return 0; }' '	return 0'
 # (the first pair re-spaces apply_api's same line, so the mutation lands in apply_add) and the
 # node / sub / favourite methods through apply_api: every one reports the daemon it signalled
 ctl rpcd-api-no-signal rpcd fail 'rpcd/set_url/ok ;rpcd/set_url/no-daemon-reported ;rpcd/del_subscription/ok ;rpcd/del_subscription/no-daemon-reported ;rpcd/del_source/ok ;rpcd/del_source/no-daemon-reported ;rpcd/import_select/ok ;rpcd/import_select/no-daemon-reported ;rpcd/delete_node/ok ;rpcd/delete_node/no-daemon-reported ;rpcd/delete_nodes/ok ;rpcd/delete_nodes/no-daemon-reported ;rpcd/restore_node/ok ;rpcd/restore_node/no-daemon-reported ;rpcd/refilter_node/ok ;rpcd/refilter_node/no-daemon-reported ;rpcd/activate_saved/ok ;rpcd/activate_saved/no-daemon-reported ;rpcd/deactivate_saved/ok ;rpcd/deactivate_saved/no-daemon-reported ;rpcd/del_sub/ok ;rpcd/del_sub/no-daemon-reported ;rpcd/hide/ok ;rpcd/hide/no-daemon-reported ;rpcd/unhide/ok ;rpcd/unhide/no-daemon-reported ;rpcd/auto_exclude/ok ;rpcd/auto_exclude/no-daemon-reported ;rpcd/auto_include/ok ;rpcd/auto_include/no-daemon-reported ;rpcd/sub_set/ok ;rpcd/sub_set/no-daemon-reported ;rpcd/sub_del/ok ;rpcd/sub_del/no-daemon-reported ;rpcd/connect/favourite-not-in-a-source-joins-the-pool ' \

@@ -64,6 +64,11 @@ BASE_CONFIG="$REPO/package/vpnpool/files/etc/config/vpnpool"
 
 reset_state() {   # fresh config + empty runtime/persistent dirs + no mocks + no daemon
 	daemon_stop
+	# a node-list build of a no-daemon case (listbuild.sh) must not write into the next case
+	# (by its pidfile: `pgrep -f listbuild.sh` matches this shell too, and pkill_tree then killed
+	# the stand's own rpcd / ubusd)
+	_lb=$(cat /tmp/vpnpool/.listbuild.pid 2>/dev/null)
+	case "$_lb" in ''|*[!0-9]*) ;; *) pkill_tree "$_lb"; kill "$_lb" 2>/dev/null ;; esac
 	cp "$BASE_CONFIG" /etc/config/vpnpool
 	rm -rf /tmp/vpnpool /etc/vpnpool /tmp/curlmock
 	mkdir -p /tmp/vpnpool /etc/vpnpool /tmp/curlmock

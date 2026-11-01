@@ -478,7 +478,8 @@ engine_changed() {
 		ucode "$_ec" cap "$ENGINE_BIN" --force >/dev/null 2>&1
 		ucode "$_ec" cap "$STOCK_BIN" --force >/dev/null 2>&1
 	fi
-	[ -f /usr/libexec/vpnpool/lib.sh ] && sh -c '. /usr/libexec/vpnpool/lib.sh; signal_daemon USR1' >/dev/null 2>&1
+	# the service off: the node lists are rebuilt without it (listbuild.sh), deferred nodes show up
+	[ -f /usr/libexec/vpnpool/lib.sh ] && sh -c '. /usr/libexec/vpnpool/lib.sh; signal_daemon USR1 || { [ -x /usr/libexec/vpnpool/listbuild.sh ] && /usr/libexec/vpnpool/listbuild.sh USR1 </dev/null & }' >/dev/null 2>&1
 	return 0
 }
 
