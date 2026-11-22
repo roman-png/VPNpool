@@ -20,7 +20,7 @@ mig_setup() {   # a 1.4.1 router: config + /etc/vpnpool + the RAM node list of t
 skey() { printf '%s' "$1" | md5sum | cut -c1-12; }
 # everything of the config the migration must NOT touch: uci show minus the stores it moves (and
 # minus what it adds) — the routing, ports, Telegram, schedule, clients, kill-switch ...
-kept_cfg() { uci -q show vpnpool | grep -v -e '^vpnpool\.main\.\(subscription_url\|extra_sub\|source\|imported_node\|saved_node\|active_saved\|excluded_node\|selected_node\|subscription_ua\|singbox_config\|preferred_node\|auto_member\|keep_auto\|hidden\|manual_node\|schema\|probe_ua\)=' -e '^vpnpool\.sub_'; }
+kept_cfg() { uci -q show vpnpool | grep -v -e '^vpnpool\.main\.\(subscription_url\|extra_sub\|source\|imported_node\|saved_node\|active_saved\|excluded_node\|selected_node\|subscription_ua\|singbox_config\|preferred_node\|auto_member\|keep_auto\|hidden\|manual_node\|schema\|probe_ua\|awg_id_v\)=' -e '^vpnpool\.sub_'; }
 # id of a link / of a .conf, by the 2.0 parser (what every store must hold after the migration)
 lid() { printf '%s\n' "$1" > "$FXT/one.links"; ucode /usr/libexec/vpnpool/parser.uc --with-id "$FXT/one.links" 2>/dev/null | jq -r '.[0].id // ""'; }
 cid() { ucode /usr/libexec/vpnpool/parser.uc --with-id "$1" 2>/dev/null | jq -r '.[0].id // ""'; }
@@ -266,4 +266,78 @@ begin "migrate/2x-config-untouched"
 expect_eq "exit code" "$MRC5" 0
 expect_true "config byte-identical" cmp -s /etc/config/vpnpool "$FXT/def.cfg"
 expect_true "no backup, no journal" sh -c '[ ! -e /etc/vpnpool/backup-1.x ] && [ ! -e /etc/vpnpool/migrate.log ]'
+end
+
+
+# ---- 2.2.0 (issue #7): the AmneziaWG / WireGuard ids include the server ----
+# A 2.1 router: schema 2, no awg_id_v, every store of its AWG nodes on the OLD id (sha256 of the
+# private key alone). migrate.sh moves them all once: the file name, preferred, hidden,
+# auto_exclude / auto_member / keep_auto, a subscription's pick, favourites and unlock badges.
+# A non-AWG id in the same stores stays as it is.
+AFX="$T_DIR/fixtures/awg"
+OLD_A=$(printf '%s' 'YBk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk=' | sha256sum | cut -c1-12)
+NEW_A=$(cid "$AFX/awg2.conf")
+WGOB='{"type":"wireguard","tag":"WG-sub","private_key":"WGcliFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEA0=","server":"198.51.100.7","server_port":51820,"peer_public_key":"WGsrvFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEA0=","local_address":["10.0.0.2/32"]}'
+OLD_W=$(printf '%s' 'WGcliFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEA0=' | sha256sum | cut -c1-12)
+NEW_W=$(printf '[%s]' "$WGOB" | ucode /usr/libexec/vpnpool/parser.uc --with-id 2>/dev/null | jq -r '.[0].id')
+KEEP=0123456789ab   # a vless node's id: no AWG, never moved
+awg21_setup() {
+	reset_state
+	uci -q delete vpnpool.main.awg_id_v
+	uci set vpnpool.main.preferred_node="$OLD_A"
+	for o in hidden auto_exclude keep_auto auto_member; do uci add_list "vpnpool.main.$o=$OLD_A"; uci add_list "vpnpool.main.$o=$KEEP"; done
+	uci commit vpnpool
+	sub_section sj 'https://json.example/sub' pick 1 "$OLD_W" "$KEEP"
+	mkdir -p /etc/vpnpool/awg /etc/vpnpool/sources_cache
+	{ printf '# Name = Germany\n'; cat "$AFX/awg2.conf"; } > "/etc/vpnpool/awg/$OLD_A.conf"; chmod 600 "/etc/vpnpool/awg/$OLD_A.conf"
+	printf '{"outbounds":[%s]}\n' "$WGOB" > "/etc/vpnpool/sources_cache/s-$(skey 'https://json.example/sub').raw"
+	jq -nc --arg a "$OLD_A" --arg w "$OLD_W" --arg k "$KEEP" --argjson ob "$WGOB" \
+		'{($a): {tag:"Germany", link:null, active:false}, ($w): {tag:"WG-sub", ob:$ob, active:true}, ($k): {tag:"V", link:"vless://x", active:false}}' > /etc/vpnpool/favorites.map.json
+	jq -nc --arg a "$OLD_A" --arg k "$KEEP" '{($a): {"youtube":true}, ($k): {"youtube":false}}' > /etc/vpnpool/unlock.map.json
+}
+awg21_setup
+begin "migrate/awg-ids-fixture"   # positive control: the 2.1 state holds the old ids
+expect_true "old and new ids differ ($OLD_A -> $NEW_A, $OLD_W -> $NEW_W)" sh -c '[ ${#1} -eq 12 ] && [ ${#2} -eq 12 ] && [ "$1" != "$2" ] && [ ${#4} -eq 12 ] && [ "$3" != "$4" ]' _ "$OLD_A" "$NEW_A" "$OLD_W" "$NEW_W"
+expect_eq "no awg_id_v" "$(uci -q get vpnpool.main.awg_id_v)" ''
+expect_eq "preferred on the old id" "$(uci -q get vpnpool.main.preferred_node)" "$OLD_A"
+expect_true "the file under the old id" [ -f "/etc/vpnpool/awg/$OLD_A.conf" ]
+end
+sh "$MIG" >/dev/null 2>&1; AMRC=$?
+begin "migrate/awg-ids-moved"
+expect_eq "exit code" "$AMRC" 0
+expect_eq "marked done" "$(uci -q get vpnpool.main.awg_id_v)" 2
+expect_true "file renamed to the new id, name and 0600 kept" sh -c '[ ! -e "/etc/vpnpool/awg/$1.conf" ] && head -n1 "/etc/vpnpool/awg/$2.conf" | grep -q "Germany" && [ "$(ls -ln "/etc/vpnpool/awg/$2.conf" | cut -c1-10)" = -rw------- ]' _ "$OLD_A" "$NEW_A"
+expect_eq "the build sees it under the new id" "$(cid "/etc/vpnpool/awg/$NEW_A.conf")" "$NEW_A"
+expect_eq "preferred" "$(uci -q get vpnpool.main.preferred_node)" "$NEW_A"
+for o in hidden auto_exclude keep_auto auto_member; do
+	expect_eq "$o: new AWG id, the other id kept" "$(uci -q get "vpnpool.main.$o")" "$NEW_A $KEEP"
+done
+expect_eq "pick of the JSON subscription" "$(uci -q get vpnpool.sj.pick)" "$NEW_W $KEEP"
+expect_jq "favourites: both AWG keys moved, the other kept, entries intact" "$(cat /etc/vpnpool/favorites.map.json)" \
+	"(keys|sort)==([\"$NEW_A\",\"$NEW_W\",\"$KEEP\"]|sort) and .[\"$NEW_A\"].tag==\"Germany\" and .[\"$NEW_W\"].ob.tag==\"WG-sub\" and .[\"$NEW_W\"].active==true"
+expect_jq "unlock badges" "$(cat /etc/vpnpool/unlock.map.json)" ".[\"$NEW_A\"].youtube==true and .[\"$KEEP\"].youtube==false and (has(\"$OLD_A\")|not)"
+expect_true "journal line" grep -q 'AmneziaWG node ids (2.2.0): {"files":1' /etc/vpnpool/migrate.log
+end
+cp /etc/config/vpnpool "$FXT/awg.after"; md5sum /etc/vpnpool/*.json /etc/vpnpool/awg/* > "$FXT/awg.sums"
+sh "$MIG" >/dev/null 2>&1
+begin "migrate/awg-ids-once"
+expect_true "a second run changes nothing" sh -c 'cmp -s /etc/config/vpnpool "$1" && md5sum /etc/vpnpool/*.json /etc/vpnpool/awg/* | cmp -s - "$2"' _ "$FXT/awg.after" "$FXT/awg.sums"
+end
+# a 2.1 backup restored on 2.2 (or a run cut short): the moves are repeated from what is there
+awg21_setup
+uci set vpnpool.main.awg_id_v=2; uci commit vpnpool
+sh "$MIG" >/dev/null 2>&1
+begin "migrate/awg-ids-mark-means-done"
+expect_eq "with the mark nothing is moved (control for the run above)" "$(uci -q get vpnpool.main.preferred_node)" "$OLD_A"
+end
+# the package's uci-defaults for the device ID (issue #5): made once, a value already there stays
+UCIH="$REPO/package/vpnpool/files/etc/uci-defaults/91-vpnpool-hwid"
+reset_state
+( cd /; . "$UCIH" ) >/dev/null 2>&1; HRC=$?
+_h1=$(uci -q get vpnpool.main.hwid)
+( cd /; . "$UCIH" ) >/dev/null 2>&1
+begin "migrate/hwid-made-once-at-install"
+expect_eq "exit code" "$HRC" 0
+expect_true "a valid ID ($_h1)" sh -c 'printf %s "$1" | grep -qE "^[A-Za-z0-9=-]{10,64}$"' _ "$_h1"
+expect_eq "kept on the next run" "$(uci -q get vpnpool.main.hwid)" "$_h1"
 end

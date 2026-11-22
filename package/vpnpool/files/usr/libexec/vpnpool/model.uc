@@ -1,6 +1,8 @@
 #!/usr/bin/ucode
 // vpnpool data model for the shell scripts (ROADMAP 9; the stores are described in common.uc).
 //   ucode model.uc subs                    every subscription: "<id>\t<1|0 enabled>\t<all|pick>\t<url>"
+//   ucode model.uc subhdr                  the device headers of a subscription download (issue #5) as a
+//                                          curl -K config (common.uc sub_headers; empty = none)
 //   ucode model.uc pick <sub id>           the ids a "pick" subscription takes, one per line
 //   ucode model.uc hidden                  the ids the user hid, one per line
 //   ucode model.uc fav-active <links> <json>  the favourites that join the pool from the archive
@@ -14,12 +16,16 @@
 
 import { writefile, stdin } from 'fs';
 import { cursor } from 'uci';
-import { as_list, is_id, subs_of, fav_read, fav_write, live_nodes, node_lookup, link_of } from './common.uc';
+import { as_list, is_id, subs_of, fav_read, fav_write, live_nodes, node_lookup, link_of, sub_headers } from './common.uc';
 
 let cmd = ARGV[0];
 let u = cursor();
 
-if (cmd == 'subs') {
+if (cmd == 'subhdr') {
+	// a curl -K config: one `header = "..."` line per device header (empty: send none)
+	for (let h in sub_headers(u)) print('header = "', h, '"
+');
+} else if (cmd == 'subs') {
 	for (let s in subs_of(u))
 		if (length(s.url)) printf('%s\t%s\t%s\t%s\n', s.id, s.enabled ? '1' : '0', s.mode, s.url);
 } else if (cmd == 'pick') {

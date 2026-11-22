@@ -45,6 +45,11 @@ CACHEDIR="$CONF_DIR/sources_cache"
 META="$CONF_DIR/subs.meta.json"
 TAB=$(printf '\t')
 
+# The device headers (issue #5: x-hwid & co, common.uc sub_headers) as a curl -K config, made once
+# per run; empty when uci main.sub_hwid is '0'. Panels with a device limit give no nodes without it.
+SUBHDR="$SB_DATA/.subhdr"
+ucode "$MODEL" subhdr > "$SUBHDR" 2>/dev/null || : > "$SUBHDR"
+
 # Client User-Agents to probe (space separated, no spaces inside a UA).
 UAS=$(uci -q get vpnpool.main.probe_ua)
 [ -n "$UAS" ] || UAS="$DEFAULT_UAS"
@@ -94,7 +99,7 @@ fetch_best() {   # $1=url $2=sub id $3=outfile
 	best=-1; bestua=""
 	rm -f "$SB_DATA/.hdr.$sid"
 	for ua in $UAS; do
-		curl -sfL --connect-timeout 5 -m 12 --max-filesize "$MAXB" -A "$ua" -D "$SB_DATA/h.tmp" -o "$SB_DATA/b.tmp" "$url" 2>/dev/null || continue
+		curl -sfL -K "$SUBHDR" --connect-timeout 5 -m 12 --max-filesize "$MAXB" -A "$ua" -D "$SB_DATA/h.tmp" -o "$SB_DATA/b.tmp" "$url" 2>/dev/null || continue
 		sz=$(wc -c < "$SB_DATA/b.tmp" 2>/dev/null); [ "${sz:-0}" -lt 20 ] && continue
 		# too big to parse safely in RAM (a public list of thousands of nodes on a 16 MB router):
 		# refused like a dead answer — the subscription is served from its own cached copy
@@ -264,7 +269,7 @@ fi
 trap - INT TERM HUP
 write_fetch_status
 write_meta
-rm -f "$SB_DATA/.subs"
+rm -f "$SB_DATA/.subs" "$SUBHDR"
 
 log "fetch: $nfresh/$nsrc subscription(s) fetched, $ngot with data"
 [ "$nsrc" -eq 0 ] && exit 0      # no subscriptions configured: manual nodes only

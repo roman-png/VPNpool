@@ -68,6 +68,8 @@ var FIELDS = [
 	{ f: 'dead_filter_strikes', o: 'adv.dead_filter_strikes', t: 'int', v: sv('dead_filter_strikes', 3) },
 	{ f: 'dead_filter_tries', o: 'adv.dead_filter_tries', t: 'int', v: sv('dead_filter_tries', 3) },
 	{ f: 'subscription_interval', o: 'adv.subscription_interval', t: 'str', v: sv('subscription_interval', '6h') },
+	{ f: 'sub_hwid', o: 'adv.sub_hwid', t: 'bool', v: bool('sub_hwid', true) },
+	{ f: 'hwid', o: 'adv.hwid', t: 'str', v: sv('hwid', '') },
 	{ f: 'antidpi', o: 'adv.antidpi', t: 'str', v: sv('antidpi', 'off') },
 	{ f: 'ipv6', o: 'adv.ipv6', t: 'str', v: sv('ipv6', 'block') },
 	{ f: 'log_level', o: 'adv.log_level', t: 'str', v: sv('log_level', 'warn') },
@@ -324,6 +326,12 @@ return view.extend({
 		INTERVALS.forEach(function(x) { o.value(x[0], x[1]); });
 		var curInt = String(settings(st).subscription_interval || '');
 		if (curInt && !INTERVALS.some(function(x) { return x[0] === curInt; })) o.value(curInt, curInt);
+		s.option(form.Flag, 'sub_hwid', _('Send the device ID of the router to subscriptions'),
+			_('Some providers limit the number of devices and give no nodes to an app that does not send its ID. The router then takes one place in that limit, like a phone.'));
+		o = s.option(form.Value, 'hwid', _('Device ID'),
+			_('Made automatically. To take the place of a device the provider already knows, paste its ID here. Leave empty to make a new one.'));
+		o.validate = function(section_id, v) { return (v === '' || /^[A-Za-z0-9=-]{10,64}$/.test(v)) ? true : common.fieldText('bad_hwid'); };
+		o.depends('sub_hwid', '1');
 		o = s.option(form.ListValue, 'antidpi', _('Get past the provider\'s filtering'),
 			_('Splits the start of secure connections so that simple provider filters cannot read the site name. Does not help against strong blocking.'));
 		o.value('off', _('Off'));

@@ -214,6 +214,8 @@ uci set vpnpool.main.enabled='1'; uci commit vpnpool
 **Subscriptions & nodes**
 - Auto-updating subscription (base64 or sing-box JSON); 9 client User-Agents tried until one returns nodes
 - Several subscriptions merged into one pool; offline cache if the panel is down
+- Sends a device ID (HWID) like the phone apps, so panels with a device limit (Remnawave and others)
+  give their nodes; it can be turned off or replaced in **Settings → Advanced**
 - One **+ Add** for everything: links, subscription addresses, AmneziaWG `.conf` / `vpn://`, a file or a
   QR picture (decoded in the browser); a preview says per line what will be added and why not
 - A subscription can bring all its nodes or only the ones you pick; each has its own expiry, quota and
@@ -232,6 +234,7 @@ uci set vpnpool.main.enabled='1'; uci commit vpnpool
 
 **AmneziaWG** — obfuscated WireGuard that survives mobile-carrier DPI
 - Import a `.conf` or an AmneziaVPN `vpn://` link — decoded on the router, nothing leaves it
+- One client key for many servers (3x-ui, VPN providers): each server is its own node
 - All AWG fields (Jc/Jmin/Jmax, S1–S4, H1–H4 incl. ranges, I1–I5, PSK, MTU)
 - Same pool, same service check and failover as VLESS nodes
 - AmneziaWG 1.x, 2.0 and 3.1 (header protection, ranged timers, random trailers): the AmneziaWG engine

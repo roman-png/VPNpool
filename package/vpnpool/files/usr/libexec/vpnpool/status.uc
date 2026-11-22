@@ -421,6 +421,9 @@ printf('%J\n', {
 	settings: {
 		failover_interval: num(o('failover_interval', '60'), 60),
 		subscription_interval: o('subscription_interval', '6h'),
+		// the device ID of subscription downloads (issue #5): on unless '0'; hwid '' = not made yet
+		sub_hwid: o('sub_hwid', '1') != '0',
+		hwid: o('hwid', ''),
 		failover_tolerance: num(o('failover_tolerance', '50'), 50),
 		auto_switch: o('auto_switch', '1') == '1',
 		ipv6: o('ipv6', 'block'),

@@ -5,6 +5,9 @@ config vpnpool 'main'
 	# Data model version (2 = vpnpool 2.0: subscriptions are their own sections, every node
 	# store keys on the node ID). A 1.x config has none: migrate.sh moves it to 2 at install.
 	option schema '2'
+	# AmneziaWG / WireGuard node ids include the server (2.2.0). A config without it gets its AWG
+	# ids moved once by migrate.sh (awgid.uc).
+	option awg_id_v '2'
 	option enabled '0'
 	option mode 'selective'
 	# Subscriptions: one 'config subscription' section each (below), all equal — each with its
@@ -13,6 +16,11 @@ config vpnpool 'main'
 	# list manual_node 'vless://...'
 	# Subscription refresh period (e.g. 30m, 6h). Minimum 10m: panels rate-limit faster polling.
 	option subscription_interval '6h'
+	# Device ID sent with every subscription download (x-hwid + x-device-os / x-ver-os /
+	# x-device-model): panels with a device limit (Remnawave and others) give no nodes without
+	# it. hwid empty = made once from the kernel's random UUID. sub_hwid '0' = send nothing.
+	option sub_hwid '1'
+	option hwid ''
 	# Fallback liveness URL for sing-box urltest when check_services is empty.
 	option health_url 'http://cp.cloudflare.com/generate_204'
 	# Service-accuracy check — THE single node-quality criterion. The actual (often
