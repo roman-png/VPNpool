@@ -149,6 +149,7 @@ rm -rf "$TMP"; mkdir -p "$TMP"
 # must not abort the whole install. Always fetches to a file (stdout requests
 # stream the file out afterwards) so a failed attempt can be retried cleanly.
 DL_RETRIES=4
+DL_SLEEP="${VPNPOOL_DL_SLEEP:-3}"   # seconds between tries (tests set 0)
 download() {
 	# download <url> <outfile|->
 	url="$1"; out="$2"
@@ -165,7 +166,7 @@ download() {
 		else
 			die "no downloader (uclient-fetch/curl/wget) available"
 		fi
-		[ "$n" -lt "$DL_RETRIES" ] && { say "download attempt $n failed (GitHub can be flaky), retrying in 3s..."; sleep 3; }
+		[ "$n" -lt "$DL_RETRIES" ] && { say "download attempt $n failed (GitHub can be flaky), retrying in ${DL_SLEEP}s..."; sleep "$DL_SLEEP"; }
 	done
 	[ "$ok" = 1 ] || return 1
 	if [ "$out" = "-" ]; then cat "$dst"; rm -f "$dst"; fi
@@ -280,7 +281,14 @@ else
 		if ! download "$u" "$f"; then
 			if [ "$TAG" = "latest" ]; then
 				say "release download failed; trying Pages mirror ($PAGES)..."
-				download "$PAGES/$bn" "$f" || die "download failed (GitHub and Pages both unreachable): $bn"
+				# GitHub renames "~" to "." in release asset names; the Pages feed keeps the
+				# package's own name. The translation's version is <date>~<commit>, so its file is
+				# luci-i18n-vpnpool-ru_26.326.60896~4b4bc8c_all.ipk there (the release has
+				# ..._26.326.60896.4b4bc8c_all.ipk): try that name too. Saved under $bn either way.
+				alt="$(printf '%s' "$bn" | sed -e 's/\.\([0-9a-f]\{7,40\}\)\(_all\.ipk\)$/~\1\2/' -e 's/\.\([0-9a-f]\{7,40\}\)\(\.apk\)$/~\1\2/')"
+				download "$PAGES/$bn" "$f" \
+					|| { [ "$alt" != "$bn" ] && download "$PAGES/$alt" "$f"; } \
+					|| die "download failed (GitHub and Pages both unreachable): $bn"
 			else
 				die "download failed: $u"
 			fi
