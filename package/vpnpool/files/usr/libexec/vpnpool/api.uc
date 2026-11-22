@@ -54,7 +54,8 @@ import { readfile, writefile, stdin, popen, unlink, mkdir, stat, lsdir, rename, 
 import { cursor } from 'uci';
 import { rand } from 'math';
 import { DEFAULT_UAS, VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list, engine_select,
-	SCHEMA as DATA_SCHEMA, is_id, subs_of, sub_name_for, fav_read, fav_write, live_nodes, node_lookup, link_of } from './common.uc';
+	SCHEMA as DATA_SCHEMA, is_id, subs_of, sub_name_for, fav_read, fav_write, live_nodes, node_lookup, link_of,
+	HWID_RE, sub_headers } from './common.uc';
 
 const SB = '/tmp/vpnpool';
 const PARSER = '/usr/libexec/vpnpool/parser.uc';
@@ -254,6 +255,9 @@ const SCHEMA = {
 	test_port:             { s: 'main', c: I(1, 65535), a: 'USR1' },
 	node_test_port:        { s: 'main', c: I(1, 65535), a: 'USR1' },
 	subscription_interval: { s: 'main', c: chk_interval, a: 'none' },
+	// the device ID of subscription downloads (issue #5); '' = made again from the random UUID
+	sub_hwid:              { s: 'main', c: chk_bool, a: 'none' },
+	hwid:                  { s: 'main', c: (v) => chk_re(v, HWID_RE, 'bad_hwid', true), a: 'none' },
 	telegram_enabled:      { s: 'main', c: chk_bool, a: 'none' },
 	telegram_token:        { s: 'main', c: (v) => chk_re(v, /^[0-9]{1,20}:[A-Za-z0-9_-]{1,100}$/, 'bad_token', true), a: 'bot', secret: 'token' },
 	telegram_chat:         { s: 'main', c: (v) => chk_re(v, /^(-?[0-9]{1,20}|@[A-Za-z0-9_]{4,64})$/, 'bad_chat', true), a: 'bot' },
@@ -373,7 +377,7 @@ const MAX_LINES = 1000;
 
 // ---- AmneziaWG / WireGuard (ROADMAP 4.3-4.5, 4.7) ----
 // A .conf (pasted, or decoded from a vpn:// link by awgdecode.uc --json) is checked by the SAME
-// parser the build uses (--report: id = sha256 of the private key, type awg|wireguard, the
+// parser the build uses (--report: id = sha256 of the key, server key and endpoint, type awg|wireguard, the
 // reason of a refusal); add() stores it as /etc/vpnpool/awg/<id>.conf with "# Name = …" on top.
 // An AWG node the engine can't run is still stored — DEFERRED (owner's decision 14.10.2026):
 // the item carries deferred:"engine_missing"|"engine_no_awg" and add() answers ok + warning.
@@ -971,14 +975,16 @@ function sub_probe(url, deadline) {
 	mkdir(SB);
 	let f = sprintf('%s/.subcheck.%s', SB, uniq());
 	let uas = split(trim(cursor().get('vpnpool', 'main', 'probe_ua') ?? '') || DEFAULT_UAS, /[ \t]+/);
+	// the device headers, as fetch.sh sends them (issue #5)
+	let hdr = join('', map(sub_headers(cursor()), (h) => ' -H ' + sq(h)));
 	let http = '000', n = 0, tried = 0;
 	for (let ua in uas) {
 		let left = deadline - time();
 		if (!length(ua) || left < SUB_PROBE_MIN) break;
 		unlink(f);
 		tried++;
-		let h = trim(run(sprintf("curl -sfL --connect-timeout %d -m %d -A %s -o %s -w '%%{http_code}' %s 2>/dev/null",
-			min(4, left), min(8, left), sq(ua), sq(f), sq(url))));
+		let h = trim(run(sprintf("curl -sfL%s --connect-timeout %d -m %d -A %s -o %s -w '%%{http_code}' %s 2>/dev/null",
+			hdr, min(4, left), min(8, left), sq(ua), sq(f), sq(url))));
 		http = length(h) ? h : '000';
 		if (http == '000' || substr(http, 0, 1) == '5') break;
 		if ((stat(f)?.size ?? 0) > 0) {

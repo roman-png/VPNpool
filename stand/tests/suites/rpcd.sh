@@ -184,6 +184,7 @@ c_probe_source() {
 	_i=0; while [ $_i -lt 300 ]; do rcall probe_result; printf '%s' "$R" | jq -e '.running==false' >/dev/null 2>&1 && break; msleep 100; _i=$((_i+1)); done
 	expect_jq "probe_result lists both nodes" "$R" '.running==false and .total==2 and (.nodes|length)==2'
 	expect_jq "the result carries the same job" "$R" ".job==\"$_job\""
+	expect_eq "the device ID sent, like fetch.sh (issue #5)" "$(gcount "^GET https://src.example.com/l	x-hwid: $(uci -q get vpnpool.main.hwid)\$" /tmp/curlmock/headers.log)" 1
 }
 M probe_source '{"url":"https://src.example.com/l"}' - - c_probe_source '{"url":""}' -
 
@@ -962,6 +963,10 @@ begin "rpcd/add/url-first-client-gets-xray-json-next-gets-links"
 expect_jq "the URL is stored" "$R" '.ok==true and .added==1 and .failed==[]'
 expect_eq "a subscription with that URL" "$(subs_tsv | cut -f4)" 'https://rw.example/api/sub/T'
 expect_eq "two tries: v2rayNG (no nodes), then the next client name" "$(mock_calls 'GET https://rw.example/api/sub/T')" 2
+_hw=$(uci -q get vpnpool.main.hwid)
+expect_true "the device ID was made ($_hw)" sh -c 'printf %s "$1" | grep -qE "^[A-Za-z0-9=-]{10,64}$"' _ "$_hw"
+expect_eq "the trial sends it with each try, like fetch.sh (issue #5)" "$(gcount "^GET https://rw.example/api/sub/T	x-hwid: $_hw\$" /tmp/curlmock/headers.log)" 2
+expect_eq "and the system" "$(gcount "^GET https://rw.example/api/sub/T	x-device-os: OpenWrt\$" /tmp/curlmock/headers.log)" 2
 end
 # one budget for every URL of one add call (LuCI gives up on a call after 20 s): a slow panel
 # that answers each client name in 6 s with nothing usable eats it, the next URL is not tried

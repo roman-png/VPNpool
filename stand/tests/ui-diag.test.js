@@ -144,7 +144,7 @@ test('checks, the engine and every technical parameter from diag; foreign values
 	eq(byName.singbox_bin, 'chosen automatically', 'empty engine program: said in words');
 	const E = rowsOf(root.querySelector('.vp-diag-engine'));
 	eq([ E.Version.value, E.Version.name ], [ '1.12.25', '/usr/bin/sing-box' ], 'engine version and program');
-	eq([ E.AmneziaWG.value, kindOf(E.AmneziaWG) ], [ 'not supported', 'vp-badge-warn' ], 'AmneziaWG: no');
+	eq([ E.AmneziaWG.value, kindOf(E.AmneziaWG) ], [ 'needs the engine with AmneziaWG (see below)', 'vp-badge-warn' ], 'AmneziaWG: no engine yet');
 	eq(t.calls('diag').length, 1, 'diag read once');
 	eq(t.env.doc.unsafe, [], 'innerHTML writes');
 });
@@ -168,6 +168,13 @@ test('engine: AmneziaWG yes/no and how to install or update, in every case', asy
 	const t3 = setup(t.viewSrc, COMMON_SRC);
 	root = await open(t3, diagFixture(d => { Object.assign(d.engine.awg_engine, { installed: true, version: PINNED, awg: true, awg31: true, ram: false }); }));
 	ok(how(root).includes('up to date') && !how(root).includes('A newer version'), 'current: up to date: ' + how(root));
+	// issue #6: the AmneziaWG engine is installed, but no AmneziaWG node yet -> the standard engine
+	// runs (g.awg false). AmneziaWG IS supported: the router switches as soon as such a node is added.
+	eq([ rowsOf(root.querySelector('.vp-diag-engine')).AmneziaWG.value, kindOf(rowsOf(root.querySelector('.vp-diag-engine')).AmneziaWG) ],
+		[ 'supported, including 3.1', 'vp-badge-ok' ], 'standard engine runs, AmneziaWG engine installed: supported (#6)');
+	const t5 = setup(t.viewSrc, COMMON_SRC);
+	root = await open(t5, diagFixture(d => { Object.assign(d.engine.awg_engine, { installed: true, version: 'x', awg: false, awg31: false, ram: false }); }));
+	eq(rowsOf(root.querySelector('.vp-diag-engine')).AmneziaWG.value, 'not supported by the installed engine', 'an installed engine that cannot run AmneziaWG');
 	const t4 = setup(t.viewSrc, COMMON_SRC);
 	root = await open(t4, diagFixture(d => { d.engine.awg = true; d.engine.awg31 = false; }));
 	eq(rowsOf(root.querySelector('.vp-diag-engine')).AmneziaWG.value, 'supported (without 3.1)', 'AmneziaWG without 3.1');
@@ -308,7 +315,9 @@ const MUTATIONS = [
 	{ name: 'the source not asked', from: "return common.call('logs', { lines: n, source: src }", to: "return common.call('logs', { lines: n }", expect: [ 'log: more than 40 lines, filter and count, download of what is shown, source and size, polled' ] },
 	{ name: 'diag polled on a timer', from: "poll.add(L.bind(self.loadLog, self), 10);", to: "poll.add(L.bind(function() { self.loadLog(); return common.call('diag', {}); }, self), 10);", expect: [ 'log: more than 40 lines, filter and count, download of what is shown, source and size, polled' ] },
 	{ name: 'the update command offered without the engine', from: "if (a.installed && g.update_available) {", to: "if (g.update_available || !a.installed) {", expect: [ 'engine: AmneziaWG yes/no and how to install or update, in every case' ] },
-	{ name: 'AmneziaWG 3.1 not told apart', from: "g.awg31 ? _('supported, including 3.1') : _('supported (without 3.1)')", to: "_('supported, including 3.1')", expect: [ 'engine: AmneziaWG yes/no and how to install or update, in every case' ] },
+	{ name: 'AmneziaWG judged by the running engine only (#6)', from: "var awgOk = !!g.awg || (!!a.installed && !!a.awg);", to: "var awgOk = !!g.awg;", expect: [ 'engine: AmneziaWG yes/no and how to install or update, in every case' ] },
+	{ name: 'no engine and a useless engine said alike', from: "a.installed ? _('not supported by the installed engine') : _('needs the engine with AmneziaWG (see below)')", to: "_('needs the engine with AmneziaWG (see below)')", expect: [ 'engine: AmneziaWG yes/no and how to install or update, in every case' ] },
+	{ name: 'AmneziaWG 3.1 not told apart', from: "awg31 ? _('supported, including 3.1') : _('supported (without 3.1)')", to: "_('supported, including 3.1')", expect: [ 'engine: AmneziaWG yes/no and how to install or update, in every case' ] },
 	{ name: 'the exit result not shown', from: "\t\t\tout.textContent = t;\n", to: "\n", expect: [ '"Check the exit through the VPN": country and address; a failure says why' ] },
 	{ name: '"Check again" does not redraw', from: "self.diag = d; self.diagFailed = false;\n\t\t\tself.paint();", to: "self.diag = d; self.diagFailed = false;", expect: [ '"Check again" reads diag again and redraws; an unreadable diag is said' ] },
 	// two layers: the values go in as text nodes, and every child is in an array

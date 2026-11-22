@@ -138,8 +138,13 @@ return view.extend({
 	engineBody: function(d) {
 		var g = obj(d.engine), a = obj(g.awg_engine), list = [], how = [];
 		list.push(row(_('Version'), g.present === false ? _('not found') : shown(g.version), g.bin));
-		list.push(row(_('AmneziaWG'), g.awg ? common.badge(g.awg31 ? _('supported, including 3.1') : _('supported (without 3.1)'), 'ok')
-			: common.badge(_('not supported'), 'warn')));
+		// AmneziaWG can run when the engine that runs now can, OR the installed AmneziaWG engine can
+		// (the router switches to it as soon as an AmneziaWG node is added; until then the standard
+		// engine runs and alone it says "no" — issue #6)
+		var awgOk = !!g.awg || (!!a.installed && !!a.awg);
+		var awg31 = (!!g.awg && !!g.awg31) || (!!a.installed && !!a.awg && !!a.awg31);
+		list.push(row(_('AmneziaWG'), awgOk ? common.badge(awg31 ? _('supported, including 3.1') : _('supported (without 3.1)'), 'ok')
+			: common.badge(a.installed ? _('not supported by the installed engine') : _('needs the engine with AmneziaWG (see below)'), 'warn')));
 		list.push(row(_('Engine with AmneziaWG'), a.installed
 			? txt(_('installed, version %s').format(shown(a.version)) + (a.ram === true ? ' · ' + _('kept in memory (installed again at every start)') : ''))
 			: common.badge(_('not installed'), 'muted'), a.path));

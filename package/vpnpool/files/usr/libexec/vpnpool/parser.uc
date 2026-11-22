@@ -23,6 +23,8 @@
 //                every input, before the dedup.
 //   --pick FILE  (before an input file) only the ids listed in FILE are taken from THAT file
 //                (reason "not_picked" for the rest): a subscription in "pick" mode.
+//   --id-v1      (with --report) AWG / WireGuard records also carry id_v1 = the id before 2.2.0
+//                (the private key alone); awgid.uc moves the stores to the new ids with it.
 //   --report     instead of the node array print one record per input line / JSON item:
 //                {src, line|item, status:"ok"|"skip", reason?, field?, tag?, type?, id?,
 //                 dup_of?, tag_changed?, hints?, server?, port?}. reason is a machine code (no
@@ -51,6 +53,7 @@ let used_tags = {};
 let RESERVED_TAGS = { auto: 1, proxy: 1, direct: 1, block: 1, 'dns-out': 1, 'vpnpool-test': 1 };
 let KEEP_LINK = false;
 let WITH_ID = false;
+let WITH_V1 = false;   // --id-v1: report records of AWG nodes carry id_v1 (the id before 2.2.0)
 let WITH_SRC = false;
 let REPORT = false;
 let report = [];
@@ -782,11 +785,27 @@ function sha256_hex(msg) {
 	return join('', map(h, (x) => sprintf('%08x', x)));
 }
 
-// AWG / WireGuard node id (ROADMAP 2.2/4.4): first 12 hex of sha256 over the private key in its
-// canonical base64 form — one key = one node (two clients of one server = two nodes; the same
-// .conf pasted twice = one). The file is stored as /etc/vpnpool/awg/<id>.conf.
-function awg_id(private_key) {
-	let k = wg_key(private_key) ?? ('' + private_key);
+// AWG / WireGuard node id (ROADMAP 2.2/4.4, issue #7): first 12 hex of sha256 over the client's
+// private key, the server's public key and the server's address and port. Panels (3x-ui, VPN
+// providers) give ONE client key for every server, so the key alone made a second server of the
+// same client a "duplicate". Two clients of one server = two nodes; one client on two servers =
+// two nodes; the same .conf pasted twice = one. The file is stored as /etc/vpnpool/awg/<id>.conf.
+// Both endpoint forms count: peers[0] {address, port, public_key} and the legacy outbound
+// {server, server_port, peer_public_key} of a sing-box JSON source.
+function awg_peer(ob) {
+	let p0 = (type(ob.peers) == 'array' && type(ob.peers[0]) == 'object') ? ob.peers[0] : {};
+	let pub = p0.public_key ?? ob.peer_public_key;
+	return { host: lc('' + (p0.address ?? ob.server ?? '')), port: '' + (p0.port ?? ob.server_port ?? ''),
+		pub: wg_key(pub) ?? ('' + (pub ?? '')) };
+}
+function awg_id(ob) {
+	let k = wg_key(ob.private_key) ?? ('' + ob.private_key);
+	let p = awg_peer(ob);
+	return substr(sha256_hex(k + '|' + p.pub + '|' + p.host + '|' + p.port), 0, 12);
+}
+// the id before 2.2.0 (the private key alone): awgid.uc moves the stores from it to awg_id
+function awg_id_v1(ob) {
+	let k = wg_key(ob.private_key) ?? ('' + ob.private_key);
 	return substr(sha256_hex(k), 0, 12);
 }
 
@@ -975,7 +994,7 @@ function bare(ob) {
 // fingerprint, reality, transport, obfs password, ss plugin, ...) is part of the identity; the
 // display name, the input order and the JSON key order are not. The parser normalises what is
 // case-insensitive (UUIDs, fingerprint, ss method) before this, so the same node written
-// differently gets one id. AWG/WireGuard nodes: awg_id (sha256 of the private key).
+// differently gets one id. AWG/WireGuard nodes: awg_id (sha256 of the key, server key and endpoint).
 // The id is THE key of every store (preferred, favourites, hidden, dead marks, auto-pool members,
 // test results; ROADMAP 2.2) and it is unique in the output: one config = one node (add_node).
 function fnv1a(s, h) {
@@ -1021,7 +1040,7 @@ function add_node(ob, link) {
 	if (!length(base)) base = 'node';
 	// the id: AWG/WireGuard = its private key, any other node = its canonical config without the name
 	let id = null;
-	if (is_awg) { if (length(ob.private_key)) id = awg_id(ob.private_key); }
+	if (is_awg) { if (length(ob.private_key)) id = awg_id(ob); }
 	else id = key_id(config_key(ob));
 	// a node without an id (an AWG endpoint of a JSON source without a key) can't be picked
 	let hidden = !!(id && HIDE && HIDE[id]);
@@ -1036,6 +1055,7 @@ function add_node(ob, link) {
 	if (seen[dk] != null) {
 		let r = { status: 'skip', reason: 'duplicate', type: ob.type, dup_of: seen[dk] };
 		if (id) r.id = id;
+		if (WITH_V1 && id && is_awg) r.id_v1 = awg_id_v1(ob);
 		return r;
 	}
 	ob.tag = unique_tag(base);
@@ -1047,6 +1067,7 @@ function add_node(ob, link) {
 	push(nodes, ob);
 	let r = { status: 'ok', tag: ob.tag, type: ob.type };
 	if (id) r.id = id;
+	if (WITH_V1 && id && is_awg) r.id_v1 = awg_id_v1(ob);
 	if (ob.tag != base) r.tag_changed = true;
 	return r;
 }
@@ -1205,8 +1226,8 @@ function process_text(raw) {
 	if (index(lc(raw), '[interface]') >= 0) {
 		let pa = parse_awg_conf(raw);
 		if (pa.ob) {
-			// one private key = one node: the same .conf twice is a duplicate, two clients of
-			// one server are two nodes
+			// one key + server = one node: the same .conf twice is a duplicate; two clients of
+			// one server, or one client on two servers, are two nodes
 			let r = add_node(pa.ob, null);
 			r.line = 1;
 			if (pa.hints) r.hints = pa.hints;
@@ -1264,6 +1285,7 @@ for (let i = 0; i < length(ARGV); i++) {
 	else if (a == '--with-id') WITH_ID = true;
 	else if (a == '--with-src') WITH_SRC = true;
 	else if (a == '--report') REPORT = true;
+	else if (a == '--id-v1') WITH_V1 = true;
 	else if (a == '--hide') HIDE = id_set(ARGV[++i]);
 	else if (a == '--pick') next_pick = id_set(ARGV[++i]);
 	else { push(files, { path: a, pick: next_pick }); next_pick = null; }

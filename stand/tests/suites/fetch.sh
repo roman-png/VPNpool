@@ -192,3 +192,47 @@ expect_eq "pool: the other one from its cached copy" "$(pool_tags)" '["Ext1","Ex
 expect_eq "still no request to it" "$(mock_calls "GET $PRI")" 0
 end
 cp "$FXF/extra.orig" "$FXF/extra.txt"
+
+# ---- issue #5: the device ID (x-hwid & co) with every subscription download ----
+# panels with a device limit (Remnawave) give no nodes without x-hwid. The package default config
+# has sub_hwid '1' and an empty hwid: the first download makes it from the kernel's random UUID
+# and keeps it; the board name goes out cleaned (no quote / backslash can break the curl -K line).
+reset_state; two_subs
+mkdir -p /tmp/sysinfo; _mdl0=$(cat /tmp/sysinfo/model 2>/dev/null)
+printf 'Test "Board" \ AX-3000\n' > /tmp/sysinfo/model
+fetch_setup 200 200; rm -f /tmp/curlmock/headers.log
+sh "$FETCH" >/dev/null 2>&1
+_hw=$(uci -q get vpnpool.main.hwid)
+begin "fetch/hwid-sent-with-every-subscription"
+expect_eq "control: the default config sends it, with no ID yet" "$(uci -q get "vpnpool.main.sub_hwid")/$(sed -n "s/^[[:space:]]*option hwid '\(.*\)'$/\1/p" "$BASE_CONFIG")" "1/"
+expect_true "an ID was made and kept ($_hw)" sh -c 'printf %s "$1" | grep -qE "^[A-Za-z0-9=-]{10,64}$"' _ "$_hw"
+expect_eq "x-hwid to the first subscription" "$(gcount "^GET $PRI	x-hwid: $_hw\$" /tmp/curlmock/headers.log)" 1
+expect_eq "x-hwid to the second subscription" "$(gcount "^GET $EXT	x-hwid: $_hw\$" /tmp/curlmock/headers.log)" 1
+expect_eq "x-device-os" "$(gcount "^GET $PRI	x-device-os: OpenWrt\$" /tmp/curlmock/headers.log)" 1
+expect_eq "x-device-model cleaned" "$(gcount "^GET $PRI	x-device-model: Test Board AX-3000\$" /tmp/curlmock/headers.log)" 1
+expect_eq "x-ver-os = the release" "$(gcount "^GET $PRI	x-ver-os: $(. /etc/openwrt_release; echo "$DISTRIB_RELEASE")\$" /tmp/curlmock/headers.log)" 1
+expect_eq "pool unchanged by the headers (positive control)" "$(pool_tags)" '["Ext1","Pri1","Pri2"]'
+end
+# the same ID next time (the provider must see one device, not a new one per download)
+rm -f /tmp/curlmock/headers.log
+sh "$FETCH" >/dev/null 2>&1
+begin "fetch/hwid-stable"
+expect_eq "the kept ID again" "$(gcount "^GET $PRI	x-hwid: $_hw\$" /tmp/curlmock/headers.log)" 1
+expect_eq "uci unchanged" "$(uci -q get vpnpool.main.hwid)" "$_hw"
+end
+# switched off: no device header at all
+uci set vpnpool.main.sub_hwid=0; uci commit vpnpool
+rm -f /tmp/curlmock/headers.log /tmp/curlmock/calls.log
+sh "$FETCH" >/dev/null 2>&1
+begin "fetch/hwid-off-sends-nothing"
+expect_true "downloaded (positive control)" [ "$(mock_calls "GET $PRI")" -ge 1 ]
+expect_eq "no device header" "$(gcount 'x-hwid\|x-device' /tmp/curlmock/headers.log)" 0
+end
+# an ID typed by hand is sent as it is
+uci set vpnpool.main.sub_hwid=1; uci set vpnpool.main.hwid=MyPhone-0123456789; uci commit vpnpool
+rm -f /tmp/curlmock/headers.log
+sh "$FETCH" >/dev/null 2>&1
+begin "fetch/hwid-typed-by-hand"
+expect_eq "sent as typed" "$(gcount "^GET $PRI	x-hwid: MyPhone-0123456789\$" /tmp/curlmock/headers.log)" 1
+end
+if [ -n "$_mdl0" ]; then printf '%s\n' "$_mdl0" > /tmp/sysinfo/model; else rm -f /tmp/sysinfo/model; fi

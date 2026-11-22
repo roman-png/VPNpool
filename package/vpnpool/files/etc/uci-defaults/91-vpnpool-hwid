@@ -1,0 +1,10 @@
+#!/bin/sh
+# vpnpool 2.2.0: the device ID sent with subscription downloads (issue #5; x-hwid, see common.uc
+# sub_device). Made ONCE from the kernel's random UUID and kept in uci, so the provider sees the
+# same device after every update. A value already there (made before, or typed by hand) stays.
+[ "$(uci -q get vpnpool.main)" = vpnpool ] || exit 0
+[ -n "$(uci -q get vpnpool.main.hwid)" ] && exit 0
+id=$(cat /proc/sys/kernel/random/uuid 2>/dev/null)
+[ -n "$id" ] || exit 0
+uci -q set vpnpool.main.hwid="$id" && uci -q commit vpnpool
+exit 0

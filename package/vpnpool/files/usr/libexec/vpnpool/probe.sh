@@ -33,10 +33,13 @@ normalize() {
 	esac
 }
 
+# the device headers (issue #5, as fetch.sh): panels with a device limit give no nodes without them
+ucode /usr/libexec/vpnpool/model.uc subhdr > "$P/hdr" 2>/dev/null || : > "$P/hdr"
+
 # fetch with each UA, keep the decoded text that yields the most nodes
 best=-1
 for ua in $UAS; do
-	curl -sfL --connect-timeout 4 -m 10 -A "$ua" -o "$P/raw" "$URL" 2>/dev/null || continue
+	curl -sfL -K "$P/hdr" --connect-timeout 4 -m 10 -A "$ua" -o "$P/raw" "$URL" 2>/dev/null || continue
 	[ "$(wc -c < "$P/raw" 2>/dev/null || echo 0)" -ge 20 ] || continue
 	normalize "$P/raw" > "$P/txt"
 	cnt=$(ucode /usr/libexec/vpnpool/parser.uc --keep-link "$P/txt" 2>/dev/null | jq 'length' 2>/dev/null)

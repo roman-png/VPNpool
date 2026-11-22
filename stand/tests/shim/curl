@@ -16,11 +16,15 @@
 # Every call is appended to $MOCK_DIR/calls.log ("<key>\t<code>").
 # Several transfers in one call (curl URL1 -o F1 URL2 -o F2, or URL1 URL2 to stdout) are
 # answered in order, like curl: each URL pairs with the n-th -o, -w is printed per transfer.
+# Request headers (-H "Name: value", and `header = "Name: value"` lines of a -K config file) are
+# appended to $MOCK_DIR/headers.log, one "<key>\t<header>" line each (subscription HWID, #5).
 MOCK_DIR=${MOCK_DIR:-/tmp/curlmock}
 REAL=/usr/bin/curl
 [ -f "$MOCK_DIR/enabled" ] || exec "$REAL" "$@"
 
-ua=""; maxt=""; wfmt=""; hdr=""; fail=0; proxy=""; method=GET; hasdata=0
+NL='
+'
+ua=""; maxt=""; wfmt=""; hdr=""; fail=0; proxy=""; method=GET; hasdata=0; rqh=""
 nurl=0; nout=0
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -32,7 +36,15 @@ while [ $# -gt 0 ]; do
 		-d|--data|--data-raw|--data-binary|--data-urlencode|-F|--form) hasdata=1; shift ;;
 		-A|--user-agent) ua="$2"; shift ;;
 		-m|--max-time) maxt="$2"; shift ;;
-		-H|--header|--connect-timeout|-e|--referer|-u|--user|-b|--cookie|-c|--cookie-jar|--retry|-r|--range|--limit-rate|--resolve|--interface|--max-filesize) shift ;;
+		-H|--header) rqh="$rqh$2$NL"; shift ;;
+		-K|--config)
+			# only the `header = "..."` lines (what the package writes); builtins only: the status
+			# suite counts the processes of a poll
+			while IFS= read -r _l || [ -n "$_l" ]; do
+				case "$_l" in 'header = "'*'"') _l=${_l#'header = "'}; rqh="$rqh${_l%'"'}$NL" ;; esac
+			done < "$2"
+			shift ;;
+		--connect-timeout|-e|--referer|-u|--user|-b|--cookie|-c|--cookie-jar|--retry|-r|--range|--limit-rate|--resolve|--interface|--max-filesize) shift ;;
 		-f|--fail) fail=1 ;;
 		-*) case "$1" in -*f*) case "$1" in --*) ;; *) fail=1 ;; esac ;; esac ;;   # e.g. -sfL
 		*) nurl=$((nurl + 1)); eval "url_$nurl=\$1" ;;
@@ -41,8 +53,6 @@ while [ $# -gt 0 ]; do
 done
 [ "$method" = GET ] && [ "$hasdata" = 1 ] && method=POST
 TAB='	'
-NL='
-'
 
 transfer() {   # $1=url $2=output file ("" = stdout) -> sets RC
 	url="$1"; out="$2"
@@ -60,6 +70,11 @@ transfer() {   # $1=url $2=output file ("" = stdout) -> sets RC
 		done < "$MOCK_DIR/rules"
 	fi
 	printf '%s\t%s\n' "$key" "$code" >> "$MOCK_DIR/calls.log"
+	_r=$rqh
+	while [ -n "$_r" ]; do
+		_h=${_r%%"$NL"*}; _r=${_r#*"$NL"}
+		[ -n "$_h" ] && printf '%s\t%s\n' "$key" "$_h" >> "$MOCK_DIR/headers.log"
+	done
 	timedout=0
 	if [ "$slp" != 0 ] && [ -n "$maxt" ] && awk -v s="$slp" -v m="$maxt" 'BEGIN { exit !(s > m) }'; then
 		slp=$maxt; code=000; timedout=1

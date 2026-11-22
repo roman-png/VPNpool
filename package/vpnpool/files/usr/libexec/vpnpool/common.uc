@@ -87,7 +87,7 @@ function as_list(v, split_ws) {
 
 // ---- the data model (ROADMAP 9, schema 2) ----
 // A node is known by its ID (parser.uc: 12 hex of the canonical config without the name; AWG:
-// sha256 of the private key) in EVERY store; the tag is only its display name in one build.
+// sha256 of the key, server key and endpoint) in EVERY store; the tag is only its display name in one build.
 //   uci  config subscription 'sub_<key>'  name, url, enabled, mode all|pick, list pick <id>
 //   uci  main: preferred_node <id>, list auto_member / auto_exclude / keep_auto / hidden <id>, favorites_only,
 //        list manual_node <link> ("my nodes"; AmneziaWG ones are /etc/vpnpool/awg/<id>.conf)
@@ -263,6 +263,46 @@ function engine_select(cfg_bin, has_awg) {
 // Panels answer per client: one gets xray JSON, another a plain link list.
 const DEFAULT_UAS = 'v2rayNG/1.9.5 v2rayN/6.45 Happ/1.0 sing-box/1.12 clash-meta/1.18 Streisand Hiddify/2.0 Shadowrocket/2.2 Mozilla/5.0';
 
-export { DEFAULT_UAS, VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list,
+// ---- the device headers of a subscription download (issue #5) ----
+// Panels with a device limit (Remnawave: extractHwidHeaders) give no nodes to a client that sends
+// no x-hwid; with it the router takes one place of the limit, like a phone app. The same headers
+// as the apps: x-hwid (^[A-Za-z0-9=-]{10,64}$), x-device-os, x-ver-os, x-device-model.
+// sub_device(u) -> {hwid, os, ver, model} or null (uci main.sub_hwid '0', or a hwid typed by hand
+// that is not valid). An empty hwid is made once from the kernel's random UUID and kept in uci
+// (the package's uci-defaults normally does it first). u = a uci cursor (common.uc imports no uci).
+const HWID_RE = /^[A-Za-z0-9=-]{10,64}$/;
+function hdr_clean(s, n) {
+	// letters, digits and a few signs only: the value goes into a quoted curl -K line, where a
+	// backslash or a quote would end it (no '/': inside [...] ucode would keep the backslash too)
+	s = trim(replace(replace('' + (s ?? ''), /[^A-Za-z0-9 ._+(),:-]+/g, ' '), / +/g, ' '));
+	return length(s) ? substr(s, 0, n) : null;
+}
+function sub_device(u) {
+	if (('' + (u.get('vpnpool', 'main', 'sub_hwid') ?? '1')) == '0') return null;
+	let id = trim('' + (u.get('vpnpool', 'main', 'hwid') ?? ''));
+	if (!length(id)) {
+		id = trim(readfile('/proc/sys/kernel/random/uuid') ?? '');
+		if (!match(id, HWID_RE)) return null;
+		u.set('vpnpool', 'main', 'hwid', id);
+		u.commit('vpnpool');
+	}
+	if (!match(id, HWID_RE)) return null;
+	let rel = null;
+	for (let l in split(readfile('/etc/openwrt_release') ?? '', '\n'))
+		if (substr(l, 0, 16) == 'DISTRIB_RELEASE=') rel = replace(substr(l, 16), /['"]/g, '');
+	return { hwid: id, os: 'OpenWrt', ver: hdr_clean(rel, 32),
+		model: hdr_clean(readfile('/tmp/sysinfo/model'), 64) };
+}
+// the same as "Name: value" lines (curl -H arguments / a curl -K config)
+function sub_headers(u) {
+	let d = sub_device(u);
+	if (!d) return [];
+	let h = [ 'x-hwid: ' + d.hwid, 'x-device-os: ' + d.os ];
+	if (d.ver) push(h, 'x-ver-os: ' + d.ver);
+	if (d.model) push(h, 'x-device-model: ' + d.model);
+	return h;
+}
+
+export { DEFAULT_UAS, HWID_RE, sub_device, sub_headers, VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list,
 	CONF_DIR, RUN_DIR, FAV_MAP, SUBS_META, SCHEMA, is_id, subs_of, sub_name_for, fav_read, fav_write, live_nodes, node_lookup, link_of,
 	SB_STOCK, SB_AWG, ENGINE_CAP, sb_version_mm, engine_cap, engine_select };

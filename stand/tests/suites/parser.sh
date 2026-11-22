@@ -348,18 +348,39 @@ _o=$(printf '%s\n' "$ID_LINKS" | ucode "$PARSER" 2>/dev/null)
 expect_jq "6 nodes parsed" "$_o" 'length==6'
 expect_jq "no id field without --with-id (sing-box rejects unknown fields)" "$_o" 'all(.[]; has("id")|not)'
 end
-# AWG id (ROADMAP 4.4) = first 12 hex of sha256 over the private key (canonical base64): checked
-# against coreutils sha256sum — the pure-ucode SHA-256 must agree with a real one
-begin "parser/awg-id-is-sha256-of-private-key"
+# AWG id (ROADMAP 4.4, issue #7) = first 12 hex of sha256 over "<private key>|<server public
+# key>|<server address>|<port>" (canonical base64): checked against coreutils sha256sum — the
+# pure-ucode SHA-256 must agree with a real one. --id-v1: the id before 2.2.0 (the key alone).
+begin "parser/awg-id-is-sha256-of-key-and-server"
 _aw=$(ucode "$PARSER" --with-id "$FX/awg/awg2.conf" 2>/dev/null)
-_want=$(printf '%s' 'YBk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk=' | sha256sum | cut -c1-12)
+_want=$(printf '%s' 'YBk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk=|SrvPUBFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0=|198.51.100.61|443' | sha256sum | cut -c1-12)
+_old=$(printf '%s' 'YBk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk=' | sha256sum | cut -c1-12)
 expect_true "control: sha256sum gave 12 hex ($_want)" sh -c 'printf %s "$1" | grep -qE "^[0-9a-f]{12}$"' _ "$_want"
-expect_jq "id = sha256(PrivateKey)[:12]" "$_aw" "length==1 and .[0].id==\"$_want\""
+expect_true "control: the new id is not the old one" sh -c '[ "$1" != "$2" ]' _ "$_want" "$_old"
+expect_jq "id = sha256(PrivateKey|PublicKey|host|port)[:12]" "$_aw" "length==1 and .[0].id==\"$_want\""
 # a second, independent key (the stock WireGuard fixture)
 _wg=$(ucode "$PARSER" --with-id "$FX/awg/wg-plain.conf" 2>/dev/null)
-_want2=$(printf '%s' 'WGcliFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEA0=' | sha256sum | cut -c1-12)
-expect_jq "wireguard id = sha256(PrivateKey)[:12]" "$_wg" "length==1 and .[0].id==\"$_want2\""
+_want2=$(printf '%s' 'WGcliFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEA0=|WGsrvFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEA0=|198.51.100.7|51820' | sha256sum | cut -c1-12)
+expect_jq "wireguard id = sha256(PrivateKey|PublicKey|host|port)[:12]" "$_wg" "length==1 and .[0].id==\"$_want2\""
 expect_jq "no id without --with-id" "$(ucode "$PARSER" "$FX/awg/awg2.conf" 2>/dev/null)" '.[0]|has("id")|not'
+_rv=$(ucode "$PARSER" --report --id-v1 "$FX/awg/awg2.conf" 2>/dev/null)
+expect_jq "--id-v1: the old id next to the new one" "$_rv" ".[0].id==\"$_want\" and .[0].id_v1==\"$_old\""
+expect_jq "no id_v1 without --id-v1" "$(ucode "$PARSER" --report "$FX/awg/awg2.conf" 2>/dev/null)" '.[0]|has("id_v1")|not'
+end
+# issue #7: one client key for every server of a panel (3x-ui, VPN providers) — each server is its
+# own node; the same server under another name is still one node; the legacy JSON outbound form
+# {server, server_port, peer_public_key} gets the same id as the endpoint form
+begin "parser/awg-one-client-key-many-servers"
+sed 's/^Endpoint = .*/Endpoint = 203.0.113.9:443/' "$FX/awg/awg2.conf" > "$T_STATE/parser/srv2.conf"
+sed 's/^PublicKey = .*/PublicKey = Srv2PUBFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAK0=/' "$FX/awg/awg2.conf" > "$T_STATE/parser/srv3.conf"
+{ printf '# Name = Another name
+'; cat "$FX/awg/awg2.conf"; } > "$T_STATE/parser/srv1-renamed.conf"
+_k=$(ucode "$PARSER" --report "$FX/awg/awg2.conf" "$T_STATE/parser/srv2.conf" "$T_STATE/parser/srv3.conf" "$T_STATE/parser/srv1-renamed.conf" 2>/dev/null)
+expect_jq "control: the four files hold one private key" "$(cat "$FX/awg/awg2.conf" "$T_STATE/parser/srv2.conf" "$T_STATE/parser/srv3.conf" "$T_STATE/parser/srv1-renamed.conf" | grep '^PrivateKey' | sort -u | jq -R . | jq -s .)" 'length==1'
+expect_jq "another endpoint and another server key: three nodes" "$_k" '[.[0,1,2].status]==["ok","ok","ok"] and ([.[0,1,2].id]|unique|length)==3'
+expect_jq "the same server renamed: a duplicate" "$_k" '.[3].status=="skip" and .[3].reason=="duplicate" and .[3].id==.[0].id'
+_jw='[{"type":"wireguard","tag":"j1","private_key":"WGcliFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEA0=","server":"198.51.100.7","server_port":51820,"peer_public_key":"WGsrvFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEA0=","local_address":["10.0.0.2/32"]}]'
+expect_jq "legacy JSON outbound: the id of the same .conf" "$(printf '%s' "$_jw" | ucode "$PARSER" --with-id 2>/dev/null)" ".[0].id==\"$_want2\""
 end
 
 # ---- --report: one record per input line, machine reason codes ----
@@ -571,13 +592,13 @@ sed 's/^PersistentKeepalive = .*/PersistentKeepalive = 25-35/' "$FX/awg/wg-plain
 expect_jq "type awg, range kept, preshared_key" "$(ucode "$PARSER" "$T_STATE/parser/ka.conf" 2>/dev/null)" \
 	'.[0].type=="awg" and .[0].peers[0].persistent_keepalive_interval=="25-35" and (.[0].peers[0].preshared_key|length)==44'
 end
-# identity (ROADMAP 4.4): the name comes from "# Name ="; two clients of one server = two nodes;
-# the same .conf twice = one node
+# identity (ROADMAP 4.4, issue #7): the name comes from "# Name ="; two clients of one server =
+# two nodes; the same .conf twice = one node
 begin "parser/awg-name-comment-and-identity"
 { printf '# Name = Мой сервер (10.8.1.9)\n'; cat "$FX/awg/awg3.conf"; } > "$T_STATE/parser/named.conf"
 sed 's/^PrivateKey = .*/PrivateKey = ZZk0FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAk=/' "$FX/awg/awg3.conf" > "$T_STATE/parser/client2.conf"
 _m=$(ucode "$PARSER" --with-id "$T_STATE/parser/named.conf" "$T_STATE/parser/client2.conf" "$FX/awg/awg3.conf" 2>/dev/null)
-expect_jq "two nodes (named + client2; the third file repeats the first key)" "$_m" 'length==2'
+expect_jq "two nodes (named + client2; the third file repeats the first one)" "$_m" 'length==2'
 expect_jq "name from the comment" "$_m" '.[0].tag=="Мой сервер (10.8.1.9)"'
 expect_jq "two ids" "$_m" '(map(.id)|unique|length)==2'
 _rp=$(ucode "$PARSER" --report "$T_STATE/parser/named.conf" "$T_STATE/parser/client2.conf" "$FX/awg/awg3.conf" 2>/dev/null)

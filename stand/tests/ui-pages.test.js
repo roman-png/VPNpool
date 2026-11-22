@@ -261,7 +261,8 @@ function settingsStatus() {
 			telegram_enabled: true, telegram_control: false, telegram_token: '123456:***', telegram_token_set: true,
 			telegram_chat: '42', telegram_via_proxy: true, sched_enabled: false, sched_on: '', sched_off: '', sched_refresh: '',
 			failover_interval: 60, failover_tolerance: 50, dead_filter_strikes: 3, dead_filter_tries: 3,
-			subscription_interval: '6h', antidpi: 'off', ipv6: 'block', log_level: 'warn', prefilter_concurrency: 16
+			subscription_interval: '6h', antidpi: 'off', ipv6: 'block', log_level: 'warn', prefilter_concurrency: 16,
+			sub_hwid: true, hwid: '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0'
 		}
 	};
 }
@@ -311,7 +312,8 @@ function changeAllSettings(P) {
 		'telegram.telegram_chat': '@newchat1', 'telegram.telegram_via_proxy': '0',
 		'schedule.sched_enabled': '1', 'schedule.sched_on': '07:30', 'schedule.sched_off': '23:15', 'schedule.sched_refresh': '04:00',
 		'adv.failover_interval': '90', 'adv.failover_tolerance': '70', 'adv.dead_filter_strikes': '4', 'adv.dead_filter_tries': '2',
-		'adv.subscription_interval': '12h', 'adv.antidpi': 'aggressive', 'adv.ipv6': 'off', 'adv.log_level': 'info', 'adv.prefilter_concurrency': '8'
+		'adv.subscription_interval': '12h', 'adv.antidpi': 'aggressive', 'adv.ipv6': 'off', 'adv.log_level': 'info', 'adv.prefilter_concurrency': '8',
+		'adv.hwid': 'MyPhone-0123456789'
 	};
 	for (const [k, v] of Object.entries(t)) setv(P, k, v);
 }
@@ -320,7 +322,7 @@ const SETTINGS_WANT = {
 	dead_filter: false, killswitch: true, dns_protect: true, telegram_enabled: false, telegram_control: true, telegram_token: SECRET,
 	telegram_chat: '@newchat1', telegram_via_proxy: false, sched_enabled: true, sched_on: '07:30', sched_off: '23:15', sched_refresh: '04:00',
 	failover_interval: 90, failover_tolerance: 70, dead_filter_strikes: 4, dead_filter_tries: 2, subscription_interval: '12h',
-	antidpi: 'aggressive', ipv6: 'off', log_level: 'info', prefilter_concurrency: 8
+	antidpi: 'aggressive', ipv6: 'off', log_level: 'info', prefilter_concurrency: 8, hwid: 'MyPhone-0123456789'
 };
 
 // ---- tests
@@ -616,6 +618,17 @@ test('settings: a wrong time stops the save before anything is sent', async (S) 
 	eq(calls(P, 'set_config').length, 1, 'a valid time is sent');
 });
 
+test('settings: a wrong device ID stops the save; empty is allowed (a new one is made)', async (S) => {
+	const P = await open('settings', S);
+	setv(P, 'adv.hwid', 'bad id"with quote');
+	await clickSave(P);
+	eq(calls(P, 'set_config').length, 0, 'set_config calls');
+	setv(P, 'adv.hwid', '');
+	await clickSave(P);
+	eq(calls(P, 'set_config').length, 1, 'empty is sent');
+	eq(calls(P, 'set_config')[0][1].settings.hwid, '', 'as an empty ID');
+});
+
 test('settings: backup download and restore (the router checks first, replacing needs a yes)', async (S) => {
 	const bytes = Buffer.from([ 0x1f, 0x8b, 8, 0, 1, 2, 3, 250, 255 ]);
 	let restores = [];
@@ -892,6 +905,8 @@ const MUTATIONS = [
 		[ 'settings: backup download and restore (the router checks first, replacing needs a yes)' ] ],
 	[ 'restored: "starts again" while the service is off', 'settings', "(r && r.daemon === 'not_running') ? common.codeText('restored')", "false ? common.codeText('restored')",
 		[ 'settings: backup download and restore (the router checks first, replacing needs a yes)' ] ],
+	[ 'device ID not checked', 'settings', "\t\to.validate = function(section_id, v) { return (v === '' || /^[A-Za-z0-9=-]{10,64}$/.test(v)) ? true : common.fieldText('bad_hwid'); };", '',
+		[ 'settings: a wrong device ID stops the save; empty is allowed (a new one is made)' ] ],
 	[ 'time not checked', 'settings', '\t\t\to.validate = timeOk;', '',
 		[ 'settings: a wrong time stops the save before anything is sent' ] ],
 	[ 'Revert does nothing', 'common', [ [ '\t\t\trestoreSnap(m, self.snaps[i]);', '' ],

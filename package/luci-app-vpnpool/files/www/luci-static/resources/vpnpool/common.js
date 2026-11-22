@@ -213,6 +213,7 @@ var FIELD_TEXT = {
 	bad_mark:      _('Enter a whole number.'),
 	bad_token:     _('This does not look like a Telegram bot token.'),
 	bad_chat:      _('This does not look like a Telegram chat number.'),
+	bad_hwid:      _('Use 10 to 64 Latin letters, digits, "-" or "=".'),
 	bad_tag:       _('No such node.'),
 	bad_path:      _('There is no such program on the router.'),
 	bad_mode:      _('Choose whether to take every node or only the nodes you pick.'),

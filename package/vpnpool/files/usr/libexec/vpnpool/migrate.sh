@@ -1,7 +1,7 @@
 #!/bin/sh
 # vpnpool: migrate a 1.x configuration to the 2.0 data model (ROADMAP 9.7; the mapping is in
-# migrate.uc). Idempotent: a config already on schema 2 is left alone at once (one uci read), so
-# every caller may simply run it:
+# migrate.uc). Idempotent: a config already on schema 2 is left alone at once (a uci read; once
+# per config the 2.2.0 AmneziaWG id move, awg_ids below), so every caller may simply run it:
 #   /etc/uci-defaults/90-vpnpool-2.0   at package install / upgrade (opkg AND apk: the package's
 #                                      postinst runs default_postinst, which runs the package's
 #                                      uci-defaults files) and at the first boot of an image;
@@ -32,7 +32,32 @@ failed() {   # $1 = reason code, $2 = what the journal says
 	exit 1
 }
 
-if [ "$(uci -q get vpnpool.main.schema)" = 2 ]; then rm -f "$FAILF"; exit 0; fi
+# 2.2.0 (issue #7): the AmneziaWG / WireGuard node ids now include the server — awgid.uc moves
+# every store to them ONCE (uci main.awg_id_v '2'). Runs on a schema-2 config only (a 1.x one is
+# migrated first, below, and then comes here). A failure only leaves the old ids in place (the
+# nodes still work; favourites / hidden / preferred of AWG nodes wait) — not a migration failure.
+awg_ids() {
+	[ "$(uci -q get vpnpool.main.schema)" = 2 ] || return 0
+	[ "$(uci -q get vpnpool.main.awg_id_v)" = 2 ] && return 0
+	local lk="$SB_DATA/.awgid.lock" n=0 r
+	mkdir -p "$SB_DATA"
+	while ! ( set -C; echo $$ > "$lk" ) 2>/dev/null; do
+		clear_stale_lock "$lk" 120
+		n=$((n + 1)); [ "$n" -ge 30 ] && return 0
+		sleep 1
+	done
+	if [ "$(uci -q get vpnpool.main.awg_id_v)" != 2 ]; then
+		r=$(ucode /usr/libexec/vpnpool/awgid.uc 2>>"$LOGF")
+		if [ "$(printf '%s' "$r" | jq -r '.ok // false' 2>/dev/null)" = true ]; then
+			printf '%s' "$r" | jq -e '.moved' >/dev/null 2>&1 && journal "AmneziaWG node ids (2.2.0): $(printf '%s' "$r" | jq -c '.moved')"
+		else
+			journal "AmneziaWG node ids (2.2.0) not moved yet: $(printf '%s' "$r" | jq -c '{error}' 2>/dev/null) — tried again at the next start"
+		fi
+	fi
+	rm -f "$lk"
+}
+
+if [ "$(uci -q get vpnpool.main.schema)" = 2 ]; then rm -f "$FAILF"; awg_ids; exit 0; fi
 [ "$(uci -q get vpnpool.main)" = vpnpool ] || exit 0   # no vpnpool config at all: nothing to migrate
 
 # single flight (init.d and the package scripts may meet): wait for the other run (up to 60 s)
@@ -47,7 +72,7 @@ while ! ( set -C; echo $$ > "$LOCK" ) 2>/dev/null; do
 	sleep 1
 done
 trap 'rm -f "$LOCK"' EXIT INT TERM
-if [ "$(uci -q get vpnpool.main.schema)" = 2 ]; then rm -f "$FAILF"; exit 0; fi   # the other run did it
+if [ "$(uci -q get vpnpool.main.schema)" = 2 ]; then rm -f "$FAILF"; rm -f "$LOCK"; trap - EXIT INT TERM; awg_ids; exit 0; fi   # the other run did it
 
 journal "start: 1.x configuration -> 2.0"
 mkdir -p "$BKDIR" 2>/dev/null; chmod 700 "$BKDIR" 2>/dev/null
@@ -87,4 +112,5 @@ if [ "$rc" -ne 0 ] || [ "$(printf '%s' "$REP" | jq -r '.to // ""' 2>/dev/null)" 
 fi
 rm -f "$BKDIR/.in-progress" "$FAILF"
 journal "done: $(printf '%s' "$REP" | jq -c '.moved' 2>/dev/null); not matched: $(printf '%s' "$REP" | jq -r '.unmatched | length' 2>/dev/null) (listed in migration.json)"
+awg_ids
 exit 0
