@@ -721,5 +721,46 @@ begin "engine/stock-restored-after-install-tests"
 expect_eq "stock sing-box back" "$(sha_of "$STOCK")" "$STOCK_SHA"
 expect_true "rpcd still serves vpnpool" ubus list vpnpool
 end
+
+# ---- 7. install.sh online: the GitHub release unreachable, the Pages mirror serves ----
+# (seen on a router whose network drops the release download host): GitHub renames "~" to "." in
+# release asset names, the Pages feed keeps the package's own name — the translation
+# (<date>~<commit>) has to be found there under its "~" name.
+OSH="$T_STATE/online-shim"; OPG="$T_STATE/online-pages"; mkdir -p "$OSH" "$OPG"
+cp "$ISH/opkg" "$ISH/apk" "$OSH/"
+if [ "$IPM" = apk ]; then
+	O_FILES="vpnpool-2.2.0-r1.apk luci-app-vpnpool-2.2.0-r1.apk luci-i18n-vpnpool-ru-26.326.60896~4b4bc8c.apk"; O_SUB=/apk
+else
+	O_FILES="vpnpool_2.2.0-r1_all.ipk luci-app-vpnpool_2.2.0-r1_all.ipk luci-i18n-vpnpool-ru_26.326.60896~4b4bc8c_all.ipk"; O_SUB=
+fi
+mkdir -p "$OPG$O_SUB"
+O_JSON='{"assets":['
+for f in $O_FILES; do : > "$OPG$O_SUB/$f"; O_JSON="$O_JSON{\"browser_download_url\": \"https://github.com/roman-png/VPNpool/releases/download/v2.2.0/$(printf '%s' "$f" | tr '~' '.')\"},"; done
+printf '%s{}]}\n' "$O_JSON" > "$OSH/latest.json"
+cat > "$OSH/uclient-fetch" <<EOF
+#!/bin/sh
+out=""; url=""
+while [ \$# -gt 0 ]; do case "\$1" in -T) shift ;; -qO|-O) shift; out=\$1 ;; -q) ;; *) url=\$1 ;; esac; shift; done
+echo "\$url" >> "$OSH/calls"
+case "\$url" in
+	https://api.github.com/repos/roman-png/VPNpool/releases/latest) cat "$OSH/latest.json" > "\$out" ;;
+	https://roman-png.github.io/VPNpool/*) f="$OPG/\${url#https://roman-png.github.io/VPNpool/}"; [ -f "\$f" ] || exit 1; cat "\$f" > "\$out" ;;
+	*) exit 1 ;;   # the release download host is unreachable
+esac
+EOF
+chmod +x "$OSH/uclient-fetch"
+reset_engine; rm -f "$EW/pm.log" "$OSH/calls"
+run_with_timeout 120 env PATH="$OSH:$PATH" ESH="$ESH" VPNPOOL_DL_SLEEP=0 \
+	sh -c 'sh "$1" > "$2" 2>&1' _ "$REPO/install.sh" "$EW/online.log"; ORC=$?
+begin "engine/install-sh-pages-mirror-translation-name"
+expect_true "control: the release lists the translation with '.' and the mirror has it with '~'" \
+	sh -c 'grep -q "ru[-_]26.326.60896.4b4bc8c" "$1" && ls "$2" | grep -q "ru[-_]26.326.60896~4b4bc8c"' _ "$OSH/latest.json" "$OPG$O_SUB"
+expect_true "the release download was tried first (and failed)" grep -q '^https://github.com/roman-png/VPNpool/releases/download/' "$OSH/calls"
+expect_true "exit 0 (rc=$ORC)" [ "$ORC" -eq 0 ]
+expect_eq "installed: base, web UI, its Russian translation" "$(inst_order)" "vpnpool luci-app-vpnpool luci-i18n-vpnpool-ru "
+expect_true "the translation came from the mirror under its '~' name" grep -q "VPNpool$O_SUB/luci-i18n-vpnpool-ru[-_]26.326.60896~4b4bc8c" "$OSH/calls"
+expect_true "no 'both unreachable' error" sh -c '! grep -q "both unreachable" "$1"' _ "$EW/online.log"
+end
+rm -rf "$OSH" "$OPG"
 reset_engine
 rm -rf "$ESRV" "$EW" "$ISH" /tmp/usr/bin/sing-box /tmp/vpnpool-install /opt/stand/stocktest
