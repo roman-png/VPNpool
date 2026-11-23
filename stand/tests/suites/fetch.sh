@@ -235,4 +235,72 @@ sh "$FETCH" >/dev/null 2>&1
 begin "fetch/hwid-typed-by-hand"
 expect_eq "sent as typed" "$(gcount "^GET $PRI	x-hwid: MyPhone-0123456789\$" /tmp/curlmock/headers.log)" 1
 end
+
+# ---- the system, its version and the model typed by hand (Settings: sub_os / sub_os_ver / sub_model) ----
+uci set vpnpool.main.sub_os=Android; uci set vpnpool.main.sub_os_ver=14; uci set 'vpnpool.main.sub_model=Pixel 8 (Pro)'; uci commit vpnpool
+rm -f /tmp/curlmock/headers.log
+sh "$FETCH" >/dev/null 2>&1
+begin "fetch/device-typed-by-hand"
+expect_eq "x-device-os as typed" "$(gcount "^GET $PRI	x-device-os: Android\$" /tmp/curlmock/headers.log)" 1
+expect_eq "x-ver-os as typed" "$(gcount "^GET $PRI	x-ver-os: 14\$" /tmp/curlmock/headers.log)" 1
+expect_eq "x-device-model as typed" "$(gcount "^GET $PRI	x-device-model: Pixel 8 (Pro)\$" /tmp/curlmock/headers.log)" 1
+expect_eq "not the router's own model as well" "$(gcount "^GET $PRI	x-device-model: Test Board" /tmp/curlmock/headers.log)" 0
+expect_eq "the ID still goes with them" "$(gcount "^GET $PRI	x-hwid: MyPhone-0123456789\$" /tmp/curlmock/headers.log)" 1
+end
+# a value edited past set_config (a quote would end the curl -K line): the router's own goes
+uci set 'vpnpool.main.sub_model=Bad "model'; uci set vpnpool.main.sub_os=''; uci commit vpnpool
+rm -f /tmp/curlmock/headers.log
+sh "$FETCH" >/dev/null 2>&1
+begin "fetch/device-bad-or-empty-falls-back-to-router"
+expect_eq "bad model: the router's own" "$(gcount "^GET $PRI	x-device-model: Test Board AX-3000\$" /tmp/curlmock/headers.log)" 1
+expect_eq "nothing with the quote" "$(gcount 'Bad' /tmp/curlmock/headers.log)" 0
+expect_eq "empty system: OpenWrt" "$(gcount "^GET $PRI	x-device-os: OpenWrt\$" /tmp/curlmock/headers.log)" 1
+expect_eq "the version typed stays" "$(gcount "^GET $PRI	x-ver-os: 14\$" /tmp/curlmock/headers.log)" 1
+end
+uci -q delete vpnpool.main.sub_os; uci -q delete vpnpool.main.sub_os_ver; uci -q delete vpnpool.main.sub_model; uci commit vpnpool
+
+# ---- one client name typed in Settings (sub_ua): the router calls itself only that ----
+# the panel gives nodes only to that name (with spaces, ";" and brackets, as real client names)
+UA1='Happ/3.5.0 (Linux; arm64)'
+_NUAS=$(sh -c '. /usr/libexec/vpnpool/lib.sh; printf "%s\n" $DEFAULT_UAS' | grep -c .)
+fetch_ua_rules() {
+	mock_on
+	mock_rule "GET $PRI @$UA1" 200 "$FXF/primary.b64" "$FXF/primary.hdr"
+	mock_rule "GET $PRI" 404
+	mock_rule "GET $EXT" 200 "$FXF/extra.txt" "$FXF/extra.hdr"
+}
+fetch_ua_rules; rm -f /tmp/curlmock/calls.log /tmp/curlmock/ua.log
+sh "$FETCH" >/dev/null 2>&1
+begin "fetch/ua-empty-tries-the-list"   # control: without it the list is tried, that name is not in it
+expect_true "control: the list holds several names ($_NUAS)" [ "$_NUAS" -gt 1 ]
+expect_eq "every name of the standard list" "$(mock_calls "GET $PRI")" "$_NUAS"
+expect_eq "never that name" "$(gcount "^GET $PRI	$UA1\$" /tmp/curlmock/ua.log)" 0
+expect_jq "so the primary is not fresh" "$(cat /tmp/vpnpool/fetch_status.json)" ".[\"$PRI\"].result != \"ok\""
+end
+uci set "vpnpool.main.sub_ua=$UA1"; uci commit vpnpool
+fetch_ua_rules; rm -f /tmp/curlmock/calls.log /tmp/curlmock/ua.log
+sh "$FETCH" >/dev/null 2>&1
+begin "fetch/ua-typed-only-that-name"
+expect_eq "one call per subscription" "$(mock_calls "GET $PRI")/$(mock_calls "GET $EXT")" "1/1"
+expect_eq "the whole name, spaces kept" "$(gcount "^GET $PRI	$UA1\$" /tmp/curlmock/ua.log)" 1
+expect_eq "to the other subscription too" "$(gcount "^GET $EXT	$UA1\$" /tmp/curlmock/ua.log)" 1
+expect_jq "the primary fetched now" "$(cat /tmp/vpnpool/fetch_status.json)" ".[\"$PRI\"].result == \"ok\" and .[\"$PRI\"].nodes == 2"
+end
+# the panel refuses that name: no other name is tried (the provider sees only the chosen app)
+mock_on; mock_rule "GET $PRI" 404; mock_rule "GET $EXT" 200 "$FXF/extra.txt" "$FXF/extra.hdr"
+rm -f /tmp/curlmock/calls.log
+sh "$FETCH" >/dev/null 2>&1
+begin "fetch/ua-typed-no-fallback-to-list"
+expect_eq "one try only" "$(mock_calls "GET $PRI")" 1
+expect_eq "pool from the cached copy" "$(pool_tags)" '["Ext1","Pri1","Pri2"]'
+end
+# a name edited past set_config (a quote): not used, the list is tried
+uci set 'vpnpool.main.sub_ua=Bad"UA'; uci commit vpnpool
+fetch_ua_rules; rm -f /tmp/curlmock/calls.log /tmp/curlmock/ua.log
+sh "$FETCH" >/dev/null 2>&1
+begin "fetch/ua-bad-falls-back-to-list"
+expect_eq "the list again" "$(mock_calls "GET $PRI")" "$_NUAS"
+expect_eq "not the bad name" "$(gcount 'Bad' /tmp/curlmock/ua.log)" 0
+end
+uci -q delete vpnpool.main.sub_ua; uci commit vpnpool
 if [ -n "$_mdl0" ]; then printf '%s\n' "$_mdl0" > /tmp/sysinfo/model; else rm -f /tmp/sysinfo/model; fi

@@ -17,7 +17,8 @@
 # Several transfers in one call (curl URL1 -o F1 URL2 -o F2, or URL1 URL2 to stdout) are
 # answered in order, like curl: each URL pairs with the n-th -o, -w is printed per transfer.
 # Request headers (-H "Name: value", and `header = "Name: value"` lines of a -K config file) are
-# appended to $MOCK_DIR/headers.log, one "<key>\t<header>" line each (subscription HWID, #5).
+# appended to $MOCK_DIR/headers.log, one "<key>\t<header>" line each (subscription HWID, #5);
+# the User-Agent (-A) of every call to $MOCK_DIR/ua.log, "<key>\t<ua>".
 MOCK_DIR=${MOCK_DIR:-/tmp/curlmock}
 REAL=/usr/bin/curl
 [ -f "$MOCK_DIR/enabled" ] || exec "$REAL" "$@"
@@ -70,6 +71,8 @@ transfer() {   # $1=url $2=output file ("" = stdout) -> sets RC
 		done < "$MOCK_DIR/rules"
 	fi
 	printf '%s\t%s\n' "$key" "$code" >> "$MOCK_DIR/calls.log"
+	# the client name of each call ("<key>\t<-A value>", empty when none): the name typed in Settings
+	printf '%s\t%s\n' "$key" "$ua" >> "$MOCK_DIR/ua.log"
 	_r=$rqh
 	while [ -n "$_r" ]; do
 		_h=${_r%%"$NL"*}; _r=${_r#*"$NL"}

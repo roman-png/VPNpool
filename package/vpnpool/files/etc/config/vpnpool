@@ -21,6 +21,14 @@ config vpnpool 'main'
 	# it. hwid empty = made once from the kernel's random UUID. sub_hwid '0' = send nothing.
 	option sub_hwid '1'
 	option hwid ''
+	# What the router says about itself in those headers, typed by hand for a provider that
+	# expects a certain device (empty = the router's own: OpenWrt, its release, its board name).
+	option sub_os ''
+	option sub_os_ver ''
+	option sub_model ''
+	# One client name (User-Agent) for every subscription download, e.g. 'Happ/3.5.0'. Empty =
+	# try the client names in order (probe_ua, else the standard list) up to one that gives nodes.
+	option sub_ua ''
 	# Fallback liveness URL for sing-box urltest when check_services is empty.
 	option health_url 'http://cp.cloudflare.com/generate_204'
 	# Service-accuracy check — THE single node-quality criterion. The actual (often

@@ -70,6 +70,10 @@ var FIELDS = [
 	{ f: 'subscription_interval', o: 'adv.subscription_interval', t: 'str', v: sv('subscription_interval', '6h') },
 	{ f: 'sub_hwid', o: 'adv.sub_hwid', t: 'bool', v: bool('sub_hwid', true) },
 	{ f: 'hwid', o: 'adv.hwid', t: 'str', v: sv('hwid', '') },
+	{ f: 'sub_os', o: 'adv.sub_os', t: 'str', v: sv('sub_os', '') },
+	{ f: 'sub_os_ver', o: 'adv.sub_os_ver', t: 'str', v: sv('sub_os_ver', '') },
+	{ f: 'sub_model', o: 'adv.sub_model', t: 'str', v: sv('sub_model', '') },
+	{ f: 'sub_ua', o: 'adv.sub_ua', t: 'str', v: sv('sub_ua', '') },
 	{ f: 'antidpi', o: 'adv.antidpi', t: 'str', v: sv('antidpi', 'off') },
 	{ f: 'ipv6', o: 'adv.ipv6', t: 'str', v: sv('ipv6', 'block') },
 	{ f: 'log_level', o: 'adv.log_level', t: 'str', v: sv('log_level', 'warn') },
@@ -89,6 +93,18 @@ var LOG_LEVELS = [
 function timeOk(section_id, v) {
 	return (v == null || v === '' || /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(String(v).trim())) ? true
 		: common.fieldText('bad_time');
+}
+
+// the same rules as set_config (common.uc DEV_RE / UA_RE; set_config cuts the spaces at the
+// edges first): no quote or backslash reaches the curl line
+function devOk(section_id, v) {
+	var s = (v == null) ? '' : String(v).trim();
+	return (s === '' || /^[A-Za-z0-9 ._+(),:-]{1,64}$/.test(s)) ? true : common.fieldText('bad_device');
+}
+function uaOk(section_id, v) {
+	var s = (v == null) ? '' : String(v).trim();
+	return (s === '' || /^[A-Za-z0-9._+()\/,:;=-]([A-Za-z0-9 ._+()\/,:;=-]{0,198}[A-Za-z0-9._+()\/,:;=-])?$/.test(s))
+		? true : common.fieldText('bad_ua');
 }
 
 // An input-less option: our own widget (buttons, a line of explanation)
@@ -332,6 +348,22 @@ return view.extend({
 			_('Made automatically. To take the place of a device the provider already knows, paste its ID here. Leave empty to make a new one.'));
 		o.validate = function(section_id, v) { return (v === '' || /^[A-Za-z0-9=-]{10,64}$/.test(v)) ? true : common.fieldText('bad_hwid'); };
 		o.depends('sub_hwid', '1');
+		// what the router says about itself with the ID (api.uc sub_os / sub_os_ver / sub_model):
+		// empty = its own, shown as the placeholder (status settings.sub_auto)
+		var auto = settings(st).sub_auto || {};
+		[ [ 'sub_os', _('System'), auto.os ], [ 'sub_os_ver', _('System version'), auto.ver ], [ 'sub_model', _('Device model'), auto.model ] ].forEach(function(x, i) {
+			o = s.option(form.Value, x[0], x[1], i ? null
+				: _('Empty fields: the router\'s own details, shown pale in the field. Type your own if the provider expects a certain device.'));
+			if (x[2]) o.placeholder = String(x[2]);
+			o.validate = devOk;
+			o.depends('sub_hwid', '1');
+		});
+		// one client name for every download (api.uc sub_ua); empty = the list in order
+		o = s.option(form.Value, 'sub_ua', _('App name for subscriptions'),
+			_('Empty: the router tries the names of popular apps one by one until the subscription gives nodes. If the provider lets in only a certain app, choose it or type its name: then the router uses only that name.'));
+		(settings(st).sub_ua_list || []).forEach(function(x) { o.value(String(x), String(x)); });
+		o.placeholder = _('one by one');
+		o.validate = uaOk;
 		o = s.option(form.ListValue, 'antidpi', _('Get past the provider\'s filtering'),
 			_('Splits the start of secure connections so that simple provider filters cannot read the site name. Does not help against strong blocking.'));
 		o.value('off', _('Off'));

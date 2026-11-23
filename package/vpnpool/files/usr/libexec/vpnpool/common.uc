@@ -277,6 +277,17 @@ function hdr_clean(s, n) {
 	s = trim(replace(replace('' + (s ?? ''), /[^A-Za-z0-9 ._+(),:-]+/g, ' '), / +/g, ' '));
 	return length(s) ? substr(s, 0, n) : null;
 }
+// The system, its version and the model can be typed by hand in Settings (uci main.sub_os /
+// sub_os_ver / sub_model; empty = the router's own, sub_device_auto): a provider that expects a
+// certain device. A typed value holds only the signs hdr_clean keeps (DEV_RE, checked by
+// set_config); one that does not (edited past set_config) is not sent, the router's own goes.
+const DEV_RE = /^[A-Za-z0-9 ._+(),:-]{1,64}$/;
+function sub_device_auto() {
+	let rel = null;
+	for (let l in split(readfile('/etc/openwrt_release') ?? '', '\n'))
+		if (substr(l, 0, 16) == 'DISTRIB_RELEASE=') rel = replace(substr(l, 16), /['"]/g, '');
+	return { os: 'OpenWrt', ver: hdr_clean(rel, 32), model: hdr_clean(readfile('/tmp/sysinfo/model'), 64) };
+}
 function sub_device(u) {
 	if (('' + (u.get('vpnpool', 'main', 'sub_hwid') ?? '1')) == '0') return null;
 	let id = trim('' + (u.get('vpnpool', 'main', 'hwid') ?? ''));
@@ -287,11 +298,22 @@ function sub_device(u) {
 		u.commit('vpnpool');
 	}
 	if (!match(id, HWID_RE)) return null;
-	let rel = null;
-	for (let l in split(readfile('/etc/openwrt_release') ?? '', '\n'))
-		if (substr(l, 0, 16) == 'DISTRIB_RELEASE=') rel = replace(substr(l, 16), /['"]/g, '');
-	return { hwid: id, os: 'OpenWrt', ver: hdr_clean(rel, 32),
-		model: hdr_clean(readfile('/tmp/sysinfo/model'), 64) };
+	let a = sub_device_auto();
+	let own = (k, auto) => { let v = trim('' + (u.get('vpnpool', 'main', k) ?? '')); return (length(v) && match(v, DEV_RE)) ? v : auto; };
+	return { hwid: id, os: own('sub_os', a.os), ver: own('sub_os_ver', a.ver), model: own('sub_model', a.model) };
+}
+
+// ---- the client name (User-Agent) of a subscription download ----
+// uci main.sub_ua (Settings): the router calls itself only that (a provider that lets in one app
+// only); empty = the list (uci probe_ua, else DEFAULT_UAS), tried in order up to the first that
+// gives nodes. UA_RE: letters, digits, spaces inside and the signs of real client names
+// ("Mozilla/5.0 (Windows NT 10.0; Win64; x64)"), no quote / backslash / glob sign. Built from a
+// string: a '/' inside [...] of a regex literal would let a backslash in too (see hdr_clean).
+const UA_RE = regexp('^[A-Za-z0-9._+()/,:;=-]([A-Za-z0-9 ._+()/,:;=-]{0,198}[A-Za-z0-9._+()/,:;=-])?$');
+function sub_uas(u) {
+	let one = trim('' + (u.get('vpnpool', 'main', 'sub_ua') ?? ''));
+	if (length(one) && match(one, UA_RE)) return [ one ];
+	return filter(split(trim('' + (u.get('vpnpool', 'main', 'probe_ua') ?? '')) || DEFAULT_UAS, /[ \t]+/), length);
 }
 // the same as "Name: value" lines (curl -H arguments / a curl -K config)
 function sub_headers(u) {
@@ -303,6 +325,6 @@ function sub_headers(u) {
 	return h;
 }
 
-export { DEFAULT_UAS, HWID_RE, sub_device, sub_headers, VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list,
+export { DEFAULT_UAS, HWID_RE, DEV_RE, UA_RE, sub_device, sub_device_auto, sub_headers, sub_uas, VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list,
 	CONF_DIR, RUN_DIR, FAV_MAP, SUBS_META, SCHEMA, is_id, subs_of, sub_name_for, fav_read, fav_write, live_nodes, node_lookup, link_of,
 	SB_STOCK, SB_AWG, ENGINE_CAP, sb_version_mm, engine_cap, engine_select };

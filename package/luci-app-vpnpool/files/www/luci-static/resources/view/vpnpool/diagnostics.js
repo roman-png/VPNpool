@@ -182,7 +182,9 @@ return view.extend({
 				row(_('Free memory a speed test needs, KB'), p.speedtest_min_mem_kb, 'speedtest_min_mem_kb'),
 				row(_('Sites checked per search run'), p.adaptive_max_per_run, 'adaptive_max_per_run'),
 				row(_('Engine program'), p.singbox_bin || _('chosen automatically'), 'singbox_bin'),
-				row(_('Program names used to download subscriptions'), p.probe_ua || _('the standard list'), 'probe_ua'),
+				// a name set in Settings (sub_ua) is the only one the router uses (common.uc sub_uas)
+				row(_('Program names used to download subscriptions'), p.sub_ua ? _('only %s (set in Settings)').format(p.sub_ua)
+					: (p.probe_ua || _('the standard list')), p.sub_ua ? 'sub_ua' : 'probe_ua'),
 				row(_('Engine process number'), s.singbox_pid),
 				row(_('Ready-made lists in use'), rs.communities),
 				row(_('Copy of the ready-made lists'), rs.cache_present ? _('%d KB').format(+rs.cache_kb || 0) : _('none yet')),

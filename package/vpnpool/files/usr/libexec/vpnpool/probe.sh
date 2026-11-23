@@ -22,7 +22,12 @@ CAP=300; PARALLEL=64
 
 # Keep the probe well under the ubus/LuCI call timeout: try only a few UAs and stop
 # at the first that yields nodes (most panels serve every client the same list).
-UAS="v2rayNG/1.9.5 clash-meta/1.18 Hiddify/2.0"
+# A client name set in Settings (uci sub_ua) replaces them: the router calls itself only that.
+# One per line (that name may hold spaces).
+NL='
+'
+UAS=$(ucode /usr/libexec/vpnpool/model.uc ua 2>/dev/null)
+[ -n "$UAS" ] || UAS=$(printf '%s\n' v2rayNG/1.9.5 clash-meta/1.18 Hiddify/2.0)
 
 normalize() {
 	c=$(head -c 1 "$1" 2>/dev/null)
@@ -38,7 +43,9 @@ ucode /usr/libexec/vpnpool/model.uc subhdr > "$P/hdr" 2>/dev/null || : > "$P/hdr
 
 # fetch with each UA, keep the decoded text that yields the most nodes
 best=-1
+oifs=$IFS; IFS=$NL; set -f
 for ua in $UAS; do
+	IFS=$oifs; set +f
 	curl -sfL -K "$P/hdr" --connect-timeout 4 -m 10 -A "$ua" -o "$P/raw" "$URL" 2>/dev/null || continue
 	[ "$(wc -c < "$P/raw" 2>/dev/null || echo 0)" -ge 20 ] || continue
 	normalize "$P/raw" > "$P/txt"
@@ -47,6 +54,7 @@ for ua in $UAS; do
 	if [ "$cnt" -gt "$best" ]; then best="$cnt"; cp "$P/txt" "$P/best"; fi
 	[ "$best" -ge 1 ] && break   # first UA that yields nodes is good enough — keep it fast
 done
+IFS=$oifs; set +f
 [ "$best" -ge 1 ] || { echo '{"ok":false,"code":"no_nodes","error":"no_nodes","total":0,"capped":false,"shown":0,"nodes":[]}'; exit 0; }
 
 ucode /usr/libexec/vpnpool/parser.uc --keep-link --with-id "$P/best" 2>/dev/null > "$P/nodes.json"

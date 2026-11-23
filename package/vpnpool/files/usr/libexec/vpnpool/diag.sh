@@ -48,6 +48,7 @@ PARAMS=$(jq -nc \
 	--arg fetchkb "$(uopt fetch_max_kb)" --arg memkb "$(uopt speedtest_min_mem_kb)" \
 	--arg conc "$(uopt prefilter_concurrency)" --arg amax "$(uopt adaptive_max_per_run)" \
 	--arg sbcfg "$(uopt singbox_bin)" --arg loglevel "$(uopt log_level)" --arg ua "$(uopt probe_ua)" \
+	--arg ua1 "$(uopt sub_ua)" \
 	'def v($x; $d): if $x == "" then $d else $x end;
 	{tproxy_port: $tproxy, test_port: v($test; "1605"), node_test_port: v($ntest; "1606"),
 	 fwmark: $fwmark, route_table: $table, route_priority: $prio, clash_api: $clash,
@@ -55,7 +56,7 @@ PARAMS=$(jq -nc \
 	 dns_strategy: v($dns; "prefer_ipv4"), health_url: $health,
 	 fetch_max_kb: v($fetchkb; "2048"), speedtest_min_mem_kb: v($memkb; "8192"),
 	 prefilter_concurrency: v($conc; "16"), adaptive_max_per_run: v($amax; "8"),
-	 singbox_bin: $sbcfg, log_level: v($loglevel; "warn"), probe_ua: $ua}' 2>/dev/null)
+	 singbox_bin: $sbcfg, log_level: v($loglevel; "warn"), probe_ua: $ua, sub_ua: $ua1}' 2>/dev/null)
 [ -n "$PARAMS" ] || PARAMS='{}'
 
 # The engine (sing-box): the binary that runs the config, its version and AmneziaWG support

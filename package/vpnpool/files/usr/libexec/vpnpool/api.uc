@@ -53,9 +53,9 @@
 import { readfile, writefile, stdin, popen, unlink, mkdir, stat, lsdir, rename, chmod, access } from 'fs';
 import { cursor } from 'uci';
 import { rand } from 'math';
-import { DEFAULT_UAS, VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list, engine_select,
+import { VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list, engine_select,
 	SCHEMA as DATA_SCHEMA, is_id, subs_of, sub_name_for, fav_read, fav_write, live_nodes, node_lookup, link_of,
-	HWID_RE, sub_headers } from './common.uc';
+	HWID_RE, DEV_RE, UA_RE, sub_headers, sub_uas } from './common.uc';
 
 const SB = '/tmp/vpnpool';
 const PARSER = '/usr/libexec/vpnpool/parser.uc';
@@ -258,6 +258,11 @@ const SCHEMA = {
 	// the device ID of subscription downloads (issue #5); '' = made again from the random UUID
 	sub_hwid:              { s: 'main', c: chk_bool, a: 'none' },
 	hwid:                  { s: 'main', c: (v) => chk_re(v, HWID_RE, 'bad_hwid', true), a: 'none' },
+	// typed by hand (common.uc sub_device / sub_uas); '' = the router's own / the list in order
+	sub_os:                { s: 'main', c: (v) => chk_re(v, DEV_RE, 'bad_device', true), a: 'none' },
+	sub_os_ver:            { s: 'main', c: (v) => chk_re(v, DEV_RE, 'bad_device', true), a: 'none' },
+	sub_model:             { s: 'main', c: (v) => chk_re(v, DEV_RE, 'bad_device', true), a: 'none' },
+	sub_ua:                { s: 'main', c: (v) => chk_re(v, UA_RE, 'bad_ua', true), a: 'none' },
 	telegram_enabled:      { s: 'main', c: chk_bool, a: 'none' },
 	telegram_token:        { s: 'main', c: (v) => chk_re(v, /^[0-9]{1,20}:[A-Za-z0-9_-]{1,100}$/, 'bad_token', true), a: 'bot', secret: 'token' },
 	telegram_chat:         { s: 'main', c: (v) => chk_re(v, /^(-?[0-9]{1,20}|@[A-Za-z0-9_]{4,64})$/, 'bad_chat', true), a: 'bot' },
@@ -957,7 +962,7 @@ function sub_op(op, inp) {
 
 // Trial download of a subscription URL: does it give nodes at all? (a typo / a panel port blocked
 // from the router must not be stored silently). The client names are tried in the order fetch.sh
-// tries them (uci probe_ua, else DEFAULT_UAS) up to the first that gives nodes: a panel may answer
+// tries them (common.uc sub_uas: the one set in Settings, else uci probe_ua, else DEFAULT_UAS) up to the first that gives nodes: a panel may answer
 // the first one with a format the parser has no use for (Remnawave: xray JSON to v2rayNG) and
 // the next one with links — one client name only refused such a subscription that fetch.sh reads.
 // No HTTP answer at all (000: DNS, connect, TLS) or a server error (5xx) ends the trial: another
@@ -974,7 +979,7 @@ const SUB_PROBE_MIN = 3;   // less left than this: no new try (a connect alone m
 function sub_probe(url, deadline) {
 	mkdir(SB);
 	let f = sprintf('%s/.subcheck.%s', SB, uniq());
-	let uas = split(trim(cursor().get('vpnpool', 'main', 'probe_ua') ?? '') || DEFAULT_UAS, /[ \t]+/);
+	let uas = sub_uas(cursor());
 	// the device headers, as fetch.sh sends them (issue #5)
 	let hdr = join('', map(sub_headers(cursor()), (h) => ' -H ' + sq(h)));
 	let http = '000', n = 0, tried = 0;
