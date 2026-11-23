@@ -50,9 +50,12 @@ TAB=$(printf '\t')
 SUBHDR="$SB_DATA/.subhdr"
 ucode "$MODEL" subhdr > "$SUBHDR" 2>/dev/null || : > "$SUBHDR"
 
-# Client User-Agents to probe (space separated, no spaces inside a UA).
-UAS=$(uci -q get vpnpool.main.probe_ua)
-[ -n "$UAS" ] || UAS="$DEFAULT_UAS"
+# Client User-Agents to probe, ONE PER LINE (a name typed in Settings may hold spaces):
+# common.uc sub_uas — the one set in Settings (uci sub_ua), else uci probe_ua, else DEFAULT_UAS.
+NL='
+'
+UAS=$(ucode "$MODEL" uas 2>/dev/null)
+[ -n "$UAS" ] || UAS=$(printf '%s\n' $DEFAULT_UAS)
 
 # Upper bound of one subscription's answer (uci fetch_max_kb, default 2048 KiB). curl stops a
 # download whose announced size is above it; the size is checked again on what arrived.
@@ -98,7 +101,9 @@ fetch_best() {   # $1=url $2=sub id $3=outfile
 	url="$1"; sid="$2"; outfile="$3"
 	best=-1; bestua=""
 	rm -f "$SB_DATA/.hdr.$sid"
+	oifs=$IFS; IFS=$NL; set -f
 	for ua in $UAS; do
+		IFS=$oifs; set +f
 		curl -sfL -K "$SUBHDR" --connect-timeout 5 -m 12 --max-filesize "$MAXB" -A "$ua" -D "$SB_DATA/h.tmp" -o "$SB_DATA/b.tmp" "$url" 2>/dev/null || continue
 		sz=$(wc -c < "$SB_DATA/b.tmp" 2>/dev/null); [ "${sz:-0}" -lt 20 ] && continue
 		# too big to parse safely in RAM (a public list of thousands of nodes on a 16 MB router):
@@ -120,6 +125,7 @@ fetch_best() {   # $1=url $2=sub id $3=outfile
 		# when the earlier UAs returned nothing; we keep trying until one works, then break.
 		[ "$cnt" -ge 1 ] && break
 	done
+	IFS=$oifs; set +f
 	rm -f "$SB_DATA/h.tmp" "$SB_DATA/b.tmp" "$SB_DATA/n.tmp"
 	if [ "$best" -ge 1 ]; then
 		log "fetch: $(mask_url "$url") -> $best nodes (best UA: $bestua)"

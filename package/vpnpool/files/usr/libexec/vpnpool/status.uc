@@ -18,7 +18,7 @@
 import { readfile, stat, lsdir, popen, access, open } from 'fs';
 import { cursor } from 'uci';
 import { read_json, mask_url, mask_token, str_key, as_list, SB_AWG, engine_cap,
-	is_id, subs_of, fav_read } from './common.uc';
+	is_id, subs_of, fav_read, sub_device_auto, DEFAULT_UAS } from './common.uc';
 
 const SB = '/tmp/vpnpool';
 const CONF = '/etc/vpnpool';
@@ -424,6 +424,14 @@ printf('%J\n', {
 		// the device ID of subscription downloads (issue #5): on unless '0'; hwid '' = not made yet
 		sub_hwid: o('sub_hwid', '1') != '0',
 		hwid: o('hwid', ''),
+		// typed by hand ('' = the router's own: sub_auto, shown greyed in the empty field); sub_ua
+		// '' = the client names in order (sub_uas: probe_ua or the standard list)
+		sub_os: o('sub_os', ''),
+		sub_os_ver: o('sub_os_ver', ''),
+		sub_model: o('sub_model', ''),
+		sub_ua: o('sub_ua', ''),
+		sub_auto: sub_device_auto(),
+		sub_ua_list: filter(split(trim(o('probe_ua', '')) || DEFAULT_UAS, /[ \t]+/), length),
 		failover_tolerance: num(o('failover_tolerance', '50'), 50),
 		auto_switch: o('auto_switch', '1') == '1',
 		ipv6: o('ipv6', 'block'),

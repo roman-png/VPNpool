@@ -559,6 +559,33 @@ expect_eq "interval stored" "$(uci -q get vpnpool.main.subscription_interval)" 1
 expect_true "crontab rewritten (sched_on changed)" [ -f /etc/crontabs/root ]
 end
 
+# the device details and the client name typed in Settings (common.uc DEV_RE / UA_RE): a quote,
+# a backslash or too long is refused (spaces at the edges are cut, as in every field); real
+# client names pass
+reset_state; daemon_start
+rcall set_config "$(jq -nc --arg m "$(awk 'BEGIN { while (i++ < 65) printf "x" }')" \
+	'{settings:{sub_os:"And\"roid", sub_os_ver:"1\\4", sub_model:$m, sub_ua:"Happ\"1.0"}}')"
+begin "rpcd/set_config/device-and-ua-checked"
+expect_jq "field codes" "$R" '.errors == {sub_os:"bad_device", sub_os_ver:"bad_device", sub_model:"bad_device", sub_ua:"bad_ua"}'
+expect_eq "nothing written" "$(uci -q get vpnpool.main.sub_ua)" ''
+end
+UAL='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+rcall set_config "$(jq -nc --arg ua "$UAL" --arg m "$(awk 'BEGIN { while (i++ < 64) printf "x" }')" \
+	'{settings:{sub_os:"Android", sub_os_ver:"14", sub_model:$m, sub_ua:$ua}}')"
+begin "rpcd/set_config/device-and-ua-accepted"   # positive control of the case above
+expect_jq "saved" "$R" '.ok==true and .code=="saved"'
+expect_eq "stored as typed" "$(uci -q get vpnpool.main.sub_os)/$(uci -q get vpnpool.main.sub_os_ver)/$(uci -q get vpnpool.main.sub_ua)" "Android/14/$UAL"
+rcall status
+expect_jq "status shows them" "$R" ".settings.sub_os==\"Android\" and .settings.sub_ua==\"$UAL\" and (.settings.sub_model|length)==64"
+expect_jq "and the router's own for the empty fields" "$R" '.settings.sub_auto.os=="OpenWrt" and (.settings.sub_auto.ver|length)>0'
+expect_jq "and the list of client names to choose from" "$R" '(.settings.sub_ua_list|length)>1 and .settings.sub_ua_list[0]=="v2rayNG/1.9.5"'
+end
+rcall set_config '{"settings":{"sub_os":"","sub_ua":""}}'
+begin "rpcd/set_config/device-and-ua-cleared"
+expect_jq "saved" "$R" '.ok==true'
+expect_eq "empty again" "$(uci -q get vpnpool.main.sub_os)/$(uci -q get vpnpool.main.sub_ua)" "/"
+end
+
 reset_state; daemon_start; : > "$INITD_LOG"
 rcall set_config '{"settings":{"failover_interval":"90","mode":"exclude","favorites_only":true}}'
 begin "rpcd/set_config/one-signal-only"
@@ -967,6 +994,28 @@ _hw=$(uci -q get vpnpool.main.hwid)
 expect_true "the device ID was made ($_hw)" sh -c 'printf %s "$1" | grep -qE "^[A-Za-z0-9=-]{10,64}$"' _ "$_hw"
 expect_eq "the trial sends it with each try, like fetch.sh (issue #5)" "$(gcount "^GET https://rw.example/api/sub/T	x-hwid: $_hw\$" /tmp/curlmock/headers.log)" 2
 expect_eq "and the system" "$(gcount "^GET https://rw.example/api/sub/T	x-device-os: OpenWrt\$" /tmp/curlmock/headers.log)" 2
+end
+# a client name typed in Settings (sub_ua): the trial and the import dialog's probe use only it
+UA1='Happ/3.5.0 (Linux; arm64)'
+reset_state; daemon_start; mock_on
+uci set "vpnpool.main.sub_ua=$UA1"; uci set vpnpool.main.sub_os=Android; uci commit vpnpool
+mock_rule "GET https://rw.example/api/sub/T @$UA1" 200 "$FXR/links.b64"
+mock_rule 'GET https://rw.example/api/sub/T' 200 "$FXR/xray.json"
+rcall add "$(jarg --arg t "https://rw.example/api/sub/T" '{text:$t}')"
+begin "rpcd/add/url-typed-client-name-only"
+expect_jq "the URL is stored (only that name gets links)" "$R" '.ok==true and .added==1 and .failed==[]'
+expect_eq "one try" "$(mock_calls 'GET https://rw.example/api/sub/T')" 1
+expect_eq "with the whole name" "$(gcount "^GET https://rw.example/api/sub/T	$UA1\$" /tmp/curlmock/ua.log)" 1
+expect_eq "and the system typed" "$(gcount "^GET https://rw.example/api/sub/T	x-device-os: Android\$" /tmp/curlmock/headers.log)" 1
+end
+printf '%s\n%s\n' "$L1" "$L2" > "$FXR/src.txt"
+mock_on; mock_rule "GET https://src.example.com/l @$UA1" 200 "$FXR/src.txt"; mock_rule 'GET https://src.example.com/l' 404
+rm -f /tmp/curlmock/ua.log
+rcall probe_source '{"url":"https://src.example.com/l"}'
+_i=0; while [ $_i -lt 300 ]; do rcall probe_result; printf '%s' "$R" | jq -e '.running==false' >/dev/null 2>&1 && break; msleep 100; _i=$((_i+1)); done
+begin "rpcd/probe_source/typed-client-name-only"
+expect_jq "both nodes listed (only that name gets them)" "$R" '.running==false and .total==2'
+expect_eq "only that name was used" "$(gcount "^GET https://src.example.com/l	$UA1\$" /tmp/curlmock/ua.log)/$(gcount '^GET https://src.example.com/l' /tmp/curlmock/ua.log)" "1/1"
 end
 # one budget for every URL of one add call (LuCI gives up on a call after 20 s): a slow panel
 # that answers each client name in 6 s with nothing usable eats it, the next URL is not tried

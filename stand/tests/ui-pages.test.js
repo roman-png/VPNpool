@@ -262,7 +262,9 @@ function settingsStatus() {
 			telegram_chat: '42', telegram_via_proxy: true, sched_enabled: false, sched_on: '', sched_off: '', sched_refresh: '',
 			failover_interval: 60, failover_tolerance: 50, dead_filter_strikes: 3, dead_filter_tries: 3,
 			subscription_interval: '6h', antidpi: 'off', ipv6: 'block', log_level: 'warn', prefilter_concurrency: 16,
-			sub_hwid: true, hwid: '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0'
+			sub_hwid: true, hwid: '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0',
+			sub_os: '', sub_os_ver: '', sub_model: '', sub_ua: '',
+			sub_auto: { os: 'OpenWrt', ver: '24.10.4', model: 'Cudy TR3000 v1' }, sub_ua_list: [ 'v2rayNG/1.9.5', 'Happ/1.0', 'Mozilla/5.0' ]
 		}
 	};
 }
@@ -313,7 +315,8 @@ function changeAllSettings(P) {
 		'schedule.sched_enabled': '1', 'schedule.sched_on': '07:30', 'schedule.sched_off': '23:15', 'schedule.sched_refresh': '04:00',
 		'adv.failover_interval': '90', 'adv.failover_tolerance': '70', 'adv.dead_filter_strikes': '4', 'adv.dead_filter_tries': '2',
 		'adv.subscription_interval': '12h', 'adv.antidpi': 'aggressive', 'adv.ipv6': 'off', 'adv.log_level': 'info', 'adv.prefilter_concurrency': '8',
-		'adv.hwid': 'MyPhone-0123456789'
+		'adv.hwid': 'MyPhone-0123456789', 'adv.sub_os': 'Android', 'adv.sub_os_ver': '14', 'adv.sub_model': 'Pixel 8 (Pro)',
+		'adv.sub_ua': 'Happ/3.5.0 (Linux; arm64)'
 	};
 	for (const [k, v] of Object.entries(t)) setv(P, k, v);
 }
@@ -322,7 +325,8 @@ const SETTINGS_WANT = {
 	dead_filter: false, killswitch: true, dns_protect: true, telegram_enabled: false, telegram_control: true, telegram_token: SECRET,
 	telegram_chat: '@newchat1', telegram_via_proxy: false, sched_enabled: true, sched_on: '07:30', sched_off: '23:15', sched_refresh: '04:00',
 	failover_interval: 90, failover_tolerance: 70, dead_filter_strikes: 4, dead_filter_tries: 2, subscription_interval: '12h',
-	antidpi: 'aggressive', ipv6: 'off', log_level: 'info', prefilter_concurrency: 8, hwid: 'MyPhone-0123456789'
+	antidpi: 'aggressive', ipv6: 'off', log_level: 'info', prefilter_concurrency: 8, hwid: 'MyPhone-0123456789',
+	sub_os: 'Android', sub_os_ver: '14', sub_model: 'Pixel 8 (Pro)', sub_ua: 'Happ/3.5.0 (Linux; arm64)'
 };
 
 // ---- tests
@@ -629,6 +633,34 @@ test('settings: a wrong device ID stops the save; empty is allowed (a new one is
 	eq(calls(P, 'set_config')[0][1].settings.hwid, '', 'as an empty ID');
 });
 
+test('settings: the system, version, model and app name typed by hand are checked; empty = the router\'s own', async (S) => {
+	const P = await open('settings', S);
+	const sv = P.common.currentForm();
+	const opt = (k) => sv.lookup('adv.' + k)[0];
+	// the empty fields show the router's own details (status settings.sub_auto)
+	eq([ opt('sub_os').placeholder, opt('sub_os_ver').placeholder, opt('sub_model').placeholder ], [ 'OpenWrt', '24.10.4', 'Cudy TR3000 v1' ], 'placeholders');
+	// the app name offers the router's list and takes a name typed by hand
+	eq(opt('sub_ua').keylist, [ 'v2rayNG/1.9.5', 'Happ/1.0', 'Mozilla/5.0' ], 'names offered');
+	// the page's rules are the router's (common.uc DEV_RE / UA_RE)
+	const cu = fs.readFileSync(path.join(path.dirname(APIUC), 'common.uc'), 'utf8');
+	const dev = cu.match(/const DEV_RE = \/(.*)\/;/), ua = cu.match(/const UA_RE = regexp\('(.*)'\);/);
+	ok(dev && ua, 'positive control: the router\'s rules found');
+	const src = P.srcs ? P.srcs.settings : fs.readFileSync(VIEWS.settings, 'utf8');
+	ok(src.includes('/' + dev[1] + '/.test(s)'), 'system / version / model: the same rule as the router');
+	ok(src.includes('/' + ua[1].replace(/\//g, '\\/') + '/.test(s)'), 'app name: the same rule as the router');
+	for (const [ k, bad ] of [ [ 'sub_os', 'And"roid' ], [ 'sub_os_ver', '1\\4' ], [ 'sub_model', 'x'.repeat(65) ], [ 'sub_ua', 'Happ"1.0' ] ]) {
+		setv(P, 'adv.' + k, bad);
+		await clickSave(P);
+		eq(calls(P, 'set_config').length, 0, k + ': a wrong value stops the save');
+		setv(P, 'adv.' + k, '');
+	}
+	setv(P, 'adv.sub_ua', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)');
+	setv(P, 'adv.sub_model', 'x'.repeat(64));
+	await clickSave(P);
+	eq(calls(P, 'set_config').length, 1, 'valid values are sent');
+	eq(calls(P, 'set_config')[0][1].settings.sub_ua, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)', 'the name as typed');
+});
+
 test('settings: backup download and restore (the router checks first, replacing needs a yes)', async (S) => {
 	const bytes = Buffer.from([ 0x1f, 0x8b, 8, 0, 1, 2, 3, 250, 255 ]);
 	let restores = [];
@@ -907,6 +939,14 @@ const MUTATIONS = [
 		[ 'settings: backup download and restore (the router checks first, replacing needs a yes)' ] ],
 	[ 'device ID not checked', 'settings', "\t\to.validate = function(section_id, v) { return (v === '' || /^[A-Za-z0-9=-]{10,64}$/.test(v)) ? true : common.fieldText('bad_hwid'); };", '',
 		[ 'settings: a wrong device ID stops the save; empty is allowed (a new one is made)' ] ],
+	[ 'system / version / model not checked', 'settings', '\t\t\to.validate = devOk;', '',
+		[ 'settings: the system, version, model and app name typed by hand are checked; empty = the router\'s own' ] ],
+	[ 'app name not checked', 'settings', '\t\to.validate = uaOk;', '',
+		[ 'settings: the system, version, model and app name typed by hand are checked; empty = the router\'s own' ] ],
+	[ 'router\'s own details not shown', 'settings', '\t\t\tif (x[2]) o.placeholder = String(x[2]);', '',
+		[ 'settings: the system, version, model and app name typed by hand are checked; empty = the router\'s own' ] ],
+	[ 'app names not offered', 'settings', "\t\t(settings(st).sub_ua_list || []).forEach(function(x) { o.value(String(x), String(x)); });", '',
+		[ 'settings: the system, version, model and app name typed by hand are checked; empty = the router\'s own' ] ],
 	[ 'time not checked', 'settings', '\t\t\to.validate = timeOk;', '',
 		[ 'settings: a wrong time stops the save before anything is sent' ] ],
 	[ 'Revert does nothing', 'common', [ [ '\t\t\trestoreSnap(m, self.snaps[i]);', '' ],

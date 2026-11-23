@@ -54,7 +54,7 @@ function diagFixture(over) {
 		params: { tproxy_port: '1603', test_port: '1605', node_test_port: '1606', fwmark: '0x400000', route_table: '142', route_priority: '106',
 			clash_api: '127.0.0.1:9091', lan_if: 'br-lan', lan_if_auto: true, coexist: 'auto', dns_strategy: 'prefer_ipv4',
 			health_url: 'http://cp.example/' + XSS, fetch_max_kb: '2048', speedtest_min_mem_kb: '8192', prefilter_concurrency: '16',
-			adaptive_max_per_run: '8', singbox_bin: '', log_level: 'warn', probe_ua: '' },
+			adaptive_max_per_run: '8', singbox_bin: '', log_level: 'warn', probe_ua: '', sub_ua: '' },
 		engine: { bin: '/usr/bin/sing-box', version: '1.12.25', present: true, awg: false, awg31: false,
 			awg_engine: { path: '/usr/bin/sing-box-awg', installed: false, version: null, awg: false, awg31: false, ram: null, installed_at: null },
 			target_version: PINNED, update_available: false },
@@ -130,8 +130,8 @@ test('checks, the engine and every technical parameter from diag; foreign values
 	ok(keys.length >= 15, 'positive control: parameters of diag.sh ' + keys.length);
 	const names = Object.values(P).map(r => r.name).filter(Boolean).join(' / ').split(' / ');
 	// on the Settings pages (not technical, no second place): log detail, nodes checked at once;
-	// lan_if_auto is said next to lan_if
-	const elsewhere = [ 'log_level', 'prefilter_concurrency', 'lan_if_auto' ];
+	// lan_if_auto is said next to lan_if; the app name set in Settings replaces the probe_ua row
+	const elsewhere = [ 'log_level', 'prefilter_concurrency', 'lan_if_auto', 'sub_ua' ];
 	eq(keys.filter(k => !elsewhere.includes(k) && !names.includes(k)), [], 'parameters of diag.sh not on the page');
 	// what the Settings page showed before 2.0 ("Technical (read-only)"): only here now
 	for (const k of [ 'tproxy_port', 'fwmark', 'route_table', 'clash_api' ]) ok(names.includes(k), 'moved from Settings: ' + k);
@@ -142,11 +142,20 @@ test('checks, the engine and every technical parameter from diag; foreign values
 	eq(byName.lan_if, 'br-lan (found automatically)', 'LAN interface');
 	eq(byName.health_url, 'http://cp.example/' + XSS, 'foreign value shown as is (text)');
 	eq(byName.singbox_bin, 'chosen automatically', 'empty engine program: said in words');
+	eq(byName.probe_ua, 'the standard list', 'no app name set: the standard list');
 	const E = rowsOf(root.querySelector('.vp-diag-engine'));
 	eq([ E.Version.value, E.Version.name ], [ '1.12.25', '/usr/bin/sing-box' ], 'engine version and program');
 	eq([ E.AmneziaWG.value, kindOf(E.AmneziaWG) ], [ 'needs the engine with AmneziaWG (see below)', 'vp-badge-warn' ], 'AmneziaWG: no engine yet');
 	eq(t.calls('diag').length, 1, 'diag read once');
 	eq(t.env.doc.unsafe, [], 'innerHTML writes');
+});
+
+test('an app name set in Settings is the only one the row names', async (t) => {
+	const root = await open(t, diagFixture((d) => { d.params.sub_ua = 'Happ/3.5.0 (Linux; arm64)'; d.params.probe_ua = 'a/1 b/2'; }));
+	const byName = {};
+	Object.values(rowsOf(root.querySelector('.vp-diag-params'))).forEach(r => { if (r.name) byName[r.name] = r.value; });
+	eq(byName.sub_ua, 'only Happ/3.5.0 (Linux; arm64) (set in Settings)', 'the name set');
+	eq(byName.probe_ua, undefined, 'not the list it replaces');
 });
 
 test('engine: AmneziaWG yes/no and how to install or update, in every case', async (t) => {
@@ -308,6 +317,7 @@ async function run(viewSrc, commonSrc, quiet) {
 }
 
 const MUTATIONS = [
+	{ name: 'the app name set in Settings not said', from: "p.sub_ua ? _('only %s (set in Settings)').format(p.sub_ua)\n\t\t\t\t\t: (p.probe_ua || _('the standard list'))", to: "(p.probe_ua || _('the standard list'))", expect: [ 'an app name set in Settings is the only one the row names' ] },
 	{ name: 'a parameter row dropped', from: "row(_('Mark of the routed traffic'), p.fwmark, 'fwmark'),", to: '', expect: [ 'checks, the engine and every technical parameter from diag; foreign values are text' ] },
 	{ name: 'the log cut to 40 lines', from: 'var LOG_LINES = [ 50, 200, 500 ];\nvar LOG_DEFAULT = 200;', to: 'var LOG_LINES = [ 20, 40 ];\nvar LOG_DEFAULT = 40;', expect: [ 'log: more than 40 lines, filter and count, download of what is shown, source and size, polled' ] },
 	{ name: 'the filter ignored', from: "if (!f) return all;", to: "return all;", expect: [ 'log: more than 40 lines, filter and count, download of what is shown, source and size, polled' ] },
