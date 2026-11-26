@@ -618,8 +618,9 @@ return view.extend({
 		if (g.kind === 'sub') {
 			var s = g.sub;
 			// the same facts as the Overview's subscription cards (one computation: common.subFacts)
-			common.subFacts(s).forEach(function(f) { parts.push({ t: f.t, k: f.k || '' }); });
-			var et = !s.enabled ? _('The subscription is turned off.') : (s.result === 'failed' ? _('The last update failed and there are no nodes from it.') : _('No nodes from this subscription yet.'));
+			var why = '';
+			common.subFacts(s).forEach(function(f) { parts.push({ t: f.t, k: f.k || '', why: f.why || '' }); if (f.why) why = f.why; });
+			var et = !s.enabled ? _('The subscription is turned off.') : (s.result === 'failed' ? _('The last update failed and there are no nodes from it.') + (why ? ' ' + why : '') : _('No nodes from this subscription yet.'));
 			if (G.empty.textContent !== et) G.empty.textContent = et;
 			var on = !!s.enabled;
 			var items = [
@@ -639,7 +640,7 @@ return view.extend({
 			var kids = [];
 			parts.forEach(function(p, i) {
 				if (i) kids.push(' · ');
-				kids.push(E('span', { 'data-kind': p.k || null }, [ p.t ]));
+				kids.push(E('span', { 'data-kind': p.k || null, 'title': p.why || null }, [ p.t ]));
 			});
 			dom.content(G.info, kids);
 		}

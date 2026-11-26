@@ -324,11 +324,11 @@ function sub_uas(u) {
 // { why, http, total?, skipped? }. rc = curl's exit code (the kind of a network failure).
 const CURL_WHY = { '6': 'dns', '7': 'connect', '28': 'timeout', '35': 'tls', '51': 'tls', '53': 'tls',
 	'54': 'tls', '58': 'tls', '59': 'tls', '60': 'tls', '66': 'tls', '77': 'tls', '80': 'tls', '82': 'tls',
-	'83': 'tls', '90': 'tls', '91': 'tls' };
+	'83': 'tls', '90': 'tls', '91': 'tls', '63': 'too_large' };
 // records that are not a node at all: the answer is not a node list
 const NOT_NODE = { not_a_link: 1, not_a_node: 1 };
 // the most telling of several tries (client names) is the one shown
-const WHY_RANK = { all_skipped: 9, not_subscription: 8, empty: 7, http_error: 6, tls: 5, timeout: 4,
+const WHY_RANK = { all_skipped: 9, not_subscription: 8, too_large: 8, empty: 7, http_error: 6, tls: 5, timeout: 4,
 	connect: 3, dns: 2, no_answer: 1 };
 function sub_report(file) {
 	if (!((stat(file)?.size ?? 0) > 0)) return null;
@@ -342,8 +342,11 @@ function sub_report(file) {
 }
 function sub_why(http, rc, rep) {
 	http = trim('' + (http ?? ''));
-	if (!length(http) || http == '000') return { why: CURL_WHY['' + rc] ?? 'no_answer', http: '000' };
+	rc = trim('' + (rc ?? ''));
+	if (!length(http) || http == '000') return { why: CURL_WHY[rc] ?? 'no_answer', http: '000' };
 	if (+http >= 400) return { why: 'http_error', http: http };
+	// an answer that began and broke off (time, size): the failure, not the half of a body
+	if (length(rc) && rc != '0') return { why: CURL_WHY[rc] ?? 'no_answer', http: http };
 	if (type(rep) != 'array' || !length(rep)) return { why: 'empty', http: http };
 	let sk = {}, n = 0;
 	for (let r in rep)

@@ -38,7 +38,9 @@ if (cmd == 'subhdr') {
 	let a = trim('' + (u.get('vpnpool', 'main', 'sub_ua') ?? ''));
 	if (length(a) && match(a, UA_RE)) print(a, '\n');
 } else if (cmd == 'why') {
-	let w = sub_why(ARGV[1], ARGV[2], (ARGV[1] == '000') ? null : sub_report(ARGV[3]));
+	// the parser runs only on an answer that came whole (no network failure, no HTTP error)
+	let whole = ARGV[1] != '000' && +ARGV[1] < 400 && ('' + (ARGV[2] ?? '0')) == '0';
+	let w = sub_why(ARGV[1], ARGV[2], whole ? sub_report(ARGV[3]) : null);
 	let prev = null;
 	if (length(ARGV[4] ?? '')) try { prev = json(readfile(ARGV[4]) ?? ''); } catch (e) { prev = null; }
 	printf('%J\n', sub_why_better(type(prev) == 'object' ? prev : null, w));

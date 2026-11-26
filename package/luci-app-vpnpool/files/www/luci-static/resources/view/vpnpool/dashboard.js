@@ -351,7 +351,7 @@ return view.extend({
 
 	updateSubs: function(subs) {
 		var view = subs.map(function(s) {
-			return { name: s.name || _('Subscription'), facts: common.subFacts(s).map(function(f) { return { t: f.t, k: f.k || '' }; }),
+			return { name: s.name || _('Subscription'), facts: common.subFacts(s).map(function(f) { return { t: f.t, k: f.k || '', why: f.why || '' }; }),
 				nodes: +s.in_pool || 0, total: +s.total || 0, used: +s.used || 0 };
 		});
 		if (!this.changed('subs', view)) return;
@@ -359,7 +359,7 @@ return view.extend({
 			var kids = [];
 			v.facts.forEach(function(f, i) {
 				if (i) kids.push(' · ');
-				kids.push(E('span', { 'data-kind': f.k || null }, [ f.t ]));
+				kids.push(E('span', { 'data-kind': f.k || null, 'title': f.why || null }, [ f.t ]));
 			});
 			var bar = '';
 			if (v.total > 0) {

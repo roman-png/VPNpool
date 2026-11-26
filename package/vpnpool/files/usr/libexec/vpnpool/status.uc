@@ -307,6 +307,8 @@ for (let s in SUBS) {
 		update_interval: m.update_interval ?? null, web_page: (type(m.web_page) == 'string') ? mask_url(m.web_page) : null,
 		updated_at: f.last_ok_at ?? (okm ? okm.mtime : null), last_fetch_at: f.at ?? null,
 		result: f.result ?? null, nodes: f.nodes ?? null,
+		// why the last update gave no nodes (issue #11; fetch.sh -> common.uc sub_why), or null
+		why: (type(f.why) == 'object') ? f.why : null,
 		kind: null
 	};
 	if (primary == null && s.mode == 'all') { primary = e; e.kind = 'primary'; }

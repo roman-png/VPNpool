@@ -181,6 +181,25 @@ test('a poll updates cell by cell: same elements, focus kept, no reordering; gon
 	eq(group(root, 'Picked list').querySelector('.vp-group-empty').hidden, false, 'an empty subscription says so');
 });
 
+test('a failed update of a subscription says why: the empty group, the hint of the part; a saved copy is said too (issue #11)', async (t) => {
+	const why = { why: 'http_error', http: '404' };
+	const root = await open(t, fixture(s => {
+		const p = s.subscriptions.find(x => x.id === 'sub_pick'); p.why = why; p.in_pool = 0;
+		s.nodes = s.nodes.filter(n => n.sub !== 'sub_pick');
+		const m = s.subscriptions.find(x => x.id === 'sub_main'); m.result = 'cached'; m.why = { why: 'connect', http: '000' };
+	}));
+	const W = t.common.whyText;
+	const P = group(root, 'Picked list');
+	ok(!P.querySelector('.vp-group-empty').hidden, 'positive control: the group is empty');
+	eq(P.querySelector('.vp-group-empty').textContent, 'The last update failed and there are no nodes from it. ' + W(why), 'the empty group says why');
+	const failedPart = P.querySelector('.vp-group-info').querySelectorAll('span').find(n => n.textContent === 'the last update failed');
+	ok(failedPart, 'positive control: the part is there');
+	eq(failedPart.getAttribute('title'), W(why), 'its hint is the why');
+	const cachedPart = group(root, 'Main provider').querySelector('.vp-group-info').querySelectorAll('span').find(n => n.textContent === 'the last update failed, nodes from the saved copy');
+	ok(cachedPart, 'a saved copy is said');
+	eq([ cachedPart.getAttribute('data-kind'), cachedPart.getAttribute('title') ], [ 'warn', W({ why: 'connect' }) ], 'as a warning with its why');
+});
+
 async function analyzeWith(t, items, lines) {
 	// the real analyze answers line NUMBERS (no texts): the view numbers the lines itself, after
 	// dropping the blank lines around the paste (as api.uc does)
@@ -642,6 +661,8 @@ const MUTATIONS = [
 	{ name: 'the card computes its own "excluded"', from: "var why = autoPool(st).why(n.id);", to: "var why = (arr(st.auto_member_ids).length && arr(st.auto_member_ids).indexOf(n.id) < 0) ? 'not_member' : autoPool(st).why(n.id);", expect: [ 'automatic choice by the engine\'s rule: a stale member list excludes nobody, "favourites only", the dialog' ] },
 	{ name: 'exclusion written as "everyone but"', from: "common.call('auto_exclude', { id: idOf(n) }", to: "common.call('set_auto_members', { members: autoPool(this.st).participants.filter(function(i) { return i !== n.id; }) }", expect: [ '"⋯" menu: favourites, hide and return, the automatic choice; the menu follows the node', 'only the 2.0 methods: no legacy call, every method known to common.js, no own rpc' ] },
 	{ name: 'a hidden favourite shown twice', from: "return f && f.id && !f.in_pool && !hiddenIds[f.id];", to: "return f && f.id && !f.in_pool;", expect: [ 'a hidden favourite is one card (in "Hidden"), not also "not among the nodes"' ] },
+	{ name: 'group: why of a failed update not in the empty group', from: "_('The last update failed and there are no nodes from it.') + (why ? ' ' + why : '')", to: "_('The last update failed and there are no nodes from it.')", expect: [ 'a failed update of a subscription says why: the empty group, the hint of the part; a saved copy is said too (issue #11)' ] },
+	{ name: 'group: the hint of a part dropped', from: "kids.push(E('span', { 'data-kind': p.k || null, 'title': p.why || null }, [ p.t ]));", to: "kids.push(E('span', { 'data-kind': p.k || null }, [ p.t ]));", expect: [ 'a failed update of a subscription says why: the empty group, the hint of the part; a saved copy is said too (issue #11)' ] },
 	{ name: 'add: why of a failed subscription not said', from: 'f.text || common.whyText(f.why) || common.reasonText(f.reason)', to: 'f.text || common.reasonText(f.reason)', expect: [ '"+ Add" a subscription that gave no nodes says why (issue #11)' ] },
 	{ name: 'pick: why of no nodes not said', from: "if (e instanceof common.Error && e.code === 'fetch_failed' && e.reply && common.whyText(e.reply.why)) return common.whyText(e.reply.why);", to: '', expect: [ 'picking nodes shows only the result of OUR probe; a long list says it is cut' ] },
 	{ name: 'already_running taken as our start', from: "if (r && r.code === 'already_running') throw new common.Error('probe_busy', 'probe_source', r);", to: "", expect: [ 'picking nodes shows only the result of OUR probe; a long list says it is cut' ] },

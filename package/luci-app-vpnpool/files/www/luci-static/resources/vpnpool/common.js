@@ -269,6 +269,7 @@ var WHY_TEXT = {
 	no_answer:        _('The subscription server did not answer.'),
 	http_error:       _('The subscription server answered with error %s. Check the address.'),
 	empty:            _('The subscription server sent an empty answer.'),
+	too_large:        _('The subscription is too large for the router.'),
 	not_subscription: _('The server answered, but not with a list of nodes. Check that this is the address of the subscription.')
 };
 function whyText(w) {
@@ -956,7 +957,8 @@ function failedSites(st, nodes) {
 // whole days until a moment (seconds); negative = it has passed
 function daysLeft(ts) { return Math.floor((ts * 1000 - Date.now()) / 86400000); }
 // What is known about one subscription (a status.uc subscriptions[] entry), as short parts
-// [{ t: text, k: '' | 'warn' | 'error', alert: text for the Overview's alerts or undefined }]:
+// [{ t: text, k: '' | 'warn' | 'error', alert: text for the Overview's alerts or undefined,
+//   why: why a failed update gave no nodes (a hint on the part) or undefined }]:
 // on/off, every node / picked, expiry, the quota left, "updated", a failed update, picked nodes
 // gone from it. The thresholds are the ones the daemon warns at in Telegram (vpnpoold
 // periodic_refresh: quota <= 10 % left), plus an expiry within 7 days.
@@ -982,8 +984,12 @@ function subFacts(s) {
 			alert: (low && s.enabled) ? _('The subscription %s has little traffic left: %s of %s.').format(name, fmtBytes(left), fmtBytes(s.total)) : undefined });
 	}
 	if (s.updated_at) out.push({ t: _('updated %s').format(ago(s.updated_at)) });
-	if (s.result === 'failed') out.push({ t: _('the last update failed'), k: 'error',
-		alert: s.enabled ? _('The subscription %s could not be updated the last time.').format(name) : undefined });
+	// a failed update says why (issue #11: status subscriptions[].why): in the hint of the part, in
+	// the Overview's alert and, with no nodes from it, in the empty group of the Nodes page
+	var why = whyText(s.why);
+	if (s.result === 'failed') out.push({ t: _('the last update failed'), k: 'error', why: why || undefined,
+		alert: s.enabled ? _('The subscription %s could not be updated the last time.').format(name) + (why ? ' ' + why : '') : undefined });
+	else if (s.result === 'cached') out.push({ t: _('the last update failed, nodes from the saved copy'), k: 'warn', why: why || undefined });
 	if (s.pick_missing > 0) out.push({ t: _('picked nodes gone from it: %d').format(s.pick_missing), k: 'warn' });
 	return out;
 }

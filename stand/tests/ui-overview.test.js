@@ -239,6 +239,16 @@ test('alerts in words: failing nodes, engine, set aside, unreadable files, subsc
 	eq(alerts(root), [ '1 node fails the check of the sites (www.youtube.com, chat.example): it is left out of the automatic choice.' ], 'several sites: the strict check over all of them');
 	await poll(t, fixture(s => { s.nodes = []; s.build = { ok: false, error: 'no_nodes', at: SEC }; }));
 	eq(alerts(root), [ 'There is not a single node: the subscriptions could not be downloaded or have no nodes.' ], 'a subscription without nodes');
+	// issue #11: a failed update says why in its alert and in the hint of the card's part; a
+	// saved copy serving is a part of the card (no alert: its nodes still work)
+	await poll(t, fixture(s => {
+		s.subscriptions.push({ id: 'sub_w', name: 'Why', enabled: true, mode: 'all', in_pool: 0, result: 'failed', why: { why: 'tls', http: '000' } });
+		s.subscriptions.push({ id: 'sub_c', name: 'Copy', enabled: true, mode: 'all', in_pool: 2, result: 'cached', why: { why: 'timeout', http: '000' } });
+	}));
+	eq(alerts(root), [ 'The subscription Why could not be updated the last time. ' + t.common.WHY_TEXT.tls ], 'the alert says why; the copy does not warn');
+	const parts = [].concat(...root.querySelectorAll('.vp-ov-sub').map(c => c.querySelectorAll('span')));
+	eq(parts.filter(n => n.textContent === 'the last update failed').map(n => n.getAttribute('title')), [ t.common.WHY_TEXT.tls ], 'failed: the hint');
+	eq(parts.filter(n => n.textContent === 'the last update failed, nodes from the saved copy').map(n => n.getAttribute('title')), [ t.common.WHY_TEXT.timeout ], 'the copy: the hint');
 	await poll(t, fixture(s => { s.nodes = [ { tag: 'Home AWG', id: ID.W, proto: 'awg', deferred: true, reason: 'engine_no_awg', source: 'awg' } ]; }));
 	eq(alerts(root), [ '1 AmneziaWG node waits for the AmneziaWG engine: it starts working once the engine is installed.',
 		'No node can work right now: all nodes are waiting (the reason is shown next to each node).' ], 'only waiting nodes');
@@ -403,6 +413,9 @@ const MUTATIONS = [
 	{ name: 'no node at all said as a failed update', from: "if (b && b.ok === false && b.error === 'no_nodes')", to: "if (false)", expect: [ T_ALERT ] },
 	{ name: 'the failed update of the settings not said', from: "if (b && b.ok === false && b.error", to: "if (false && b.error", expect: [ T_ALERT ] },
 	{ name: 'common: a turned-off subscription warns', file: 'common', from: "alert: (days < 7 && s.enabled) ?", to: "alert: (days < 7) ?", expect: [ T_ALERT ] },
+	{ name: 'common: the why of a failed update not in its alert', file: 'common', from: ".format(name) + (why ? ' ' + why : '') : undefined });", to: ".format(name) : undefined });", expect: [ T_ALERT ] },
+	{ name: 'common: a saved copy serving not said', file: 'common', from: "else if (s.result === 'cached') out.push(", to: "else if (false) out.push(", expect: [ T_ALERT ] },
+	{ name: 'the hint of a card part dropped', from: "kids.push(E('span', { 'data-kind': f.k || null, 'title': f.why || null }, [ f.t ]));", to: "kids.push(E('span', { 'data-kind': f.k || null }, [ f.t ]));", expect: [ T_ALERT ] },
 	{ name: 'common: the quota threshold off', file: 'common', from: "var low = left <= s.total * 0.1;", to: "var low = false;", expect: [ T_ALERT ] },
 	{ name: 'no bar of the traffic left', from: "if (v.total > 0) {\n\t\t\t\tvar pct", to: "if (false) {\n\t\t\t\tvar pct", expect: [ T_SUBS ] },
 	{ name: 'the router shown as an empty name', from: "name: c.self ? _('This router') : (c.host || c.ip || '?')", to: "name: (c.host || c.ip || '?')", expect: [ T_DEV ] },
