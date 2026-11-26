@@ -303,4 +303,33 @@ expect_eq "the list again" "$(mock_calls "GET $PRI")" "$_NUAS"
 expect_eq "not the bad name" "$(gcount 'Bad' /tmp/curlmock/ua.log)" 0
 end
 uci -q delete vpnpool.main.sub_ua; uci commit vpnpool
+
+# ---- issue #11: a failed update says why (fetch_status.json -> status subscriptions[].why) ----
+reset_state; two_subs
+printf '%s\n' "vless://$U@203.0.113.70:443?type=kcp&security=none#K1" "vless://$U@203.0.113.71:443?type=kcp&security=none#K2" | base64 -w0 > "$FXF/kcp.b64"
+mock_on; mock_rule "GET $PRI" 200 "$FXF/kcp.b64"; mock_rule "GET $EXT" 404
+sh "$FETCH" >/dev/null 2>&1
+_fs=$(cat /tmp/vpnpool/fetch_status.json 2>/dev/null)
+rcall status
+begin "fetch/failed-update-says-why"
+expect_jq "nodes the router cannot run, counted" "$_fs" ".[\"$PRI\"] | .result==\"failed\" and .why.why==\"all_skipped\" and .why.total==2 and .why.skipped.unsupported_transport==2"
+expect_jq "an HTTP error with its code" "$_fs" ".[\"$EXT\"] | .result==\"failed\" and .why.why==\"http_error\" and .why.http==\"404\""
+expect_jq "status says it per subscription" "$R" '[.subscriptions[] | .why.why] | sort == ["all_skipped","http_error"]'
+end
+fetch_setup 200 200
+sh "$FETCH" >/dev/null 2>&1
+_fs=$(cat /tmp/vpnpool/fetch_status.json 2>/dev/null)
+begin "fetch/ok-update-no-why"
+expect_jq "fetched: no why" "$_fs" ".[\"$PRI\"] | .result==\"ok\" and .why==null"
+expect_true "no why file left behind" sh -c '! ls /tmp/vpnpool/.why.* >/dev/null 2>&1'
+end
+# the panel not reached (no rule: connection refused), its saved copy serves: cached + why
+mock_on; mock_rule "GET $EXT" 200 "$FXF/extra.txt" "$FXF/extra.hdr"
+sh "$FETCH" >/dev/null 2>&1
+_fs=$(cat /tmp/vpnpool/fetch_status.json 2>/dev/null)
+begin "fetch/cached-update-says-why"
+expect_jq "from the copy, and why" "$_fs" ".[\"$PRI\"] | .result==\"cached\" and .why.why==\"connect\" and .why.http==\"000\""
+expect_eq "pool from the copy (positive control)" "$(pool_tags)" '["Ext1","Pri1","Pri2"]'
+end
+
 if [ -n "$_mdl0" ]; then printf '%s\n' "$_mdl0" > /tmp/sysinfo/model; else rm -f /tmp/sysinfo/model; fi

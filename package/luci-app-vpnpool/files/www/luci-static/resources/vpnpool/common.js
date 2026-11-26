@@ -258,6 +258,36 @@ var REASON_TEXT = {
 	bad_value:              _('A value in the settings is not valid.')
 };
 
+// Why a subscription download gave no nodes (issue #11): the "why" of add failed[] (reason
+// fetch_failed) and of the import dialog's probe result (code no_nodes) — common.uc sub_why.
+// ui-common.test.js checks that every why of the backend has a text here.
+var WHY_TEXT = {
+	dns:              _('The router could not find the subscription server by its name. Check the address.'),
+	connect:          _('The subscription server did not accept the connection. Check the address and the port.'),
+	timeout:          _('The subscription server did not answer in time.'),
+	tls:              _('The secure connection to the subscription server failed: its certificate may be self-signed or expired.'),
+	no_answer:        _('The subscription server did not answer.'),
+	http_error:       _('The subscription server answered with error %s. Check the address.'),
+	empty:            _('The subscription server sent an empty answer.'),
+	too_large:        _('The subscription is too large for the router.'),
+	not_subscription: _('The server answered, but not with a list of nodes. Check that this is the address of the subscription.')
+};
+function whyText(w) {
+	if (!w || typeof w !== 'object' || !w.why) return null;
+	if (w.why === 'all_skipped') {
+		var sk = (w.skipped && typeof w.skipped === 'object') ? w.skipped : {};
+		var parts = Object.keys(sk).sort(function(a, b) { return (+sk[b] || 0) - (+sk[a] || 0); })
+			.map(function(k) { return reasonText(k) + ' (' + (+sk[k] || 0) + ')'; });
+		var t = _('Nodes in the subscription: %d, but the router can use none of them.').format(+w.total || 0);
+		if (parts.length) t += ' ' + parts.join(' ');
+		if (has(sk, 'unsupported_encryption'))
+			t += ' ' + _('In the panel, set the VLESS encryption of this connection to none and add the subscription again.');
+		return t;
+	}
+	if (!has(WHY_TEXT, w.why)) return null;
+	return w.why === 'http_error' ? WHY_TEXT.http_error.format(String(w.http || '')) : WHY_TEXT[w.why];
+}
+
 // Codes of the backend before stage 3 -> today's codes (until every router runs the new one).
 var CODE_ALIAS = {
 	no_tag: 'bad_tag',
@@ -927,7 +957,8 @@ function failedSites(st, nodes) {
 // whole days until a moment (seconds); negative = it has passed
 function daysLeft(ts) { return Math.floor((ts * 1000 - Date.now()) / 86400000); }
 // What is known about one subscription (a status.uc subscriptions[] entry), as short parts
-// [{ t: text, k: '' | 'warn' | 'error', alert: text for the Overview's alerts or undefined }]:
+// [{ t: text, k: '' | 'warn' | 'error', alert: text for the Overview's alerts or undefined,
+//   why: why a failed update gave no nodes (a hint on the part) or undefined }]:
 // on/off, every node / picked, expiry, the quota left, "updated", a failed update, picked nodes
 // gone from it. The thresholds are the ones the daemon warns at in Telegram (vpnpoold
 // periodic_refresh: quota <= 10 % left), plus an expiry within 7 days.
@@ -953,8 +984,12 @@ function subFacts(s) {
 			alert: (low && s.enabled) ? _('The subscription %s has little traffic left: %s of %s.').format(name, fmtBytes(left), fmtBytes(s.total)) : undefined });
 	}
 	if (s.updated_at) out.push({ t: _('updated %s').format(ago(s.updated_at)) });
-	if (s.result === 'failed') out.push({ t: _('the last update failed'), k: 'error',
-		alert: s.enabled ? _('The subscription %s could not be updated the last time.').format(name) : undefined });
+	// a failed update says why (issue #11: status subscriptions[].why): in the hint of the part, in
+	// the Overview's alert and, with no nodes from it, in the empty group of the Nodes page
+	var why = whyText(s.why);
+	if (s.result === 'failed') out.push({ t: _('the last update failed'), k: 'error', why: why || undefined,
+		alert: s.enabled ? _('The subscription %s could not be updated the last time.').format(name) + (why ? ' ' + why : '') : undefined });
+	else if (s.result === 'cached') out.push({ t: _('the last update failed, nodes from the saved copy'), k: 'warn', why: why || undefined });
 	if (s.pick_missing > 0) out.push({ t: _('picked nodes gone from it: %d').format(s.pick_missing), k: 'warn' });
 	return out;
 }
@@ -985,6 +1020,8 @@ return baseclass.extend({
 
 	/** Human text of why a pasted line was not added (analyze / add reasons); unknown -> "could not be read". */
 	reasonText: reasonText,
+	whyText: whyText,
+	WHY_TEXT: WHY_TEXT,
 
 	/** Human text of a field code (errors{field: code}); unknown -> "The value is not valid." */
 	fieldText: fieldText,

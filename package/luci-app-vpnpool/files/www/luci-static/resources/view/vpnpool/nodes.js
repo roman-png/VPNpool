@@ -343,8 +343,10 @@ function probe(url) {
 	});
 }
 function probeError(e) {
-	return (e instanceof common.Error && e.code === 'probe_busy')
-		? _('Another address is being checked right now. Try again when that check ends.') : common.errorText(e);
+	if (e instanceof common.Error && e.code === 'probe_busy') return _('Another address is being checked right now. Try again when that check ends.');
+	// no nodes: why (issue #11, probe.sh -> reply.why)
+	if (e instanceof common.Error && e.code === 'fetch_failed' && e.reply && common.whyText(e.reply.why)) return common.whyText(e.reply.why);
+	return common.errorText(e);
 }
 
 // Which nodes take part in the automatic choice — the ONE place that says it, the way the
@@ -616,8 +618,9 @@ return view.extend({
 		if (g.kind === 'sub') {
 			var s = g.sub;
 			// the same facts as the Overview's subscription cards (one computation: common.subFacts)
-			common.subFacts(s).forEach(function(f) { parts.push({ t: f.t, k: f.k || '' }); });
-			var et = !s.enabled ? _('The subscription is turned off.') : (s.result === 'failed' ? _('The last update failed and there are no nodes from it.') : _('No nodes from this subscription yet.'));
+			var why = '';
+			common.subFacts(s).forEach(function(f) { parts.push({ t: f.t, k: f.k || '', why: f.why || '' }); if (f.why) why = f.why; });
+			var et = !s.enabled ? _('The subscription is turned off.') : (s.result === 'failed' ? _('The last update failed and there are no nodes from it.') + (why ? ' ' + why : '') : _('No nodes from this subscription yet.'));
 			if (G.empty.textContent !== et) G.empty.textContent = et;
 			var on = !!s.enabled;
 			var items = [
@@ -637,7 +640,7 @@ return view.extend({
 			var kids = [];
 			parts.forEach(function(p, i) {
 				if (i) kids.push(' · ');
-				kids.push(E('span', { 'data-kind': p.k || null }, [ p.t ]));
+				kids.push(E('span', { 'data-kind': p.k || null, 'title': p.why || null }, [ p.t ]));
 			});
 			dom.content(G.info, kids);
 		}
@@ -1363,7 +1366,8 @@ return view.extend({
 			if (f) {
 				errLines.push(it.line);
 				dom.content(row.chip, common.badge(_('Not added'), 'error'));
-				row.why.textContent = f.text || common.reasonText(f.reason);
+				// a subscription that gave no nodes says why (issue #11), else the reason's sentence
+				row.why.textContent = f.text || common.whyText(f.why) || common.reasonText(f.reason);
 				if (!row.why.parentNode) row.el.appendChild(row.why);
 			} else if (sent[it.line]) {
 				// the reply counts duplicates found while adding, not per line

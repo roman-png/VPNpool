@@ -97,19 +97,34 @@ hdr_meta() {   # $1 = curl -D header dump
 		   support: ($h["support-url"] // null)}' "$1" 2>/dev/null
 }
 
+fetch_why() {   # $1=http code $2=curl exit code (body: $SB_DATA/b.tmp; the best so far: $WHYF)
+	ucode "$MODEL" why "$1" "$2" "$SB_DATA/b.tmp" "$WHYF" > "$WHYF.new" 2>/dev/null && mv "$WHYF.new" "$WHYF"
+	rm -f "$WHYF.new"
+}
+
+fetch_why_line() {   # $1=sub id -> the why of its failed fetch as one line of JSON (or nothing)
+	tr -d '\n\t' < "$SB_DATA/.why.$1" 2>/dev/null; rm -f "$SB_DATA/.why.$1"
+}
+
 fetch_best() {   # $1=url $2=sub id $3=outfile
 	url="$1"; sid="$2"; outfile="$3"
 	best=-1; bestua=""
 	rm -f "$SB_DATA/.hdr.$sid"
+	# why a try gave no nodes (issue #11, model.uc why: the most telling of all tries) ->
+	# $SB_DATA/.why.$sid, read by fetch_source into fetch_status.json for the UI
+	WHYF="$SB_DATA/.why.$sid"; : > "$WHYF"
 	oifs=$IFS; IFS=$NL; set -f
 	for ua in $UAS; do
 		IFS=$oifs; set +f
-		curl -sfL -K "$SUBHDR" --connect-timeout 5 -m 12 --max-filesize "$MAXB" -A "$ua" -D "$SB_DATA/h.tmp" -o "$SB_DATA/b.tmp" "$url" 2>/dev/null || continue
-		sz=$(wc -c < "$SB_DATA/b.tmp" 2>/dev/null); [ "${sz:-0}" -lt 20 ] && continue
+		rm -f "$SB_DATA/b.tmp"
+		code=$(curl -sfL -K "$SUBHDR" --connect-timeout 5 -m 12 --max-filesize "$MAXB" -A "$ua" -D "$SB_DATA/h.tmp" -o "$SB_DATA/b.tmp" -w '%{http_code}' "$url" 2>/dev/null); rc=$?
+		if [ "$rc" != 0 ]; then fetch_why "${code:-000}" "$rc"; continue; fi
+		sz=$(wc -c < "$SB_DATA/b.tmp" 2>/dev/null); [ "${sz:-0}" -lt 20 ] && { fetch_why "${code:-200}" 0; continue; }
 		# too big to parse safely in RAM (a public list of thousands of nodes on a 16 MB router):
 		# refused like a dead answer — the subscription is served from its own cached copy
 		if [ "${sz:-0}" -gt "$MAXB" ]; then
 			log "fetch: $(mask_url "$url") answered ${sz} bytes, more than the limit ${MAXB} — not used"
+			fetch_why "${code:-200}" 63
 			break
 		fi
 		normalize "$SB_DATA/b.tmp" > "$SB_DATA/n.tmp"
@@ -124,10 +139,12 @@ fetch_best() {   # $1=url $2=sub id $3=outfile
 		# adds load on the provider and slows the fetch). The multi-UA sweep only matters
 		# when the earlier UAs returned nothing; we keep trying until one works, then break.
 		[ "$cnt" -ge 1 ] && break
+		fetch_why "${code:-200}" 0
 	done
 	IFS=$oifs; set +f
 	rm -f "$SB_DATA/h.tmp" "$SB_DATA/b.tmp" "$SB_DATA/n.tmp"
 	if [ "$best" -ge 1 ]; then
+		rm -f "$WHYF"
 		log "fetch: $(mask_url "$url") -> $best nodes (best UA: $bestua)"
 		return 0
 	fi
@@ -165,10 +182,10 @@ fetch_source() {   # $1=url $2=sub id
 		if [ "$age_days" -ge 3 ]; then
 			tg_notify "⚠️ vpnpool: подписка $(mask_url "$1") недоступна, работаю на сохранённой копии (~${age_days} дн.) — узлы могут не работать"
 		fi
-		printf '%s\t%s\tcached\t0\n' "$1" "$2" >> "$FSTAT_TSV"
+		printf '%s\t%s\tcached\t0\t%s\n' "$1" "$2" "$(fetch_why_line "$2")" >> "$FSTAT_TSV"
 		return 1
 	fi
-	printf '%s\t%s\tfailed\t0\n' "$1" "$2" >> "$FSTAT_TSV"
+	printf '%s\t%s\tfailed\t0\t%s\n' "$1" "$2" "$(fetch_why_line "$2")" >> "$FSTAT_TSV"
 	return 1
 }
 
@@ -185,6 +202,7 @@ write_fetch_status() {
 		($prev[0] // {}) as $p
 		| reduce (inputs | split("\t") | select(length >= 4)) as $r (if $keep then $p else {} end;
 			.[$r[0]] = {id: $r[1], at: $at, result: $r[2], nodes: ($r[3] | tonumber? // 0),
+			            why: (($r[4] // "") | if length > 0 then (fromjson? // null) else null end),
 			            last_ok_at: (if $r[2] == "ok" then $at else ($p[$r[0]].last_ok_at // null) end)})' \
 		"$FSTAT_TSV" 2>/dev/null | write_atomic "$FSTAT"
 	rm -f "$FSTAT_TSV"
@@ -223,7 +241,7 @@ on_signal() {
 		printf '%s\t%s\tinterrupted\t0\n' "$url" "$sid" >> "$FSTAT_TSV"
 	done < "$SB_DATA/.subs"
 	write_fetch_status
-	rm -f "$SB_DATA/h.tmp" "$SB_DATA/b.tmp" "$SB_DATA/n.tmp" "$SB_DATA"/.hdr.*
+	rm -f "$SB_DATA/h.tmp" "$SB_DATA/b.tmp" "$SB_DATA/n.tmp" "$SB_DATA"/.hdr.* "$SB_DATA"/.why.*
 	exit 143
 }
 trap on_signal INT TERM HUP

@@ -219,6 +219,10 @@ uci set vpnpool.main.enabled='1'; uci commit vpnpool
 - The system, its version, the device model and the app name (User-Agent) the router sends can be
   typed by hand in **Settings → Advanced**, for a provider that expects a certain device or app;
   empty fields send the router's own details and try the client names in turn
+- A subscription that gives no nodes says why: the server was not reached (name, connection,
+  certificate, timeout), answered an HTTP error, sent an empty answer or a page that is not a node
+  list, or sent nodes the router cannot run (counted by reason, e.g. VLESS encryption); a failed
+  automatic update says the same on the Overview and Nodes pages, also when a saved copy serves
 - One **+ Add** for everything: links, subscription addresses, AmneziaWG `.conf` / `vpn://`, a file or a
   QR picture (decoded in the browser); a preview says per line what will be added and why not
 - A subscription can bring all its nodes or only the ones you pick; each has its own expiry, quota and
