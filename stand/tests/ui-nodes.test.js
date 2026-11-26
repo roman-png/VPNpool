@@ -246,6 +246,25 @@ test('"+ Add": everything fine closes the dialog with the result; "nothing added
 	eq(D.box.querySelectorAll('.vp-field-error-text').length, 0, 'gone after a good check');
 });
 
+test('"+ Add" a subscription that gave no nodes says why (issue #11)', async (t) => {
+	await open(t, fixture());
+	const D = await analyzeWith(t, [ { line: 1, kind: 'subscription_url', status: 'add', name: 'https://a.example/***' },
+		{ line: 2, kind: 'subscription_url', status: 'add', name: 'https://b.example/***' },
+		{ line: 3, kind: 'subscription_url', status: 'add', name: 'https://c.example/***' } ],
+		{ 1: 'https://a.example/x', 2: 'https://b.example/y', 3: 'https://c.example/z' });
+	t.env.handlers.add = () => ({ ok: false, code: 'nothing_added', error: 'nothing_added', daemon: 'n/a', added: 0, dup: 0, failed: [
+		{ line: 1, reason: 'fetch_failed', http: '200', why: { why: 'all_skipped', http: '200', total: 3, skipped: { unsupported_encryption: 1, unsupported_transport: 2 } } },
+		{ line: 2, reason: 'fetch_failed', http: '404', why: { why: 'http_error', http: '404' } },
+		{ line: 3, reason: 'fetch_failed', http: '000' } ] });
+	click(t, D.addBtn); await settle(t);
+	const R = t.common.REASON_TEXT;
+	const w = rowsOf(D).map(r => (r.querySelector('.vp-add-why') || {}).textContent);
+	eq(w[0], 'Nodes in the subscription: 3, but the router can use none of them. ' + R.unsupported_transport + ' (2) ' + R.unsupported_encryption
+		+ ' (1) In the panel, set the VLESS encryption of this connection to none and add the subscription again.', 'nodes the router cannot run, most first');
+	eq(w[1], 'The subscription server answered with error 404. Check the address.', 'an HTTP error with its code');
+	eq(w[2], t.common.CODE_TEXT.fetch_failed, 'an older router (no why): the general sentence');
+});
+
 test('"+ Add" a subscription address: pick nodes -> add with mode pick and the picked ids', async (t) => {
 	await open(t, fixture());
 	const D = await analyzeWith(t, [ { line: 1, kind: 'subscription_url', status: 'add', name: 'https://sub.example/***' } ], { 1: 'https://sub.example/abc' });
@@ -571,6 +590,13 @@ test('picking nodes shows only the result of OUR probe; a long list says it is c
 	clickMenu(t, acts, 'Pick nodes…'); await t.env.tick(5000);
 	eq(modal(t).querySelectorAll('.vp-pick-item').length, 3, 'positive control: our result shown ("every node" + 2)');
 	eq(modal(t).querySelector('.vp-pick-capped').textContent, 'Shown: the first 2 of 512 nodes.', 'the cut is said');
+	// ours, no nodes: why (issue #11)
+	t.env.handlers.probe_result = () => ({ ok: false, code: 'no_nodes', error: 'no_nodes', running: false, job: 'ours', nodes: [], why: { why: 'tls', http: '000' } });
+	clickMenu(t, acts, 'Pick nodes…'); await t.env.tick(5000);
+	eq(modal(t).querySelector('.vp-pick-box').querySelector('.vp-nodes-err').textContent, t.common.WHY_TEXT.tls, 'no nodes: why');
+	t.env.handlers.probe_result = () => ({ ok: false, code: 'no_nodes', error: 'no_nodes', running: false, job: 'ours', nodes: [] });
+	clickMenu(t, acts, 'Pick nodes…'); await t.env.tick(5000);
+	eq(modal(t).querySelector('.vp-pick-box').querySelector('.vp-nodes-err').textContent, t.common.CODE_TEXT.fetch_failed, 'an older router: the general sentence');
 });
 
 test('only the 2.0 methods: no legacy call, every method known to common.js, no own rpc', async (t) => {
@@ -616,6 +642,8 @@ const MUTATIONS = [
 	{ name: 'the card computes its own "excluded"', from: "var why = autoPool(st).why(n.id);", to: "var why = (arr(st.auto_member_ids).length && arr(st.auto_member_ids).indexOf(n.id) < 0) ? 'not_member' : autoPool(st).why(n.id);", expect: [ 'automatic choice by the engine\'s rule: a stale member list excludes nobody, "favourites only", the dialog' ] },
 	{ name: 'exclusion written as "everyone but"', from: "common.call('auto_exclude', { id: idOf(n) }", to: "common.call('set_auto_members', { members: autoPool(this.st).participants.filter(function(i) { return i !== n.id; }) }", expect: [ '"⋯" menu: favourites, hide and return, the automatic choice; the menu follows the node', 'only the 2.0 methods: no legacy call, every method known to common.js, no own rpc' ] },
 	{ name: 'a hidden favourite shown twice', from: "return f && f.id && !f.in_pool && !hiddenIds[f.id];", to: "return f && f.id && !f.in_pool;", expect: [ 'a hidden favourite is one card (in "Hidden"), not also "not among the nodes"' ] },
+	{ name: 'add: why of a failed subscription not said', from: 'f.text || common.whyText(f.why) || common.reasonText(f.reason)', to: 'f.text || common.reasonText(f.reason)', expect: [ '"+ Add" a subscription that gave no nodes says why (issue #11)' ] },
+	{ name: 'pick: why of no nodes not said', from: "if (e instanceof common.Error && e.code === 'fetch_failed' && e.reply && common.whyText(e.reply.why)) return common.whyText(e.reply.why);", to: '', expect: [ 'picking nodes shows only the result of OUR probe; a long list says it is cut' ] },
 	{ name: 'already_running taken as our start', from: "if (r && r.code === 'already_running') throw new common.Error('probe_busy', 'probe_source', r);", to: "", expect: [ 'picking nodes shows only the result of OUR probe; a long list says it is cut' ] },
 	{ name: 'the probe job not compared', from: "if (job != null && (!res || res.job !== job))", to: "if (false)", expect: [ 'picking nodes shows only the result of OUR probe; a long list says it is cut' ] },
 	{ name: 'a cut list not said', from: "var capped = !!(res && res.capped && res.total > nodes.length);", to: "var capped = false;", expect: [ 'picking nodes shows only the result of OUR probe; a long list says it is cut' ] },

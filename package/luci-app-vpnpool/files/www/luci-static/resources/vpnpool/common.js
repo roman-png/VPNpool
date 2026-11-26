@@ -258,6 +258,35 @@ var REASON_TEXT = {
 	bad_value:              _('A value in the settings is not valid.')
 };
 
+// Why a subscription download gave no nodes (issue #11): the "why" of add failed[] (reason
+// fetch_failed) and of the import dialog's probe result (code no_nodes) — common.uc sub_why.
+// ui-common.test.js checks that every why of the backend has a text here.
+var WHY_TEXT = {
+	dns:              _('The router could not find the subscription server by its name. Check the address.'),
+	connect:          _('The subscription server did not accept the connection. Check the address and the port.'),
+	timeout:          _('The subscription server did not answer in time.'),
+	tls:              _('The secure connection to the subscription server failed: its certificate may be self-signed or expired.'),
+	no_answer:        _('The subscription server did not answer.'),
+	http_error:       _('The subscription server answered with error %s. Check the address.'),
+	empty:            _('The subscription server sent an empty answer.'),
+	not_subscription: _('The server answered, but not with a list of nodes. Check that this is the address of the subscription.')
+};
+function whyText(w) {
+	if (!w || typeof w !== 'object' || !w.why) return null;
+	if (w.why === 'all_skipped') {
+		var sk = (w.skipped && typeof w.skipped === 'object') ? w.skipped : {};
+		var parts = Object.keys(sk).sort(function(a, b) { return (+sk[b] || 0) - (+sk[a] || 0); })
+			.map(function(k) { return reasonText(k) + ' (' + (+sk[k] || 0) + ')'; });
+		var t = _('Nodes in the subscription: %d, but the router can use none of them.').format(+w.total || 0);
+		if (parts.length) t += ' ' + parts.join(' ');
+		if (has(sk, 'unsupported_encryption'))
+			t += ' ' + _('In the panel, set the VLESS encryption of this connection to none and add the subscription again.');
+		return t;
+	}
+	if (!has(WHY_TEXT, w.why)) return null;
+	return w.why === 'http_error' ? WHY_TEXT.http_error.format(String(w.http || '')) : WHY_TEXT[w.why];
+}
+
 // Codes of the backend before stage 3 -> today's codes (until every router runs the new one).
 var CODE_ALIAS = {
 	no_tag: 'bad_tag',
@@ -985,6 +1014,8 @@ return baseclass.extend({
 
 	/** Human text of why a pasted line was not added (analyze / add reasons); unknown -> "could not be read". */
 	reasonText: reasonText,
+	whyText: whyText,
+	WHY_TEXT: WHY_TEXT,
 
 	/** Human text of a field code (errors{field: code}); unknown -> "The value is not valid." */
 	fieldText: fieldText,

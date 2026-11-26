@@ -6,6 +6,9 @@
 //   ucode model.uc uas                     the client names (User-Agents) of a subscription download, one
 //                                          per line, in order (common.uc sub_uas)
 //   ucode model.uc ua                      the client name set in Settings (uci sub_ua), or nothing
+//   ucode model.uc why <http> <rc> <body> [<prev>]  why a download gave no nodes (issue #11; common.uc
+//                                          sub_why) as JSON; with <prev> (a file of an earlier
+//                                          answer of this command) the more telling of the two
 //   ucode model.uc pick <sub id>           the ids a "pick" subscription takes, one per line
 //   ucode model.uc hidden                  the ids the user hid, one per line
 //   ucode model.uc fav-active <links> <json>  the favourites that join the pool from the archive
@@ -17,9 +20,10 @@
 //                                          own favourites are never touched)
 'use strict';
 
-import { writefile, stdin } from 'fs';
+import { writefile, stdin, readfile } from 'fs';
 import { cursor } from 'uci';
-import { as_list, is_id, subs_of, fav_read, fav_write, live_nodes, node_lookup, link_of, sub_headers, sub_uas, UA_RE } from './common.uc';
+import { as_list, is_id, subs_of, fav_read, fav_write, live_nodes, node_lookup, link_of, sub_headers, sub_uas, UA_RE,
+	sub_report, sub_why, sub_why_better } from './common.uc';
 
 let cmd = ARGV[0];
 let u = cursor();
@@ -33,6 +37,11 @@ if (cmd == 'subhdr') {
 } else if (cmd == 'ua') {
 	let a = trim('' + (u.get('vpnpool', 'main', 'sub_ua') ?? ''));
 	if (length(a) && match(a, UA_RE)) print(a, '\n');
+} else if (cmd == 'why') {
+	let w = sub_why(ARGV[1], ARGV[2], (ARGV[1] == '000') ? null : sub_report(ARGV[3]));
+	let prev = null;
+	if (length(ARGV[4] ?? '')) try { prev = json(readfile(ARGV[4]) ?? ''); } catch (e) { prev = null; }
+	printf('%J\n', sub_why_better(type(prev) == 'object' ? prev : null, w));
 } else if (cmd == 'subs') {
 	for (let s in subs_of(u))
 		if (length(s.url)) printf('%s\t%s\t%s\t%s\n', s.id, s.enabled ? '1' : '0', s.mode, s.url);

@@ -15,6 +15,9 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+// LuCI's String.prototype.format (%s, %d) for common.js texts with a value (whyText)
+if (!String.prototype.format)
+	String.prototype.format = function() { let i = 0; const a = arguments; return this.replace(/%[sd]/g, (m) => { const v = a[i++]; return m === '%d' ? String(parseInt(v, 10)) : String(v); }); };
 
 const REPO = process.env.REPO_DIR || path.resolve(__dirname, '../..');
 const APP = path.join(REPO, 'package/luci-app-vpnpool');
@@ -478,6 +481,21 @@ test('every reason the backend gives for a pasted line has a human text', async 
 	eq(C.reasonText('no_such_reason_x'), C.REASON_TEXT.parse_error, 'unknown reason -> "could not be read"');
 	eq(C.reasonText('exists'), C.REASON_TEXT.exists, 'own reason text first');
 	eq(C.reasonText('fetch_failed'), C.CODE_TEXT.fetch_failed, 'then the code text');
+});
+// issue #11: why a subscription gave no nodes (common.uc sub_why / WHY_RANK) -> a text for each
+test('every why of a subscription with no nodes has a human text', async (C) => {
+	const cu = fs.readFileSync(path.join(path.dirname(APIUC), 'common.uc'), 'utf8');
+	const m = cu.match(/const WHY_RANK = \{([\s\S]*?)\};/);
+	ok(m, 'positive control: WHY_RANK found in common.uc');
+	const whys = [ ...m[1].matchAll(/([a-z_]+):\s*[0-9]+/g) ].map(x => x[1]);
+	ok(whys.length >= 8, 'positive control: whys ' + whys.length);
+	const miss = whys.filter(w => w !== 'all_skipped' && !C.WHY_TEXT[w]);
+	eq(miss, [], 'whys without a text');
+	for (const w of whys) ok(typeof C.whyText({ why: w, http: '404', total: 2, skipped: { unsupported_flow: 2 } }) === 'string', 'text for ' + w);
+	eq(C.whyText({ why: 'http_error', http: '403' }), 'The subscription server answered with error 403. Check the address.', 'the code goes into the text');
+	eq(C.whyText({ why: 'all_skipped', total: 2, skipped: { unsupported_flow: 2 } }),
+		'Nodes in the subscription: 2, but the router can use none of them. ' + C.REASON_TEXT.unsupported_flow + ' (2)', 'reasons counted, no panel hint without encryption');
+	eq([ C.whyText(null), C.whyText({}), C.whyText({ why: 'no_such_why' }) ], [ null, null, null ], 'nothing to say: null (the caller says the general sentence)');
 });
 test('every rpcd method and every ACL method is declared in METHODS with the same arguments', async (C) => {
 	const listed = backendList();

@@ -42,20 +42,32 @@ normalize() {
 ucode /usr/libexec/vpnpool/model.uc subhdr > "$P/hdr" 2>/dev/null || : > "$P/hdr"
 
 # fetch with each UA, keep the decoded text that yields the most nodes
-best=-1
+# A try that gives no nodes says why (issue #11: model.uc why — the panel not reached and how,
+# an HTTP error, an empty answer, not a node list, nodes the router cannot run); the most
+# telling one of all tries goes into the answer.
+best=-1; : > "$P/why"
+why() { ucode /usr/libexec/vpnpool/model.uc why "$1" "$2" "$P/raw" "$P/why" > "$P/why.new" 2>/dev/null && mv "$P/why.new" "$P/why"; }
 oifs=$IFS; IFS=$NL; set -f
 for ua in $UAS; do
 	IFS=$oifs; set +f
-	curl -sfL -K "$P/hdr" --connect-timeout 4 -m 10 -A "$ua" -o "$P/raw" "$URL" 2>/dev/null || continue
-	[ "$(wc -c < "$P/raw" 2>/dev/null || echo 0)" -ge 20 ] || continue
+	rm -f "$P/raw"
+	code=$(curl -sfL -K "$P/hdr" --connect-timeout 4 -m 10 -A "$ua" -o "$P/raw" -w '%{http_code}' "$URL" 2>/dev/null); rc=$?
+	if [ "$rc" != 0 ]; then why "${code:-000}" "$rc"; continue; fi
+	if [ "$(wc -c < "$P/raw" 2>/dev/null || echo 0)" -lt 20 ]; then why "${code:-200}" 0; continue; fi
 	normalize "$P/raw" > "$P/txt"
 	cnt=$(ucode /usr/libexec/vpnpool/parser.uc --keep-link "$P/txt" 2>/dev/null | jq 'length' 2>/dev/null)
 	[ -n "$cnt" ] || cnt=0
 	if [ "$cnt" -gt "$best" ]; then best="$cnt"; cp "$P/txt" "$P/best"; fi
+	[ "$cnt" -ge 1 ] || why "${code:-200}" 0
 	[ "$best" -ge 1 ] && break   # first UA that yields nodes is good enough — keep it fast
 done
 IFS=$oifs; set +f
-[ "$best" -ge 1 ] || { echo '{"ok":false,"code":"no_nodes","error":"no_nodes","total":0,"capped":false,"shown":0,"nodes":[]}'; exit 0; }
+if [ "$best" -lt 1 ]; then
+	w=$(cat "$P/why" 2>/dev/null); [ -n "$w" ] || w=null
+	printf '%s' "$w" | jq -c '{ok:false, code:"no_nodes", error:"no_nodes", total:0, capped:false, shown:0, nodes:[], why:(if type=="object" then . else null end)}' 2>/dev/null \
+		|| echo '{"ok":false,"code":"no_nodes","error":"no_nodes","total":0,"capped":false,"shown":0,"nodes":[]}'
+	exit 0
+fi
 
 ucode /usr/libexec/vpnpool/parser.uc --keep-link --with-id "$P/best" 2>/dev/null > "$P/nodes.json"
 TOTAL=$(jq 'length' "$P/nodes.json" 2>/dev/null); [ -n "$TOTAL" ] || TOTAL=0

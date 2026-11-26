@@ -55,7 +55,7 @@ import { cursor } from 'uci';
 import { rand } from 'math';
 import { VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list, engine_select,
 	SCHEMA as DATA_SCHEMA, is_id, subs_of, sub_name_for, fav_read, fav_write, live_nodes, node_lookup, link_of,
-	HWID_RE, DEV_RE, UA_RE, sub_headers, sub_uas } from './common.uc';
+	HWID_RE, DEV_RE, UA_RE, sub_headers, sub_uas, sub_report, sub_why, sub_why_better } from './common.uc';
 
 const SB = '/tmp/vpnpool';
 const PARSER = '/usr/libexec/vpnpool/parser.uc';
@@ -982,25 +982,30 @@ function sub_probe(url, deadline) {
 	let uas = sub_uas(cursor());
 	// the device headers, as fetch.sh sends them (issue #5)
 	let hdr = join('', map(sub_headers(cursor()), (h) => ' -H ' + sq(h)));
-	let http = '000', n = 0, tried = 0;
+	let http = '000', n = 0, tried = 0, why = null;
 	for (let ua in uas) {
 		let left = deadline - time();
 		if (!length(ua) || left < SUB_PROBE_MIN) break;
 		unlink(f);
 		tried++;
-		let h = trim(run(sprintf("curl -sfL%s --connect-timeout %d -m %d -A %s -o %s -w '%%{http_code}' %s 2>/dev/null",
-			hdr, min(4, left), min(8, left), sq(ua), sq(f), sq(url))));
-		http = length(h) ? h : '000';
-		if (http == '000' || substr(http, 0, 1) == '5') break;
+		// "<http code> <curl exit code>": the exit code tells a name / connect / TLS / time failure
+		let o = split(trim(run(sprintf("curl -sfL%s --connect-timeout %d -m %d -A %s -o %s -w '%%{http_code}' %s 2>/dev/null; printf ' %%s' $?",
+			hdr, min(4, left), min(8, left), sq(ua), sq(f), sq(url)))), ' ');
+		http = length(o[0]) ? o[0] : '000';
+		let rc = (length(o) > 1) ? o[length(o) - 1] : '';
+		if (length(o) == 1) { rc = o[0]; http = '000'; }   // no code printed at all
+		if (http == '000' || substr(http, 0, 1) == '5') { why = sub_why_better(why, sub_why(http, rc, null)); break; }
 		if ((stat(f)?.size ?? 0) > 0) {
 			let v = null;
 			try { v = json(run(sprintf('ucode %s %s 2>/dev/null', PARSER, sq(f)))); } catch (e) { v = null; }
 			if (type(v) == 'array') n = length(v);
 		}
 		if (n > 0) break;
+		// no nodes from this client name: why (the parser's report of what came)
+		why = sub_why_better(why, sub_why(http, rc, sub_report(f)));
 	}
 	unlink(f);
-	return { n: n, http: http, tried: tried };
+	return { n: n, http: http, tried: tried, why: (n > 0) ? null : why };
 }
 
 function add(input) {
@@ -1051,7 +1056,13 @@ function add(input) {
 			let pr = sub_probe(line, probe_by);
 			push(probes, { line: it.line, fetched: pr.n, http: pr.http });
 			if (!pr.tried) { push(failed, { line: it.line, reason: 'probe_no_time' }); continue; }
-			if (pr.n < 1) { push(failed, { line: it.line, reason: 'fetch_failed', http: pr.http }); continue; }
+			if (pr.n < 1) {
+				// why (issue #11): the dialog says it instead of one sentence for every case
+				let fl = { line: it.line, reason: 'fetch_failed', http: pr.http };
+				if (pr.why) fl.why = pr.why;
+				push(failed, fl);
+				continue;
+			}
 			push(addurls, line); acts[sub_on ? 'USR2' : 'none'] = true;
 		} else if (it.kind == 'link') { push(addlinks, line); acts.USR1 = true; }
 		else if (it.kind == 'awg' && AN.confs['' + it.line]) {

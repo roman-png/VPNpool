@@ -974,9 +974,51 @@ reset_state; daemon_start; mock_on; mock_rule 'GET https://dead.example.com/s' 5
 rcall add "$(jarg --arg t "$L1
 https://dead.example.com/s" '{text:$t}')"
 begin "rpcd/add/url-without-nodes-not-stored"
-expect_jq "the link added, the URL failed with fetch_failed" "$R" '.ok==true and .added==1 and .failed==[{line:2,reason:"fetch_failed",http:"500"}]'
+expect_jq "the link added, the URL failed with fetch_failed" "$R" '.ok==true and .added==1 and .failed==[{line:2,reason:"fetch_failed",http:"500",why:{why:"http_error",http:"500"}}]'
 expect_eq "no subscription" "$(subs_tsv)" ''
 expect_eq "the trial download happened" "$(mock_calls 'GET https://dead.example.com/s')" 1
+end
+# issue #11: a trial download that gives no nodes says WHY (common.uc sub_why), one case per kind.
+# One client name (sub_ua) so each URL is one try; the ranking of several tries is the next case.
+WU=9c5b7d60-86ba-4f6f-9f81-29e9afb0c5ce; WK=Q2VHx8nZpXbq3m0ZJ6wP0v4rA1bC2dE3fG4hI5jK6lM
+printf '%s\n' "vless://$WU@203.0.113.10:443?type=tcp&encryption=mlkem768x25519plus.native.0rtt.AAAA&security=reality&pbk=$WK&sni=a.example&sid=ab12#a" \
+	"vless://$WU@203.0.113.11:443?type=kcp&security=none#b" "vless://$WU@203.0.113.12:443?type=kcp&security=none#c" | base64 -w0 > "$FXR/skip.b64"
+printf '<html><body>Not a subscription</body></html>\n' > "$FXR/page.html"
+: > "$FXR/empty.txt"
+reset_state; daemon_start; mock_on
+uci set vpnpool.main.sub_ua=OneApp/1.0; uci commit vpnpool
+mock_rule 'GET https://w.example/skip' 200 "$FXR/skip.b64"
+mock_rule 'GET https://w.example/page' 200 "$FXR/page.html"
+mock_rule 'GET https://w.example/empty' 200 "$FXR/empty.txt"
+mock_rule 'GET https://w.example/gone' 404
+mock_rule 'GET https://w.example/slow' 200 "$FXR/skip.b64" - 0.010 9
+why_of() { rcall add "$(jarg --arg t "$1" '{text:$t}')"; printf '%s' "$R" | jq -c '.failed[0].why'; }
+begin "rpcd/add/fetch-failed-says-why"
+expect_jq "nodes the router cannot run: counted by reason" "$(why_of https://w.example/skip)" \
+	'.why=="all_skipped" and .http=="200" and .total==3 and .skipped=={unsupported_encryption:1, unsupported_transport:2}'
+expect_jq "a web page: not a node list" "$(why_of https://w.example/page)" '.why=="not_subscription" and .http=="200"'
+expect_jq "an empty answer" "$(why_of https://w.example/empty)" '.why=="empty"'
+expect_jq "an HTTP error with its code" "$(why_of https://w.example/gone)" '.why=="http_error" and .http=="404"'
+expect_jq "no connection (curl exit 7)" "$(why_of https://w.example/down)" '.why=="connect" and .http=="000"'
+expect_jq "no answer in time (curl exit 28)" "$(why_of https://w.example/slow)" '.why=="timeout"'
+expect_eq "nothing stored" "$(subs_tsv)" ''
+end
+# several client names: the most telling answer is the one said (a web page to one name beats
+# a 404 to the others)
+uci -q delete vpnpool.main.sub_ua; uci commit vpnpool
+mock_on; mock_rule 'GET https://w.example/mixed @v2rayNG*' 200 "$FXR/page.html"; mock_rule 'GET https://w.example/mixed' 404
+begin "rpcd/add/fetch-failed-why-most-telling-try"
+expect_jq "not a node list, not the 404 of the later tries" "$(why_of https://w.example/mixed)" '.why=="not_subscription"'
+expect_true "control: several names were tried" [ "$(mock_calls 'GET https://w.example/mixed')" -gt 1 ]
+end
+# the import dialog's probe says why too (probe.sh -> probe_result.why)
+mock_on; mock_rule 'GET https://w.example/skip' 200 "$FXR/skip.b64"; mock_rule 'GET https://w.example/gone' 404
+probe_wait() { rcall probe_source "$(jarg --arg u "$1" '{url:$u}')"; _i=0; while [ $_i -lt 300 ]; do rcall probe_result; printf '%s' "$R" | jq -e '.running==false' >/dev/null 2>&1 && break; msleep 100; _i=$((_i+1)); done; }
+probe_wait https://w.example/skip
+begin "rpcd/probe_source/no-nodes-says-why"
+expect_jq "nodes the router cannot run" "$R" '.code=="no_nodes" and .why.why=="all_skipped" and .why.total==3 and .why.skipped.unsupported_encryption==1'
+probe_wait https://w.example/gone
+expect_jq "an HTTP error with its code" "$R" '.code=="no_nodes" and .why.why=="http_error" and .why.http=="404"'
 end
 # a panel that answers the first client name with xray JSON (Remnawave to v2rayNG) and a later
 # one with links: the trial tries the client names like fetch.sh, the URL is stored

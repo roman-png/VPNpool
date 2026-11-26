@@ -192,8 +192,8 @@ msgid "Paste a subscription address, a node link or AmneziaWG settings on the No
 msgstr "Вставьте адрес подписки, ссылку на узел или настройки AmneziaWG на вкладке «Узлы». VPN заработает, как только появится узел."
 
 #: files/www/luci-static/resources/view/vpnpool/dashboard.js:205
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:438
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:456
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:440
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:458
 msgid "+ Add"
 msgstr "+ Добавить"
 
@@ -218,8 +218,8 @@ msgid "Speed"
 msgstr "Скорость"
 
 #: files/www/luci-static/resources/view/vpnpool/dashboard.js:224
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:449
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:756
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:451
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:758
 msgid "Back to automatic choice"
 msgstr "Вернуть автовыбор"
 
@@ -270,12 +270,12 @@ msgid "↓ %s ↑ %s · connections: %d"
 msgstr "↓ %s ↑ %s · соединений: %d"
 
 #: files/www/luci-static/resources/view/vpnpool/dashboard.js:333
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:560
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:562
 msgid "Chosen by you: %s. It is not among the nodes now, so the automatic choice works."
 msgstr "Выбран вами: %s. Сейчас его нет среди узлов, поэтому работает автовыбор."
 
 #: files/www/luci-static/resources/view/vpnpool/dashboard.js:334
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:561
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:563
 msgid "Connected to %s: chosen by you. If it stops working, the automatic choice takes over until it is back."
 msgstr "Подключён к %s — выбран вами. Если он перестанет работать, автовыбор подменит его, пока он не вернётся."
 
@@ -284,8 +284,8 @@ msgid "Automatic choice: the best working node is used."
 msgstr "Автовыбор: используется лучший рабочий узел."
 
 #: files/www/luci-static/resources/view/vpnpool/dashboard.js:354
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:413
-#: files/www/luci-static/resources/vpnpool/common.js:937
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:415
+#: files/www/luci-static/resources/vpnpool/common.js:966
 msgid "Subscription"
 msgstr "Подписка"
 
@@ -627,7 +627,7 @@ msgid "Refresh"
 msgstr "Обновить"
 
 #: files/www/luci-static/resources/view/vpnpool/diagnostics.js:215
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1066
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1068
 msgid "Download"
 msgstr "Скачать"
 
@@ -768,718 +768,718 @@ msgstr "Снять все"
 msgid "No nodes were found at this address."
 msgstr "По этому адресу узлов не нашлось."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:347
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:346
 msgid "Another address is being checked right now. Try again when that check ends."
 msgstr "Сейчас проверяется другой адрес. Попробуйте, когда эта проверка закончится."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:415
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1083
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:417
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1085
 msgid "My nodes"
 msgstr "Мои узлы"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:416
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:418
 msgid "Favourites no subscription has"
 msgstr "Избранное — нет в подписке"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:417
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:419
 msgid "Hidden"
 msgstr "Скрытые"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:439
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:550
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:441
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:552
 msgid "Check ping"
 msgstr "Проверить пинг"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:440
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:553
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:442
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:555
 msgid "Update subscriptions"
 msgstr "Обновить подписки"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:441
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:441
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:443
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:443
 msgid "Search by name or server"
 msgstr "Поиск по имени или серверу"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:444
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:446
 msgid "Which nodes take part in the automatic choice…"
 msgstr "Какие узлы участвуют в автовыборе…"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:445
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:447
 msgid "Export nodes…"
 msgstr "Выгрузить узлы…"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:446
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:656
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:768
-#: files/www/luci-static/resources/vpnpool/common.js:1262
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:448
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:658
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:770
+#: files/www/luci-static/resources/vpnpool/common.js:1293
 msgid "More actions"
 msgstr "Ещё действия"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:454
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:456
 msgid "No nodes yet"
 msgstr "Узлов пока нет"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:455
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:457
 msgid "Add a subscription or a node: paste a link, a subscription address or AmneziaWG settings."
 msgstr "Добавьте подписку или узел: вставьте ссылку, адрес подписки или настройки AmneziaWG."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:462
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:738
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:464
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:740
 msgid "Add to favourites"
 msgstr "В избранное"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:463
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:748
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:465
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:750
 msgid "Hide"
 msgstr "Скрыть"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:464
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:698
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:750
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:951
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:968
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1137
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:466
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:700
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:752
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:953
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:970
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1139
 msgid "Delete"
 msgstr "Удалить"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:465
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:467
 msgid "Clear the selection"
 msgstr "Снять выделение"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:466
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:468
 msgid "Actions with the selected nodes"
 msgstr "Действия с выбранными узлами"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:470
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:472
 msgid "VPN Pool — Nodes"
 msgstr "VPN Pool — Узлы"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:550
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:552
 msgid "Checking… %d of %d"
 msgstr "Проверка… %d из %d"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:550
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:552
 msgid "Checking…"
 msgstr "Проверка…"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:553
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:555
 msgid "Updating…"
 msgstr "Обновление…"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:564
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:566
 msgid "Automatic choice: now %s."
 msgstr "Автовыбор: сейчас %s."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:564
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:566
 msgid "Automatic choice."
 msgstr "Автовыбор."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:570
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:572
 msgid "VPN is off: the delays and states of the nodes are not checked now."
 msgstr "VPN выключен: задержки и состояние узлов сейчас не проверяются."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:571
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:573
 msgid "The service is not running: the delays and states of the nodes are not checked now."
 msgstr "Служба не запущена: задержки и состояние узлов сейчас не проверяются."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:590
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:592
 msgid "Update"
 msgstr "Обновить"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:613
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1071
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:615
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1073
 msgid "%d node"
 msgid_plural "%d nodes"
 msgstr[0] "%d узел"
 msgstr[1] "%d узла"
 msgstr[2] "%d узлов"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:620
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:622
 msgid "The subscription is turned off."
 msgstr "Подписка выключена."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:620
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:622
 msgid "The last update failed and there are no nodes from it."
 msgstr "Последнее обновление не удалось, узлов из неё нет."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:620
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:622
 msgid "No nodes from this subscription yet."
 msgstr "Узлов из этой подписки пока нет."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:624
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1280
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:626
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1282
 msgid "Pick nodes…"
 msgstr "Выбрать узлы…"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:625
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:627
 msgid "Turn off"
 msgstr "Выключить"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:625
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:627
 msgid "Turn on"
 msgstr "Включить"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:626
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:628
 msgid "Delete the subscription"
 msgstr "Удалить подписку"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:633
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:635
 msgid "best ping %d ms"
 msgstr "лучший пинг %d мс"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:672
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:674
 msgid "Not among the nodes now: it is kept in your favourites and connects with one button"
 msgstr "Сейчас его нет среди узлов: он хранится в избранном и подключается одной кнопкой"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:673
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:687
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:723
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:675
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:689
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:725
 msgid "Favourite"
 msgstr "Избранное"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:674
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:755
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:756
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:676
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:757
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:758
 msgid "Connect"
 msgstr "Подключиться"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:676
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:737
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:678
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:739
 msgid "Remove from favourites"
 msgstr "Убрать из избранного"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:677
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:739
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:679
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:741
 msgid "QR code and link"
 msgstr "QR-код и ссылка"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:685
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:687
 msgid "A node its subscription no longer has"
 msgstr "Узел, которого уже нет в подписке"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:686
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:688
 msgid "Hidden by you. The subscription does not have it any more."
 msgstr "Скрыт вами. В подписке его больше нет."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:686
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:688
 msgid "Hidden by you: it is not used."
 msgstr "Скрыт вами: не используется."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:688
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:690
 msgid "Return"
 msgstr "Вернуть"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:696
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:698
 msgid "Delete the file and add the settings again."
 msgstr "Удалите файл и добавьте настройки заново."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:711
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:713
 msgid "Testing the speed…"
 msgstr "Идёт тест скорости…"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:712
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:714
 msgid "Checking the services…"
 msgstr "Идёт проверка сервисов…"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:713
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:715
 msgid "In use: chosen by you"
 msgstr "Используется: выбран вами"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:713
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:715
 msgid "In use: automatic choice"
 msgstr "Используется: автовыбор"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:714
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:716
 msgid "Chosen by you, but not in use now: the automatic choice works instead"
 msgstr "Выбран вами, но сейчас не используется: вместо него работает автовыбор"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:716
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:718
 msgid "Excluded by you from the automatic choice"
 msgstr "Исключён вами из автовыбора"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:717
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:719
 msgid "Not on the list of nodes for the automatic choice"
 msgstr "Не в списке узлов автовыбора"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:718
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:720
 msgid "Not in the automatic choice: \"favourites only\" is on"
 msgstr "Не в автовыборе: включено «только избранные»"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:719
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:721
 msgid "In the automatic choice: kept by you, although the check fails"
 msgstr "В автовыборе: оставлен вами, хотя проверку не проходит"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:720
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:722
 msgid "In the automatic choice"
 msgstr "В автовыборе"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:725
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:727
 msgid "%s Mbit/s"
 msgstr "%s Мбит/с"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:730
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:732
 msgid "%s opens through this node"
 msgstr "%s открывается через этот узел"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:730
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:732
 msgid "%s does not open through this node"
 msgstr "%s не открывается через этот узел"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:741
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:743
 msgid "Speed test"
 msgstr "Тест скорости"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:742
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:744
 msgid "Check services"
 msgstr "Проверить сервисы"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:743
 #: files/www/luci-static/resources/view/vpnpool/nodes.js:745
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:747
 msgid "Return to the automatic choice"
 msgstr "Вернуть в автовыбор"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:746
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:748
 msgid "Exclude from the automatic choice"
 msgstr "Исключить из автовыбора"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:747
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:749
 msgid "Check it automatically again"
 msgstr "Снова проверять автоматически"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:808
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:810
 msgid "Selected: %d"
 msgstr "Выбрано: %d"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:840
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:842
 msgid "%s is chosen: it is used once the service runs."
 msgstr "%s выбран: он будет использоваться, когда служба заработает."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:841
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:843
 msgid "Connected to %s."
 msgstr "Подключено к %s."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:846
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:848
 msgid "The automatic choice is already on."
 msgstr "Автовыбор уже включён."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:846
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:848
 msgid "Back to the automatic choice."
 msgstr "Снова работает автовыбор."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:849
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:851
 msgid "Added to favourites: %s"
 msgstr "Добавлен в избранное: %s"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:850
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:852
 msgid "Removed from favourites: %s"
 msgstr "Убран из избранного: %s"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:852
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:854
 msgid "Hidden: %s. You can return it from the hidden nodes."
 msgstr "Скрыт: %s. Вернуть его можно из группы «Скрытые»."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:855
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:857
 msgid "Returned: %s."
 msgstr "Возвращён: %s."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:855
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:857
 msgid "Returned."
 msgstr "Возвращён."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:858
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:860
 msgid "Back in the automatic choice: %s. It stays there even if the check fails."
 msgstr "Снова в автовыборе: %s. Он останется там, даже если проверка не пройдёт."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:861
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:863
 msgid "%s is checked automatically again."
 msgstr "%s снова проверяется автоматически."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:875
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1036
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:877
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1038
 msgid "At least one node must stay in the automatic choice."
 msgstr "В автовыборе должен остаться хотя бы один узел."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:878
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:880
 msgid "Excluded from the automatic choice: %s"
 msgstr "Исключён из автовыбора: %s"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:881
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:883
 msgid "Back in the automatic choice: %s"
 msgstr "Снова в автовыборе: %s"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:892
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:894
 msgid "Testing the speed of %s: for a moment the router sends its traffic through this node."
 msgstr "Тест скорости %s: на короткое время роутер пускает свой трафик через этот узел."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:893
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:895
 msgid "Checking which services open through %s: for a moment the router sends its traffic through this node."
 msgstr "Проверка, какие сервисы открываются через %s: на короткое время роутер пускает свой трафик через этот узел."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:897
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:899
 msgid "%s: %s Mbit/s"
 msgstr "%s: %s Мбит/с"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:898
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:900
 msgid "The service check of %s is done."
 msgstr "Проверка сервисов для %s закончена."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:912
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:914
 msgid "Link"
 msgstr "Ссылка"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:913
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:915
 msgid "Node link: %s"
 msgstr "Ссылка узла: %s"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:914
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:916
 msgid "Scan the code with the VPN app on your phone, or copy the link."
 msgstr "Отсканируйте код VPN-приложением на телефоне или скопируйте ссылку."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:917
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:919
 msgid "Copy the link"
 msgstr "Скопировать ссылку"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:918
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1087
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:920
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1089
 msgid "Close"
 msgstr "Закрыть"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:923
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:925
 msgid "This node has no link to share."
 msgstr "У этого узла нет ссылки, которой можно поделиться."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:938
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:940
 msgid "Nodes of a subscription (%d) are hidden: the subscription will not bring them back. You can return them from the hidden nodes."
 msgstr "Узлы подписки (%d) скрываются: подписка их больше не вернёт. Вернуть их можно из группы «Скрытые»."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:939
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:941
 msgid "Your links (%d) are removed from your nodes."
 msgstr "Ваши ссылки (%d) удаляются из «Моих узлов»."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:940
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:942
 msgid "AmneziaWG settings files (%d) are removed from the router."
 msgstr "Файлы настроек AmneziaWG (%d) удаляются с роутера."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:941
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:943
 msgid "Favourites (%d) stay in your favourites."
 msgstr "Избранные (%d) остаются в избранном."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:942
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:944
 msgid "The node chosen by you goes: the automatic choice takes over."
 msgstr "Выбранный вами узел уходит: дальше работает автовыбор."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:949
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:951
 msgid "Delete the node %s?"
 msgstr "Удалить узел %s?"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:949
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:951
 msgid "Delete the selected nodes (%d)?"
 msgstr "Удалить выбранные узлы (%d)?"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:957
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:969
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:959
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:971
 msgid "Deleted: %s"
 msgstr "Удалён: %s"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:957
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:959
 msgid "Deleted nodes: %d"
 msgstr "Удалено узлов: %d"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:967
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:969
 msgid "Delete the settings file %s?"
 msgstr "Удалить файл настроек %s?"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:968
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:970
 msgid "The file is removed from the router."
 msgstr "Файл удаляется с роутера."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:977
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:979
 msgid "The selected nodes are already in your favourites."
 msgstr "Выбранные узлы уже в избранном."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:980
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:982
 msgid "Added to favourites: %d"
 msgstr "Добавлено в избранное: %d"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:987
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:989
 msgid "None of the selected nodes can be hidden."
 msgstr "Ни один из выбранных узлов нельзя скрыть."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:990
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:992
 msgid "Hidden nodes: %d. You can return them from the hidden nodes."
 msgstr "Скрыто узлов: %d. Вернуть их можно из группы «Скрытые»."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:997
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:999
 msgid "None of the selected nodes can be deleted: remove favourites from the favourites instead."
 msgstr "Ни один из выбранных узлов нельзя удалить: избранные убираются из избранного."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1004
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1006
 msgid "The check is already running."
 msgstr "Проверка уже идёт."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1004
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1006
 msgid "Checking every node: the delays update as it goes."
 msgstr "Проверяются все узлы: задержки обновляются по ходу."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1008
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1010
 msgid "Updating every subscription: the list refreshes when it is done."
 msgstr "Обновляются все подписки: список обновится, когда они загрузятся."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1014
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1016
 msgid "Updating the subscription %s: its nodes refresh when it is done."
 msgstr "Обновляется подписка %s: её узлы обновятся, когда она скачается."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1015
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1017
 msgid "The subscription is turned off. Turn it on to update it."
 msgstr "Подписка выключена. Включите её, чтобы обновить."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1027
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1029
 msgid "Which nodes take part in the automatic choice"
 msgstr "Какие узлы участвуют в автовыборе"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1028
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1030
 msgid "The automatic choice switches only between the checked nodes; new nodes of the subscriptions take part too. The others stay in the list: you can still connect to them yourself."
 msgstr "Автовыбор переключается только между отмеченными узлами; новые узлы подписок участвуют сами. Остальные остаются в списке: к ним можно подключиться вручную."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1029
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1031
 msgid "\"Favourites only\" is on: of the checked nodes, only the favourites take part."
 msgstr "Включено «только избранные»: из отмеченных участвуют только избранные."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1030
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1032
 msgid "A list of nodes for the automatic choice from the previous version is in effect: new nodes do not join it. Save this window and new nodes will take part by themselves."
 msgstr "Действует список узлов автовыбора из прошлой версии: новые узлы в него не попадают. Сохраните это окно — и новые узлы будут участвовать сами."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1033
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1098
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1188
-#: files/www/luci-static/resources/vpnpool/common.js:1371
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1035
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1100
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1190
+#: files/www/luci-static/resources/vpnpool/common.js:1402
 msgid "Cancel"
 msgstr "Отмена"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1034
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1095
-#: files/www/luci-static/resources/vpnpool/common.js:868
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1036
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1097
+#: files/www/luci-static/resources/vpnpool/common.js:897
 msgid "Save"
 msgstr "Сохранить"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1045
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1047
 msgid "Saved: %d of %d nodes take part in the automatic choice."
 msgstr "Сохранено: в автовыборе участвуют %d из %d узлов."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1046
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1048
 msgid "Every node takes part in the automatic choice, new ones too."
 msgstr "В автовыборе участвуют все узлы, и новые тоже."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1055
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1057
 msgid "Collecting the links…"
 msgstr "Собираю ссылки…"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1065
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1067
 msgid "Copy"
 msgstr "Копировать"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1072
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1074
 msgid "Node links"
 msgstr "Ссылки узлов"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1073
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1075
 msgid "The same as a subscription"
 msgstr "То же в виде подписки"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1076
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1078
 msgid "There is nothing to export in this set."
 msgstr "В этом наборе нечего выгружать."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1079
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1081
 msgid "Export nodes"
 msgstr "Выгрузить узлы"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1080
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1082
 msgid "Choose which nodes to export: you get their links and the same list as a subscription for another app."
 msgstr "Выберите, какие узлы выгрузить: получите их ссылки и тот же список в виде подписки для другого приложения."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1082
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1084
 msgid "Favourites"
 msgstr "Избранное"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1084
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1086
 msgid "Every node"
 msgstr "Все узлы"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1094
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1302
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1096
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1304
 msgid "Downloading the subscription and checking its nodes. On a slow router this takes up to a minute."
 msgstr "Загружаю подписку и проверяю её узлы. На медленном роутере это занимает до минуты."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1096
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1098
 msgid "Pick nodes: %s"
 msgstr "Выбор узлов: %s"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1111
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1113
 msgid "Take every node of the subscription, new ones too"
 msgstr "Брать все узлы подписки, и новые тоже"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1120
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1122
 msgid "Pick at least one node, or take every node."
 msgstr "Выберите хотя бы один узел или берите все."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1122
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1124
 msgid "Saved: the subscription gives every node, new ones too."
 msgstr "Сохранено: из подписки берутся все узлы, и новые тоже."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1122
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1124
 msgid "Saved: the subscription gives %d picked nodes."
 msgstr "Сохранено: из подписки берутся выбранные узлы (%d)."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1130
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1132
 msgid "The subscription is on: its nodes come back after the update."
 msgstr "Подписка включена: её узлы вернутся после обновления."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1130
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1132
 msgid "The subscription is off: its nodes are not used."
 msgstr "Подписка выключена: её узлы не используются."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1135
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1137
 msgid "Delete the subscription %s?"
 msgstr "Удалить подписку %s?"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1136
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1138
 msgid "Its nodes leave the list."
 msgstr "Её узлы уйдут из списка."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1136
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1138
 msgid "Your favourites from it stay and connect with one button."
 msgstr "Ваши избранные узлы из неё останутся и подключаются одной кнопкой."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1139
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1141
 msgid "The subscription is deleted."
 msgstr "Подписка удалена."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1148
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1150
 msgid "Links, subscription addresses or settings"
 msgstr "Ссылки, адреса подписок или настройки"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1149
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1151
 msgid "Paste node links (one per line), a subscription address or AmneziaWG settings"
 msgstr "Вставьте ссылки узлов (по одной в строке), адрес подписки или настройки AmneziaWG"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1157
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1159
 msgid "Check"
 msgstr "Проверить"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1158
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1160
 msgid "Add"
 msgstr "Добавить"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1165
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1167
 msgid "The text has changed: check it again."
 msgstr "Текст изменился — проверьте его ещё раз."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1179
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1181
 msgid "Add nodes"
 msgstr "Добавить узлы"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1180
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1182
 msgid "One field for everything: node links, a subscription address, an AmneziaVPN link or AmneziaWG settings. Check first: every line shows whether it will be added."
 msgstr "Одно поле для всего: ссылки узлов, адрес подписки, ссылка AmneziaVPN или настройки AmneziaWG. Сначала проверьте: у каждой строки видно, добавится ли она."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1183
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1185
 msgid "From a file…"
 msgstr "Из файла…"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1184
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1186
 msgid "QR code from a picture…"
 msgstr "QR-код с картинки…"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1202
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1204
 msgid "The field now holds only these settings: AmneziaWG settings are added one file at a time."
 msgstr "В поле теперь только эти настройки: настройки AmneziaWG добавляются по одному файлу."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1211
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1213
 msgid "The file could not be read."
 msgstr "Не удалось прочитать файл."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1218
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1220
 msgid "No QR code was found in the picture. Try a sharper or a closer picture."
 msgstr "На картинке не нашёлся QR-код. Попробуйте более чёткую или крупную картинку."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1220
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1222
 msgid "The picture could not be read."
 msgstr "Не удалось прочитать картинку."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1230
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1232
 msgid "Paste links or load a file first."
 msgstr "Сначала вставьте ссылки или загрузите файл."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1231
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1233
 msgid "The text is too large to check at once: add it in parts."
 msgstr "Текст слишком большой, чтобы проверить его разом: добавьте по частям."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1241
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1243
 msgid "Will wait for the engine"
 msgstr "Будет ждать движок"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1241
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1243
 msgid "Will be added"
 msgstr "Добавится"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1242
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1244
 msgid "Repeated"
 msgstr "Повтор"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1242
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1244
 msgid "Already there"
 msgstr "Уже есть"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1243
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1245
 msgid "Will not be added"
 msgstr "Не добавится"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1255
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1257
 msgid "Nothing that could be added was found in the text."
 msgstr "В тексте не нашлось ничего, что можно добавить."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1270
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1272
 msgid "Add line %d"
 msgstr "Добавить строку %d"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1275
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1277
 msgid "line %d"
 msgstr "строка %d"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1278
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1280
 msgid "What to take from the subscription"
 msgstr "Что брать из подписки"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1279
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1281
 msgid "Take every node and keep it updated"
 msgstr "Брать все узлы и обновлять"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1292
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1294
 msgid "Will be added: %d, already there: %d, will not be added: %d"
 msgstr "Добавится: %d, уже есть: %d, не добавится: %d"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1324
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1326
 msgid "Line %d: pick at least one node of the subscription, or take every node."
 msgstr "Строка %d: выберите хотя бы один узел подписки или берите все."
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1365
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1367
 msgid "Not added"
 msgstr "Не добавлено"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1370
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1373
 msgid "Added or already there"
 msgstr "Добавлено или уже было"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1370
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1373
 msgid "Added"
 msgstr "Добавлено"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1378
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1381
 msgid "Added: %d, already there: %d, errors: %d"
 msgstr "Добавлено: %d, уже были: %d, ошибок: %d"
 
-#: files/www/luci-static/resources/view/vpnpool/nodes.js:1379
+#: files/www/luci-static/resources/view/vpnpool/nodes.js:1382
 msgid "lines %s"
 msgstr "строки %s"
 
@@ -2636,140 +2636,180 @@ msgstr "Ссылка использует шифрование, которое �
 msgid "A value in the settings is not valid."
 msgstr "Значение в настройках указано неверно."
 
-#: files/www/luci-static/resources/vpnpool/common.js:730
-#: files/www/luci-static/resources/vpnpool/common.js:761
+#: files/www/luci-static/resources/vpnpool/common.js:265
+msgid "The router could not find the subscription server by its name. Check the address."
+msgstr "Роутер не нашёл сервер подписки по имени. Проверьте адрес."
+
+#: files/www/luci-static/resources/vpnpool/common.js:266
+msgid "The subscription server did not accept the connection. Check the address and the port."
+msgstr "Сервер подписки не принял подключение. Проверьте адрес и порт."
+
+#: files/www/luci-static/resources/vpnpool/common.js:267
+msgid "The subscription server did not answer in time."
+msgstr "Сервер подписки не ответил вовремя."
+
+#: files/www/luci-static/resources/vpnpool/common.js:268
+msgid "The secure connection to the subscription server failed: its certificate may be self-signed or expired."
+msgstr "Не удалось установить защищённое соединение с сервером подписки: возможно, его сертификат самоподписанный или просрочен."
+
+#: files/www/luci-static/resources/vpnpool/common.js:269
+msgid "The subscription server did not answer."
+msgstr "Сервер подписки не ответил."
+
+#: files/www/luci-static/resources/vpnpool/common.js:270
+msgid "The subscription server answered with error %s. Check the address."
+msgstr "Сервер подписки ответил ошибкой %s. Проверьте адрес."
+
+#: files/www/luci-static/resources/vpnpool/common.js:271
+msgid "The subscription server sent an empty answer."
+msgstr "Сервер подписки прислал пустой ответ."
+
+#: files/www/luci-static/resources/vpnpool/common.js:272
+msgid "The server answered, but not with a list of nodes. Check that this is the address of the subscription."
+msgstr "Сервер ответил, но прислал не список узлов. Проверьте, что это адрес подписки."
+
+#: files/www/luci-static/resources/vpnpool/common.js:280
+msgid "Nodes in the subscription: %d, but the router can use none of them."
+msgstr "Узлов в подписке: %d, но роутер не может использовать ни один."
+
+#: files/www/luci-static/resources/vpnpool/common.js:283
+msgid "In the panel, set the VLESS encryption of this connection to none and add the subscription again."
+msgstr "В панели поставьте у этого подключения шифрование VLESS «none» и добавьте подписку снова."
+
+#: files/www/luci-static/resources/vpnpool/common.js:759
+#: files/www/luci-static/resources/vpnpool/common.js:790
 msgid "another setting"
 msgstr "другая настройка"
 
-#: files/www/luci-static/resources/vpnpool/common.js:758
+#: files/www/luci-static/resources/vpnpool/common.js:787
 msgid "\"%s\": %s"
 msgstr "«%s»: %s"
 
-#: files/www/luci-static/resources/vpnpool/common.js:798
+#: files/www/luci-static/resources/vpnpool/common.js:827
 msgid "Also: %s."
 msgstr "Также: %s."
 
-#: files/www/luci-static/resources/vpnpool/common.js:850
+#: files/www/luci-static/resources/vpnpool/common.js:879
 msgid "Saving…"
 msgstr "Сохранение…"
 
-#: files/www/luci-static/resources/vpnpool/common.js:850
+#: files/www/luci-static/resources/vpnpool/common.js:879
 msgid "There are unsaved changes."
 msgstr "Есть несохранённые изменения."
 
-#: files/www/luci-static/resources/vpnpool/common.js:850
+#: files/www/luci-static/resources/vpnpool/common.js:879
 msgid "All changes are saved."
 msgstr "Все изменения сохранены."
 
-#: files/www/luci-static/resources/vpnpool/common.js:863
+#: files/www/luci-static/resources/vpnpool/common.js:892
 msgid "Save changes"
 msgstr "Сохранение изменений"
 
-#: files/www/luci-static/resources/vpnpool/common.js:866
+#: files/www/luci-static/resources/vpnpool/common.js:895
 msgid "Revert"
 msgstr "Отменить"
 
-#: files/www/luci-static/resources/vpnpool/common.js:891
+#: files/www/luci-static/resources/vpnpool/common.js:920
 msgid "%d B"
 msgstr "%d Б"
 
-#: files/www/luci-static/resources/vpnpool/common.js:892
+#: files/www/luci-static/resources/vpnpool/common.js:921
 msgid "%s KB"
 msgstr "%s КБ"
 
-#: files/www/luci-static/resources/vpnpool/common.js:893
+#: files/www/luci-static/resources/vpnpool/common.js:922
 msgid "%s MB"
 msgstr "%s МБ"
 
-#: files/www/luci-static/resources/vpnpool/common.js:894
+#: files/www/luci-static/resources/vpnpool/common.js:923
 msgid "%s GB"
 msgstr "%s ГБ"
 
-#: files/www/luci-static/resources/vpnpool/common.js:899
+#: files/www/luci-static/resources/vpnpool/common.js:928
 msgid "just now"
 msgstr "только что"
 
-#: files/www/luci-static/resources/vpnpool/common.js:900
+#: files/www/luci-static/resources/vpnpool/common.js:929
 msgid "%d min ago"
 msgstr "%d мин назад"
 
-#: files/www/luci-static/resources/vpnpool/common.js:901
+#: files/www/luci-static/resources/vpnpool/common.js:930
 msgid "%d h ago"
 msgstr "%d ч назад"
 
-#: files/www/luci-static/resources/vpnpool/common.js:938
+#: files/www/luci-static/resources/vpnpool/common.js:967
 msgid "turned off"
 msgstr "выключена"
 
-#: files/www/luci-static/resources/vpnpool/common.js:939
+#: files/www/luci-static/resources/vpnpool/common.js:968
 msgid "picked nodes: %d"
 msgstr "выбрано узлов: %d"
 
-#: files/www/luci-static/resources/vpnpool/common.js:939
+#: files/www/luci-static/resources/vpnpool/common.js:968
 msgid "every node"
 msgstr "все узлы"
 
-#: files/www/luci-static/resources/vpnpool/common.js:942
+#: files/www/luci-static/resources/vpnpool/common.js:971
 msgid "expired on %s"
 msgstr "истекла %s"
 
-#: files/www/luci-static/resources/vpnpool/common.js:943
+#: files/www/luci-static/resources/vpnpool/common.js:972
 msgid "The subscription %s has expired: its nodes may stop working."
 msgstr "Срок подписки «%s» истёк: её узлы могут перестать работать."
 
-#: files/www/luci-static/resources/vpnpool/common.js:944
+#: files/www/luci-static/resources/vpnpool/common.js:973
 msgid "valid until %s (the last day)"
 msgstr "до %s (последний день)"
 
-#: files/www/luci-static/resources/vpnpool/common.js:945
+#: files/www/luci-static/resources/vpnpool/common.js:974
 msgid "The subscription %s expires today (%s)."
 msgstr "Подписка «%s» истекает сегодня (%s)."
 
-#: files/www/luci-static/resources/vpnpool/common.js:946
+#: files/www/luci-static/resources/vpnpool/common.js:975
 msgid "valid until %s (%d days left)"
 msgstr "до %s (осталось дн.: %d)"
 
-#: files/www/luci-static/resources/vpnpool/common.js:947
+#: files/www/luci-static/resources/vpnpool/common.js:976
 msgid "The subscription %s expires in %d days (%s)."
 msgstr "Подписка «%s» истекает через %d дн. (%s)."
 
-#: files/www/luci-static/resources/vpnpool/common.js:952
+#: files/www/luci-static/resources/vpnpool/common.js:981
 msgid "%s of %s left"
 msgstr "осталось %s из %s"
 
-#: files/www/luci-static/resources/vpnpool/common.js:953
+#: files/www/luci-static/resources/vpnpool/common.js:982
 msgid "The subscription %s has little traffic left: %s of %s."
 msgstr "У подписки «%s» мало трафика: осталось %s из %s."
 
-#: files/www/luci-static/resources/vpnpool/common.js:955
+#: files/www/luci-static/resources/vpnpool/common.js:984
 msgid "updated %s"
 msgstr "обновлено %s"
 
-#: files/www/luci-static/resources/vpnpool/common.js:956
+#: files/www/luci-static/resources/vpnpool/common.js:985
 msgid "the last update failed"
 msgstr "последнее обновление не удалось"
 
-#: files/www/luci-static/resources/vpnpool/common.js:957
+#: files/www/luci-static/resources/vpnpool/common.js:986
 msgid "The subscription %s could not be updated the last time."
 msgstr "Подписку «%s» не удалось обновить в последний раз."
 
-#: files/www/luci-static/resources/vpnpool/common.js:958
+#: files/www/luci-static/resources/vpnpool/common.js:987
 msgid "picked nodes gone from it: %d"
 msgstr "выбранных узлов в ней больше нет: %d"
 
-#: files/www/luci-static/resources/vpnpool/common.js:1071
+#: files/www/luci-static/resources/vpnpool/common.js:1102
 msgid "The service is off: the change takes effect after it is turned on."
 msgstr "Служба выключена: изменение вступит в силу после включения."
 
-#: files/www/luci-static/resources/vpnpool/common.js:1373
+#: files/www/luci-static/resources/vpnpool/common.js:1404
 msgid "Continue"
 msgstr "Продолжить"
 
-#: files/www/luci-static/resources/vpnpool/common.js:1375
+#: files/www/luci-static/resources/vpnpool/common.js:1406
 msgid "Are you sure?"
 msgstr "Вы уверены?"
 
-#: files/www/luci-static/resources/vpnpool/common.js:1395
+#: files/www/luci-static/resources/vpnpool/common.js:1426
 msgid "Select"
 msgstr "Выбрать"
 

@@ -315,6 +315,48 @@ function sub_uas(u) {
 	if (length(one) && match(one, UA_RE)) return [ one ];
 	return filter(split(trim('' + (u.get('vpnpool', 'main', 'probe_ua') ?? '')) || DEFAULT_UAS, /[ \t]+/), length);
 }
+// ---- why a subscription download gave no nodes (issue #11) ----
+// The trial download of add (api.uc sub_probe) and the probe of the import dialog (probe.sh,
+// model.uc why) say WHY, not only "failed": the panel was not reached (and how), it answered an
+// HTTP error, an empty answer, something that is not a node list (a web page, a format the
+// router does not read), or nodes the router cannot run (with the parser's reasons, counted).
+// sub_report(file) -> the parser's --report records (array) or null; sub_why(http, rc, rep) ->
+// { why, http, total?, skipped? }. rc = curl's exit code (the kind of a network failure).
+const CURL_WHY = { '6': 'dns', '7': 'connect', '28': 'timeout', '35': 'tls', '51': 'tls', '53': 'tls',
+	'54': 'tls', '58': 'tls', '59': 'tls', '60': 'tls', '66': 'tls', '77': 'tls', '80': 'tls', '82': 'tls',
+	'83': 'tls', '90': 'tls', '91': 'tls' };
+// records that are not a node at all: the answer is not a node list
+const NOT_NODE = { not_a_link: 1, not_a_node: 1 };
+// the most telling of several tries (client names) is the one shown
+const WHY_RANK = { all_skipped: 9, not_subscription: 8, empty: 7, http_error: 6, tls: 5, timeout: 4,
+	connect: 3, dns: 2, no_answer: 1 };
+function sub_report(file) {
+	if (!((stat(file)?.size ?? 0) > 0)) return null;
+	let p = popen("ucode /usr/libexec/vpnpool/parser.uc --report '" + replace('' + file, "'", "'\\''") + "' 2>/dev/null", 'r');
+	if (!p) return null;
+	let out = p.read('all') ?? '';
+	p.close();
+	let r = null;
+	try { r = json(out); } catch (e) { r = null; }
+	return type(r) == 'array' ? r : null;
+}
+function sub_why(http, rc, rep) {
+	http = trim('' + (http ?? ''));
+	if (!length(http) || http == '000') return { why: CURL_WHY['' + rc] ?? 'no_answer', http: '000' };
+	if (+http >= 400) return { why: 'http_error', http: http };
+	if (type(rep) != 'array' || !length(rep)) return { why: 'empty', http: http };
+	let sk = {}, n = 0;
+	for (let r in rep)
+		if (r?.status == 'skip' && !NOT_NODE[r.reason]) { sk[r.reason ?? 'parse_error'] = (sk[r.reason ?? 'parse_error'] ?? 0) + 1; n++; }
+	if (!n) return { why: 'not_subscription', http: http };
+	return { why: 'all_skipped', http: http, total: n, skipped: sk };
+}
+function sub_why_better(a, b) {
+	if (!a) return b;
+	if (!b) return a;
+	return (WHY_RANK[b.why] ?? 0) > (WHY_RANK[a.why] ?? 0) ? b : a;
+}
+
 // the same as "Name: value" lines (curl -H arguments / a curl -K config)
 function sub_headers(u) {
 	let d = sub_device(u);
@@ -325,6 +367,6 @@ function sub_headers(u) {
 	return h;
 }
 
-export { DEFAULT_UAS, HWID_RE, DEV_RE, UA_RE, sub_device, sub_device_auto, sub_headers, sub_uas, VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list,
+export { DEFAULT_UAS, HWID_RE, DEV_RE, UA_RE, sub_device, sub_device_auto, sub_headers, sub_uas, sub_report, sub_why, sub_why_better, VALID_COMMUNITY, uniq, read_json, write_atomic, mask_url, mask_token, str_key, as_list,
 	CONF_DIR, RUN_DIR, FAV_MAP, SUBS_META, SCHEMA, is_id, subs_of, sub_name_for, fav_read, fav_write, live_nodes, node_lookup, link_of,
 	SB_STOCK, SB_AWG, ENGINE_CAP, sb_version_mm, engine_cap, engine_select };
